@@ -212,10 +212,15 @@ export function MySkills() {
   // Prune tag filters whose pill disappeared (e.g. its last skill was deleted),
   // otherwise a stale filter silently hides everything. An empty skill list
   // says nothing about which tags are valid, so wait for one before pruning.
+  // A tag still carried by a loaded skill counts as available even when it is
+  // missing from `allTags`: that list is refetched asynchronously and lags
+  // `skills`, and in that window a rename would otherwise drop the filter that
+  // `replaceTagInFilters` just moved onto the new name.
   useEffect(() => {
     if (skills.length === 0) return;
     const hasUntagged = skills.some((skill) => skill.tags.length === 0);
-    setTagFilters((prev) => pruneStaleTagFilters(prev, allTags, hasUntagged));
+    const available = [...allTags, ...skills.flatMap((skill) => skill.tags)];
+    setTagFilters((prev) => pruneStaleTagFilters(prev, available, hasUntagged));
   }, [allTags, skills]);
 
   // Close the tag context menu on Escape (click-outside is handled by its backdrop).
@@ -236,13 +241,19 @@ export function MySkills() {
   };
 
   // A filter can outlive the control that set it (the tag row hides itself once
-  // no tag is left), so the empty state carries the way out.
+  // no tag is left), so the empty state carries the way out. `filterMode` is
+  // reset too — its control never hides, but a button labelled "clear filters"
+  // that leaves one of them on is a lie.
   const hasActiveFilters =
-    search.trim() !== "" || sourceFilters.size > 0 || tagFilters.size > 0;
+    search.trim() !== "" ||
+    sourceFilters.size > 0 ||
+    tagFilters.size > 0 ||
+    filterMode !== "all";
   const clearFilters = () => {
     setSearch("");
     setSourceFilters(new Set());
     setTagFilters(new Set());
+    setFilterMode("all");
   };
 
   const skillDisplayNames = useMemo(() => {
