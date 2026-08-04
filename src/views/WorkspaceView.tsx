@@ -72,12 +72,19 @@ function WorkspaceSkillCard({
   if (viewMode === "list") {
     return (
       <div
-        className={cn(
-          "app-panel group relative flex cursor-pointer items-center gap-3.5 rounded-xl border-transparent px-3.5 py-3 transition-all hover:border-border hover:bg-surface-hover",
-          active && "border-l-2 border-l-accent"
-        )}
+        className="app-panel group relative flex cursor-pointer items-center gap-3.5 rounded-xl border-transparent px-3.5 py-3 transition-all hover:border-border hover:bg-surface-hover"
         onClick={onClick}
       >
+        <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              active
+                ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
+                : "bg-surface-active"
+            )}
+          />
+        </div>
         <h3
           className="w-[180px] shrink-0 truncate text-[14px] font-semibold text-secondary group-hover:text-primary"
           title={title}
@@ -130,12 +137,21 @@ function WorkspaceSkillCard({
   return (
     <div
       className={cn(
-        "app-panel group relative flex h-full cursor-pointer flex-col overflow-hidden transition-all hover:border-border hover:bg-surface-hover",
-        active && "border-l-2 border-l-accent"
+        "app-panel group relative flex h-full cursor-pointer flex-col overflow-hidden shadow-card transition-all hover:-translate-y-px hover:border-border hover:shadow-card-hover"
       )}
       onClick={onClick}
     >
       <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-1.5">
+        <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              active
+                ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
+                : "bg-surface-active"
+            )}
+          />
+        </div>
         <h3
           className="flex-1 truncate text-[14px] font-semibold text-primary group-hover:text-accent-light"
           title={title}
@@ -169,7 +185,7 @@ function WorkspaceSkillCard({
           </div>
         )}
       </div>
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border-subtle px-3.5 py-2.5">
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border-faint px-3.5 py-2.5">
         <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", status.className)}>
           {status.label}
         </span>

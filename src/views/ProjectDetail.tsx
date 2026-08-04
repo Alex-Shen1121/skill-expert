@@ -28,6 +28,7 @@ import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { BatchTagDialog } from "../components/BatchTagDialog";
 import { DetailSheet } from "../components/DetailSheet";
 import { AgentToggleSection, type AgentToggleItem } from "../components/AgentToggleSection";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import { ProjectAgentDots } from "../components/ProjectAgentDots";
 import { PresetBar } from "../components/PresetBar";
 import { SkillMarkdown } from "../components/SkillMarkdown";
@@ -1094,9 +1095,7 @@ export function ProjectDetail() {
                 <div
                   key={skillKey}
                   className={cn(
-                    "app-panel group relative flex h-full cursor-pointer flex-col overflow-hidden transition-all hover:border-border hover:bg-surface-hover",
-                    skill.enabledCount > 0 && "border-l-2 border-l-accent",
-                    skill.enabledCount === 0 && "opacity-60",
+                    "app-panel group relative flex h-full cursor-pointer flex-col overflow-hidden shadow-card transition-all hover:-translate-y-px hover:border-border hover:shadow-card-hover",
                     isMultiSelect && isSelected && "ring-1 ring-accent border-accent/40"
                   )}
                   onClick={() =>
@@ -1104,11 +1103,26 @@ export function ProjectDetail() {
                   }
                 >
                   <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-1.5">
-                    {isMultiSelect && (
-                      isSelected
-                        ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
-                        : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                    )}
+                    {/* Fixed slot: status dot, or the checkbox in multi-select */}
+                    <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                      {isMultiSelect ? (
+                        isSelected
+                          ? <SquareCheck className="h-3.5 w-3.5 text-accent" />
+                          : <Square className="h-3.5 w-3.5 text-faint" />
+                      ) : (
+                        <span
+                          className={cn(
+                            "h-2 w-2 rounded-full",
+                            skill.enabledCount === skill.totalCount
+                              ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
+                              : skill.enabledCount > 0
+                                ? "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.15)]"
+                                : "bg-surface-active"
+                          )}
+                          title={`${skill.enabledCount}/${skill.totalCount}`}
+                        />
+                      )}
+                    </div>
                     <h3
                       className="flex-1 truncate text-[14px] font-semibold text-primary"
                       title={skill.name}
@@ -1144,7 +1158,7 @@ export function ProjectDetail() {
                     )}
                   </div>
 
-                  <div className="mt-auto flex items-center justify-between gap-2 border-t border-border-subtle px-3.5 py-2.5">
+                  <div className="mt-auto flex items-center justify-between gap-2 border-t border-border-faint px-3.5 py-2.5">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", statusMeta.className)}>
                         {statusMeta.label}
@@ -1204,24 +1218,16 @@ export function ProjectDetail() {
                           </button>
                         )}
                         {project.supports_skill_toggle ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleToggleSkill(skill); }}
-                            disabled={isToggling}
-                            className={cn(
-                              "rounded px-2 py-1 text-[13px] font-medium transition-colors outline-none",
-                              skill.enabledCount > 0
-                                ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                                : "text-muted hover:bg-surface-hover hover:text-secondary"
-                            )}
-                          >
-                            {isToggling ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : skill.enabledCount === skill.totalCount ? (
-                              t("project.enabled")
-                            ) : (
-                              t("project.enableSkill")
-                            )}
-                          </button>
+                          <ToggleSwitch
+                            checked={skill.enabledCount === skill.totalCount}
+                            loading={isToggling}
+                            onChange={() => handleToggleSkill(skill)}
+                            title={
+                              skill.enabledCount === skill.totalCount
+                                ? t("project.enabled")
+                                : t("project.enableSkill")
+                            }
+                          />
                         ) : null}
                         <button
                           onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
@@ -1243,19 +1249,31 @@ export function ProjectDetail() {
                 key={skillKey}
                 className={cn(
                   "app-panel group flex cursor-pointer items-center gap-3.5 rounded-xl border-transparent px-3.5 py-3 transition-all hover:border-border hover:bg-surface-hover",
-                  skill.enabledCount > 0 && "border-l-2 border-l-accent",
-                  skill.enabledCount === 0 && "opacity-60",
                   isMultiSelect && isSelected && "ring-1 ring-accent border-accent/40"
                 )}
                 onClick={() =>
                   isMultiSelect ? toggleSelect(skillKey) : handleOpenDetail(skill)
                 }
               >
-                {isMultiSelect && (
-                  isSelected
-                    ? <SquareCheck className="h-3.5 w-3.5 shrink-0 text-accent" />
-                    : <Square className="h-3.5 w-3.5 shrink-0 text-faint" />
-                )}
+                <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  {isMultiSelect ? (
+                    isSelected
+                      ? <SquareCheck className="h-3.5 w-3.5 text-accent" />
+                      : <Square className="h-3.5 w-3.5 text-faint" />
+                  ) : (
+                    <span
+                      className={cn(
+                        "h-2 w-2 shrink-0 rounded-full",
+                        skill.enabledCount === skill.totalCount
+                          ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
+                          : skill.enabledCount > 0
+                            ? "bg-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.15)]"
+                            : "bg-surface-active"
+                      )}
+                      title={`${skill.enabledCount}/${skill.totalCount}`}
+                    />
+                  )}
+                </div>
                 <h3
                   className="w-[180px] shrink-0 truncate text-[14px] font-semibold text-secondary"
                   title={skill.name}
@@ -1353,27 +1371,19 @@ export function ProjectDetail() {
                           )}
                         </button>
                       )}
-                      {project.supports_skill_toggle ? (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleToggleSkill(skill); }}
-                          disabled={isToggling}
-                          className={cn(
-                            "rounded px-2 py-0.5 text-[13px] font-medium transition-colors outline-none",
-                            skill.enabledCount > 0
-                              ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                              : "text-muted hover:bg-surface-hover hover:text-secondary"
-                          )}
-                        >
-                          {isToggling ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : skill.enabledCount === skill.totalCount ? (
-                            t("project.enabled")
-                          ) : (
-                            t("project.enableSkill")
-                          )}
-                        </button>
-                      ) : null}
                     </div>
+                    {project.supports_skill_toggle ? (
+                      <ToggleSwitch
+                        checked={skill.enabledCount === skill.totalCount}
+                        loading={isToggling}
+                        onChange={() => handleToggleSkill(skill)}
+                        title={
+                          skill.enabledCount === skill.totalCount
+                            ? t("project.enabled")
+                            : t("project.enableSkill")
+                        }
+                      />
+                    ) : null}
                     <button
                       onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
                       className="shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
