@@ -256,6 +256,7 @@
     "noSkills": "No skills to display",
     "addFirst": "Click \"Install Skills\" to add skills into the central library",
     "noMatch": "No skills match the current search or filter",
+    "clearFilters": "Clear filters",
     "noPreset": "No preset is currently available",
     "currentPresetFallback": "Current preset",
     "presetCount": "{{count}} presets",

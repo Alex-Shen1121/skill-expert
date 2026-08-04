@@ -209,11 +209,14 @@ export function MySkills() {
     refreshAllTags();
   }, [skills]);
 
-  // Prune tag filters whose tag disappeared (e.g. its last skill was deleted),
-  // otherwise a stale filter silently hides everything.
+  // Prune tag filters whose pill disappeared (e.g. its last skill was deleted),
+  // otherwise a stale filter silently hides everything. An empty skill list
+  // says nothing about which tags are valid, so wait for one before pruning.
   useEffect(() => {
-    setTagFilters((prev) => pruneStaleTagFilters(prev, allTags));
-  }, [allTags]);
+    if (skills.length === 0) return;
+    const hasUntagged = skills.some((skill) => skill.tags.length === 0);
+    setTagFilters((prev) => pruneStaleTagFilters(prev, allTags, hasUntagged));
+  }, [allTags, skills]);
 
   // Close the tag context menu on Escape (click-outside is handled by its backdrop).
   useEffect(() => {
@@ -230,6 +233,16 @@ export function MySkills() {
     if (next.has(value)) next.delete(value);
     else next.add(value);
     return next;
+  };
+
+  // A filter can outlive the control that set it (the tag row hides itself once
+  // no tag is left), so the empty state carries the way out.
+  const hasActiveFilters =
+    search.trim() !== "" || sourceFilters.size > 0 || tagFilters.size > 0;
+  const clearFilters = () => {
+    setSearch("");
+    setSourceFilters(new Set());
+    setTagFilters(new Set());
   };
 
   const skillDisplayNames = useMemo(() => {
@@ -1178,6 +1191,11 @@ export function MySkills() {
           <p className="text-[13px] text-muted">
             {skills.length === 0 ? t("mySkills.addFirst") : t("mySkills.noMatch")}
           </p>
+          {hasActiveFilters && (
+            <button onClick={clearFilters} className="app-button-secondary mt-4">
+              {t("mySkills.clearFilters")}
+            </button>
+          )}
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

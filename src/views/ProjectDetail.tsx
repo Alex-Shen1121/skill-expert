@@ -458,11 +458,14 @@ export function ProjectDetail() {
     return Array.from(tags).sort((a, b) => a.localeCompare(b));
   }, [groupedSkills]);
 
-  // Prune tag filters whose tag disappeared (e.g. its last skill was deleted),
-  // otherwise a stale filter silently hides everything.
+  // Prune tag filters whose pill disappeared (e.g. its last skill was deleted),
+  // otherwise a stale filter silently hides everything. An empty skill list
+  // says nothing about which tags are valid, so wait for one before pruning.
   useEffect(() => {
-    setTagFilters((prev) => pruneStaleTagFilters(prev, allTags));
-  }, [allTags]);
+    if (groupedSkills.length === 0) return;
+    const hasUntagged = groupedSkills.some((skill) => skill.tags.length === 0);
+    setTagFilters((prev) => pruneStaleTagFilters(prev, allTags, hasUntagged));
+  }, [allTags, groupedSkills]);
 
   const selectedSkills = useMemo(
     () => groupedSkills.filter((skill) => selectedIds.has(getSkillKey(skill))),

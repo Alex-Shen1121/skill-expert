@@ -412,11 +412,15 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
     return Array.from(tags).sort((a, b) => a.localeCompare(b));
   }, [localSkills]);
 
-  // Prune tag filters whose tag disappeared (e.g. its last skill was deleted),
-  // otherwise a stale filter silently hides everything.
+  // Prune tag filters whose pill disappeared (e.g. its last skill was deleted),
+  // otherwise a stale filter silently hides everything. An empty list is also
+  // what a failed load and the overview leave behind (`setLocalSkills([])`), and
+  // that says nothing about which tags are valid — wait for a real list.
   useEffect(() => {
-    setTagFilters((prev) => pruneStaleTagFilters(prev, allLocalTags));
-  }, [allLocalTags]);
+    if (localSkills.length === 0) return;
+    const hasUntagged = localSkills.some((skill) => skill.tags.length === 0);
+    setTagFilters((prev) => pruneStaleTagFilters(prev, allLocalTags, hasUntagged));
+  }, [allLocalTags, localSkills]);
 
   const visibleLocalSkills = useMemo(() => {
     const q = search.trim().toLowerCase();
