@@ -2895,6 +2895,34 @@ mod tests {
         assert_eq!(stored.last_checked_at, None, "the check did not complete");
     }
 
+    /// A remote that failed to resolve off the lock still has to land as an
+    /// `error` status here, not be swallowed as "nothing to apply" — the batch
+    /// check counts that error and the card shows the reason.
+    #[test]
+    fn failed_prefetch_for_the_current_source_records_the_error() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/a.git");
+
+        let err = check_skill_update_internal_with_remote(
+            &repo.store,
+            "skill-1",
+            false,
+            Some(PrefetchedRemote {
+                key: remote("https://example.test/a.git", None),
+                result: Err("could not read from remote".to_string()),
+            }),
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("could not read from remote"));
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.update_status, "error");
+        assert_eq!(
+            stored.last_check_error.as_deref(),
+            Some("could not read from remote")
+        );
+    }
+
     /// Callers hold the central-repo lock across this write, so a git skill with
     /// nothing prefetched must be skipped rather than resolved inline — that
     /// inline call is the lock-held network round-trip behind the 20s "busy"
