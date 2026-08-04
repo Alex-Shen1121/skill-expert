@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.5] - 2026-08-04
+
+### Release Overview
+- Update checks no longer hold the skills repository while they talk to the network, so an install, update, or relink started at the same time stops failing with "repository is busy" — and "check all updates" itself got substantially faster. Plus a round of tag-filter fixes for lists that could go silently empty with no way back.
+
+### User-facing
+- **"Skills repository is busy" during an update check is fixed** — Checking for updates asks each remote for its newest revision, which can take 30–57 seconds when the query is throttled. That entire round-trip ran while holding the central-repo lock, so anything you started meanwhile — install, update, relink — waited 20 seconds and then failed with `skills repository is busy`. All four check paths (check all, single skill, the tray's "check for updates", and each background auto-update round) now resolve remotes *before* taking the lock, which is then held only for the status write. (#315)
+- **"Check all updates" is much faster** — Remotes were queried one at a time, so a single slow remote stalled the whole batch. They are now resolved concurrently (up to 8 at once) and deduplicated per remote: skills installed from different subdirectories of one monorepo cost one query in total instead of one each.
+- **Deleting a tag's last skill no longer empties the list for good** — The tag's pill disappeared while its filter stayed active, so the list silently rendered empty with no visible filter left to turn off. Stale filters are now dropped automatically in My Skills, Workspace, and a project's detail page. (#318)
+- **The same fix for "Untagged"** — That pill is conditional too, so filtering by Untagged and then deleting every untagged skill hit the identical dead end.
+- **My Skills can clear its filters** — It was the only list without a reset control, so any filter combination matching nothing was a dead end. Its empty state now offers "Clear filters" whenever a filter is active.
+- **Renaming a tag keeps your filter** — The filter followed the rename, then was dropped a moment later because the tag list refreshes asynchronously.
+- **Switching projects no longer shows another project's skills** — A slow skill scan's response could land after you had already moved to a different project, swapping its skills in under the current route.
+
+### Developer & Governance
+- The batch update check is now two phases: resolve every distinct remote once — keyed by `(clone_url, branch)`, bounded at 8 concurrent `git ls-remote` calls — off the central-repo lock, then take the lock per skill only to write the status columns. `resolve_remote_revision` is safe to run concurrently: it shells out to `git ls-remote`, and its libgit2 fallback builds a fresh uuid-named bare repo per call.
+- Splitting resolve from apply opened a race the merged PR did not cover: a reinstall keeps a skill's row and repoints its source (`update_skill_after_reinstall`), so a revision read from the old remote could be written against the new one. Every prefetched revision now carries the `(clone_url, branch)` it was resolved for, and the apply side re-derives that key from the freshly read record and discards anything that no longer matches.
+- `check_skill_update_internal_with_remote` is network-free by contract — a skill with no usable prefetch is deferred to the next round rather than resolved inline, which would have put an `ls-remote` back under the lock at the check-TTL boundary. `check_skill_update_internal` is now `prefetch_skill_remote` plus that apply step, and its contract is that the caller does not hold the lock (only the CLI's `check` uses it).
+- `pruneStaleTagFilters` returns the same Set reference when nothing is stale (avoiding a re-render loop), skips pruning while the skill list is empty (an empty list says nothing about which tags are valid), and counts tags carried by a loaded skill as available — which is what closes the rename window. `ProjectDetail`'s skill load gained the request-id guard `WorkspaceView` already used.
+- Rust test suite at 401 passing, including new coverage for the prefetch key check, the failed-prefetch status write, and the concurrent resolution contract.
+
 ## [1.28.4] - 2026-08-04
 
 ### Release Overview
