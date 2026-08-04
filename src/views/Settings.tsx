@@ -3,7 +3,6 @@ import {
   Folder,
   FolderOpen,
   RefreshCw,
-  Globe,
   Link as LinkIcon,
   Unlink,
   Copy,
@@ -57,6 +56,7 @@ import { cn } from "../utils";
 import { useApp } from "../context/AppContext";
 import { useThemeContext } from "../context/ThemeContext";
 import { AgentIcon } from "../components/AgentIcon";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage } from "../lib/error";
@@ -126,7 +126,7 @@ function SortableAgentCard({ agentKey, dragLabel, children }: SortableAgentCardP
   );
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes}>
+    <div ref={setNodeRef} style={style} {...attributes} className="h-full">
       {children(handle)}
     </div>
   );
@@ -164,11 +164,10 @@ function AgentGroupDnd({ items, sensors, dragLabel, onDragEnd, renderAgentCard }
 export function Settings() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const { tools, presets, refreshTools, openHelp } = useApp();
+  const { tools, refreshTools, openHelp } = useApp();
   const [togglingTools, setTogglingTools] = useState<Set<string>>(new Set());
   const { theme, setTheme } = useThemeContext();
   const [syncMode, setSyncMode] = useState("symlink");
-  const [defaultPreset, setDefaultPreset] = useState("");
   const [closeAction, setCloseAction] = useState("");
   const [showTrayIcon, setShowTrayIcon] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -335,7 +334,6 @@ export function Settings() {
 
   useEffect(() => {
     api.getSettings("sync_mode").then((v) => { if (v) setSyncMode(v); });
-    api.getSettings("default_scenario").then((v) => { if (v) setDefaultPreset(v); });
     api.getSettings("proxy_url").then((v) => { setProxyInput(v ?? ""); });
     api.getSettings("close_action").then((v) => { setCloseAction(v ?? ""); });
     api.getSettings("show_tray_icon").then((v) => {
@@ -408,11 +406,6 @@ export function Settings() {
   const handleSyncModeChange = async (mode: string) => {
     setSyncMode(mode);
     await api.setSettings("sync_mode", mode);
-  };
-
-  const handleDefaultPresetChange = async (id: string) => {
-    setDefaultPreset(id);
-    await api.setSettings("default_scenario", id);
   };
 
   const handleCloseActionChange = async (action: string) => {
@@ -741,13 +734,11 @@ export function Settings() {
     }
   };
 
-  const fieldClass =
-    "h-8 rounded-[4px] border border-border-subtle bg-background px-2.5 text-[13px] text-secondary outline-none transition-colors focus:border-border";
-  const selectClass = `${fieldClass} min-w-[180px] appearance-none pr-8`;
-  const actionButtonClass =
-    "inline-flex h-8 items-center gap-1.5 rounded-[4px] border px-2.5 text-[13px] font-medium transition-colors outline-none disabled:opacity-60";
-  const segmentedButtonClass =
-    "flex h-8 items-center gap-1.5 px-2.5 rounded-[3px] text-[13px] font-medium transition-colors outline-none";
+  // Compose the shared control classes from index.css rather than a parallel
+  // set — bg-background keeps fields readable against the surface-colored panel.
+  const fieldClass = "app-input bg-background";
+  const actionButtonClass = "app-button-secondary gap-1.5";
+  const segmentedButtonClass = "app-segmented-button flex items-center gap-1.5";
 
   const themeOptions: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
     { value: "light", label: t("settings.themeLight"), icon: Sun },
@@ -814,7 +805,7 @@ export function Settings() {
   const renderAgentCard = (agent: typeof tools[number], dragHandle?: React.ReactNode) => (
     <div
       className={cn(
-        "group relative flex flex-col gap-1.5 rounded-[6px] border px-3 py-2.5 transition-colors",
+        "group relative flex h-full flex-col gap-1.5 rounded-xl border px-3.5 py-3 transition-colors",
         agent.installed && agent.enabled
           ? "border-border bg-surface"
           : agent.installed
@@ -822,84 +813,29 @@ export function Settings() {
             : "border-border-subtle bg-bg-secondary"
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-2.5">
         {dragHandle}
-        <div className="mt-0.5 shrink-0">
-          {agent.installed ? (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={agent.enabled}
-              onClick={() => handleToggleTool(agent.key, !agent.enabled)}
-              disabled={togglingTools.has(agent.key)}
-              title={agent.enabled ? t("settings.disableAgent") : t("settings.enableAgent")}
-              className={cn(
-                "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
-                agent.enabled ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600",
-                togglingTools.has(agent.key) ? "cursor-wait opacity-60" : "cursor-pointer"
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-flex h-3 w-3 items-center justify-center rounded-full bg-white shadow transition-transform",
-                  agent.enabled ? "translate-x-3.5" : "translate-x-0.5"
-                )}
-              >
-                {togglingTools.has(agent.key) && (
-                  <Loader2 className="h-2 w-2 animate-spin text-muted" />
-                )}
-              </span>
-            </button>
-          ) : (
-            <div
-              title={t("settings.notInstalled") as string}
-              className="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full bg-zinc-200 opacity-60 dark:bg-zinc-700"
-            >
-              <span className="inline-flex h-3 w-3 translate-x-0.5 rounded-full bg-white/80 shadow" />
-            </div>
-          )}
-        </div>
+        <AgentIcon
+          agentKey={agent.key}
+          displayName={agent.display_name}
+          className="mt-px h-6 w-6 shrink-0 rounded-md"
+        />
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <AgentIcon
-                  agentKey={agent.key}
-                  displayName={agent.display_name}
-                  className="h-5 w-5 rounded-[5px]"
-                />
-                <h3 className={cn("truncate text-[13px] font-medium", agent.installed ? "text-secondary" : "text-muted")}>
-                  {agent.display_name}
-                </h3>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    agent.installed
-                      ? agent.enabled
-                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                      : "bg-surface-hover text-muted"
-                  )}
-                >
-                  {agent.installed
-                    ? agent.enabled
-                      ? t("settings.enabledState")
-                      : t("settings.disabledState")
-                    : t("settings.notInstalled")}
-                </span>
-              </div>
-            </div>
-            {agent.is_custom && (
-              <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                <button
-                  onClick={() => handleRemoveCustomAgent(agent.key, agent.display_name)}
-                  className="p-0.5 text-muted hover:text-red-500 outline-none"
-                  title={t("settings.removeCustomAgent")}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
+          <div className="flex items-center gap-2">
+            <h3
+              className={cn(
+                "truncate text-[14px] font-semibold",
+                agent.installed ? "text-primary" : "text-muted"
+              )}
+            >
+              {agent.display_name}
+            </h3>
+            {/* Enabled/disabled is carried by the switch; only "not installed" adds info. */}
+            {!agent.installed && (
+              <span className="shrink-0 rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-muted">
+                {t("settings.notInstalled")}
+              </span>
             )}
           </div>
 
@@ -921,6 +857,31 @@ export function Settings() {
             )}
           </div>
         </div>
+
+        {agent.is_custom && (
+          <button
+            onClick={() => handleRemoveCustomAgent(agent.key, agent.display_name)}
+            className="mt-0.5 shrink-0 p-0.5 text-muted opacity-0 outline-none transition-opacity hover:text-red-500 group-hover:opacity-100"
+            title={t("settings.removeCustomAgent")}
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
+
+        <ToggleSwitch
+          className="mt-0.5"
+          checked={agent.installed && agent.enabled}
+          disabled={!agent.installed}
+          loading={togglingTools.has(agent.key)}
+          onChange={() => handleToggleTool(agent.key, !agent.enabled)}
+          title={
+            !agent.installed
+              ? (t("settings.notInstalled") as string)
+              : agent.enabled
+                ? (t("settings.disableAgent") as string)
+                : (t("settings.enableAgent") as string)
+          }
+        />
       </div>
 
       <div className="space-y-1">
@@ -964,7 +925,7 @@ export function Settings() {
               className="min-w-0 flex-1 truncate text-[12px] font-mono leading-tight text-muted"
               title={agent.skills_dir}
             >
-              {agent.installed ? compactHomePath(agent.skills_dir) : t("settings.notInstalled")}
+              {compactHomePath(agent.skills_dir)}
             </p>
             <button
               type="button"
@@ -987,9 +948,9 @@ export function Settings() {
           </div>
         )}
 
-        {/* Project-relative skills path */}
-        {agent.installed &&
-          (editingProjectPathKey === agent.key ? (
+        {/* Project-relative skills path — always rendered so every card is the
+            same height, installed or not. */}
+        {editingProjectPathKey === agent.key ? (
             <div className="flex items-center gap-1">
               <input
                 type="text"
@@ -1053,7 +1014,7 @@ export function Settings() {
                 </button>
               )}
             </div>
-          ))}
+          )}
       </div>
     </div>
   );
@@ -1243,12 +1204,12 @@ export function Settings() {
           <h2 className="app-section-title mb-3">
             {t("settings.globalConfig")}
           </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-subtle">
+          <div className="app-panel overflow-hidden divide-y divide-border-faint">
             {/* Repo path */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.repoPath")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.repoPathDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.repoPath")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.repoPathDesc")}</p>
               </div>
               <div className="flex max-w-full flex-wrap items-center gap-2">
                 {editingCentralRepoPath ? (
@@ -1257,7 +1218,7 @@ export function Settings() {
                       type="text"
                       value={centralRepoPathInput}
                       onChange={(e) => setCentralRepoPathInput(e.target.value)}
-                      className="h-8 min-w-0 flex-1 rounded-[4px] border border-border-subtle bg-background px-2.5 text-[13px] font-mono text-secondary outline-none transition-colors focus:border-border"
+                      className={`${fieldClass} min-w-0 flex-1 font-mono`}
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter") void handleSaveCentralRepoPath();
@@ -1271,7 +1232,7 @@ export function Settings() {
                       type="button"
                       onClick={() => handleBrowsePath(setCentralRepoPathInput)}
                       disabled={savingCentralRepoPath}
-                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                      className={`${actionButtonClass} text-muted hover:text-secondary`}
                     >
                       <FolderOpen className="w-3 h-3" />
                       {t("settings.selectFolder")}
@@ -1280,7 +1241,7 @@ export function Settings() {
                       type="button"
                       onClick={() => void handleSaveCentralRepoPath()}
                       disabled={savingCentralRepoPath}
-                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-emerald-500/30 px-2.5 text-[13px] font-medium text-emerald-600 transition-colors outline-none hover:bg-emerald-500/5 disabled:opacity-60"
+                      className={`${actionButtonClass} border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5 dark:text-emerald-400`}
                     >
                       {savingCentralRepoPath ? (
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -1296,13 +1257,13 @@ export function Settings() {
                         setEditingCentralRepoPath(false);
                       }}
                       disabled={savingCentralRepoPath}
-                      className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                      className={`${actionButtonClass} text-muted hover:text-secondary`}
                     >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 ) : (
-                  <div className="flex min-w-0 items-center gap-1.5 rounded-[4px] border border-border-subtle bg-background px-2 py-1">
+                  <div className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border-subtle bg-background px-3 py-2">
                     <Folder className="w-3 h-3 text-muted" />
                     <span className="truncate text-[13px] font-mono text-tertiary">{displayedRepoPath}</span>
                   </div>
@@ -1311,7 +1272,7 @@ export function Settings() {
                   <button
                     type="button"
                     onClick={handleStartEditCentralRepoPath}
-                    className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary"
+                    className={`${actionButtonClass} text-muted hover:text-secondary`}
                   >
                     <Pencil className="w-3 h-3" />
                     {t("settings.changeDir")}
@@ -1322,7 +1283,7 @@ export function Settings() {
                     type="button"
                     onClick={() => void handleResetCentralRepoPath()}
                     disabled={savingCentralRepoPath}
-                    className="inline-flex h-8 items-center gap-1 rounded-[4px] border border-border-subtle px-2.5 text-[13px] font-medium text-muted transition-colors outline-none hover:text-secondary disabled:opacity-60"
+                    className={`${actionButtonClass} text-muted hover:text-secondary`}
                   >
                     {savingCentralRepoPath ? (
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -1337,7 +1298,7 @@ export function Settings() {
                   onClick={handleOpenRepoInFinder}
                   disabled={openingRepo}
                   className={cn(
-                    "inline-flex h-8 items-center gap-1 rounded-[4px] border px-2.5 text-[13px] font-medium transition-all outline-none",
+                    actionButtonClass,
                     "border-accent-border bg-accent-bg text-accent",
                     "hover:border-accent hover:bg-accent-bg",
                     openingRepo && "cursor-wait opacity-70"
@@ -1359,12 +1320,12 @@ export function Settings() {
             </div>
 
             {/* Sync mode */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.syncMode")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.syncModeDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.syncMode")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.syncModeDesc")}</p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 <button
                   onClick={() => handleSyncModeChange("symlink")}
                   className={cn(
@@ -1387,12 +1348,12 @@ export function Settings() {
             </div>
 
             {/* Theme */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.theme")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.themeDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.theme")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.themeDesc")}</p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 {themeOptions.map((opt) => {
                   const Icon = opt.icon;
                   return (
@@ -1412,12 +1373,12 @@ export function Settings() {
             </div>
 
             {/* Text size */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.textSize")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.textSizeDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.textSize")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.textSizeDesc")}</p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 {([
                   { value: "small", label: t("settings.textSizeSmall") },
                   { value: "default", label: t("settings.textSizeDefault") },
@@ -1442,59 +1403,43 @@ export function Settings() {
               </div>
             </div>
 
-            {/* Default preset */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.defaultPreset")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.defaultPresetDesc")}</p>
-              </div>
-              <div className="relative shrink-0">
-                <select
-                  value={defaultPreset}
-                  onChange={(e) => handleDefaultPresetChange(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">—</option>
-                  {presets.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-              </div>
-            </div>
-
             {/* Language */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium">{t("settings.language")}</h3>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.language")}</h3>
               </div>
-              <div className="flex max-w-full flex-wrap items-center gap-2">
-                <Globe className="w-3.5 h-3.5 text-muted" />
-                <div className="relative">
-                  <select
-                    value={i18n.language}
-                    onChange={(e) => handleLanguageChange(e.target.value)}
-                    className={selectClass}
+              <div className="app-segmented flex-wrap bg-background">
+                {([
+                  { value: "zh", label: "简体中文" },
+                  { value: "zh-TW", label: "繁體中文" },
+                  { value: "en", label: "English" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => handleLanguageChange(opt.value)}
+                    className={cn(
+                      segmentedButtonClass,
+                      i18n.language === opt.value
+                        ? "bg-surface-active text-secondary"
+                        : "text-muted hover:text-tertiary"
+                    )}
                   >
-                    <option value="zh">简体中文 (zh-CN)</option>
-                    <option value="zh-TW">繁體中文 (zh-TW)</option>
-                    <option value="en">English (en-US)</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-                </div>
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Close action */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.closeAction")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.closeActionDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.closeAction")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.closeActionDesc")}</p>
                 {!showTrayIcon && (
                   <p className="text-[12px] text-muted mt-1">{t("settings.trayIconOffHint")}</p>
                 )}
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 {(["", "hide", "close"] as const).map((val) => (
                   <button
                     key={val}
@@ -1513,31 +1458,17 @@ export function Settings() {
             </div>
 
             {/* Tray icon */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
               <div className="min-w-0 flex-1">
-                <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.trayIcon")}</h3>
-                <p className="text-[13px] text-muted">{t("settings.trayIconDesc")}</p>
+                <h3 className="text-[14px] font-semibold text-primary">{t("settings.trayIcon")}</h3>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.trayIconDesc")}</p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
-                <button
-                  onClick={() => handleShowTrayIconChange(true)}
-                  className={cn(
-                    segmentedButtonClass,
-                    showTrayIcon ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  {t("settings.trayIcon_on")}
-                </button>
-                <button
-                  onClick={() => handleShowTrayIconChange(false)}
-                  className={cn(
-                    segmentedButtonClass,
-                    !showTrayIcon ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  {t("settings.trayIcon_off")}
-                </button>
-              </div>
+              <ToggleSwitch
+                className="mt-1"
+                checked={showTrayIcon}
+                onChange={() => handleShowTrayIconChange(!showTrayIcon)}
+                title={showTrayIcon ? t("settings.trayIcon_on") : t("settings.trayIcon_off")}
+              />
             </div>
           </div>
         </section>
@@ -1547,10 +1478,10 @@ export function Settings() {
           <h2 className="app-section-title mb-3">
             {t("settings.proxyConfig")}
           </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-subtle">
+          <div className="app-panel overflow-hidden divide-y divide-border-faint">
             <div className="px-4 py-3">
-              <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.proxyUrl")}</h3>
-              <p className="text-[13px] text-muted mb-2">{t("settings.proxyUrlDesc")}</p>
+              <h3 className="text-[14px] font-semibold text-primary">{t("settings.proxyUrl")}</h3>
+              <p className="mt-0.5 mb-2 text-[12px] text-muted">{t("settings.proxyUrlDesc")}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
@@ -1581,10 +1512,10 @@ export function Settings() {
           <h2 className="app-section-title mb-3">
             {t("settings.autoUpdate.title")}
           </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-subtle">
+          <div className="app-panel overflow-hidden divide-y divide-border-faint">
             <div className="flex items-center justify-between gap-4 px-4 py-2.5">
               <div className="min-w-0">
-                <h3 className="text-[13px] text-secondary font-medium">
+                <h3 className="text-[14px] font-semibold text-primary">
                   {t("settings.autoUpdate.intervalLabel")}
                 </h3>
                 <p className="text-[12px] text-muted">
@@ -1596,7 +1527,7 @@ export function Settings() {
                     : ""}
                 </p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 {autoUpdateIntervalOptions.map((option) => (
                   <button
                     key={option.value}
@@ -1617,14 +1548,14 @@ export function Settings() {
             </div>
             <div className="flex items-center justify-between gap-4 px-4 py-2.5">
               <div className="min-w-0">
-                <h3 className="text-[13px] text-secondary font-medium">
+                <h3 className="text-[14px] font-semibold text-primary">
                   {t("settings.autoUpdate.applyLabel")}
                 </h3>
                 <p className="text-[12px] text-muted">
                   {t("settings.autoUpdate.applyDesc")}
                 </p>
               </div>
-              <div className="flex flex-wrap rounded-[4px] border border-border-subtle bg-background p-px">
+              <div className="app-segmented flex-wrap bg-background">
                 {autoUpdateApplyOptions.map((option) => (
                   <button
                     key={option.value}
@@ -1651,11 +1582,11 @@ export function Settings() {
           <h2 className="app-section-title mb-3">
             {t("settings.gitSyncConfig")}
           </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-subtle">
+          <div className="app-panel overflow-hidden divide-y divide-border-faint">
             <div className="px-4 py-3">
-              <h3 className="text-[13px] text-secondary font-medium mb-0.5">{t("settings.gitRemoteUrl")}</h3>
+              <h3 className="text-[14px] font-semibold text-primary">{t("settings.gitRemoteUrl")}</h3>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[13px] text-muted">{t("settings.gitSyncConfigDesc")}</p>
+                <p className="mt-0.5 text-[12px] text-muted">{t("settings.gitSyncConfigDesc")}</p>
                 <button
                   type="button"
                   onClick={() => navigate("/backup")}
@@ -1699,12 +1630,17 @@ export function Settings() {
                 </button>
               </div>
               <p className="text-[12px] text-muted mt-2">{t("settings.gitDisconnectHint")}</p>
-              <label className="mt-3 flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
+              <div className="mt-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold text-primary">{t("settings.gitEngineGit2")}</div>
+                  <p className="mt-0.5 text-[12px] text-muted">{t("settings.gitEngineGit2Desc")}</p>
+                </div>
+                <ToggleSwitch
+                  className="mt-1"
                   checked={gitEngineGit2}
-                  onChange={async (e) => {
-                    const next = e.target.checked;
+                  title={t("settings.gitEngineGit2")}
+                  onChange={async () => {
+                    const next = !gitEngineGit2;
                     setGitEngineGit2(next);
                     try {
                       await api.setSettings("git_backup_engine", next ? "git2" : "system");
@@ -1714,19 +1650,19 @@ export function Settings() {
                       toast.error(t("common.error"));
                     }
                   }}
-                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-accent)]"
                 />
-                <span className="min-w-0">
-                  <span className="block text-[13px] text-secondary">{t("settings.gitEngineGit2")}</span>
-                  <span className="block text-[12px] text-muted">{t("settings.gitEngineGit2Desc")}</span>
-                </span>
-              </label>
-              <label className="mt-3 flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
+              </div>
+              <div className="mt-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold text-primary">{t("settings.gitMergeEngineObject")}</div>
+                  <p className="mt-0.5 text-[12px] text-muted">{t("settings.gitMergeEngineObjectDesc")}</p>
+                </div>
+                <ToggleSwitch
+                  className="mt-1"
                   checked={gitMergeEngineObject}
-                  onChange={async (e) => {
-                    const next = e.target.checked;
+                  title={t("settings.gitMergeEngineObject")}
+                  onChange={async () => {
+                    const next = !gitMergeEngineObject;
                     setGitMergeEngineObject(next);
                     try {
                       await api.setSettings("merge_engine", next ? "object" : "system");
@@ -1736,13 +1672,8 @@ export function Settings() {
                       toast.error(t("common.error"));
                     }
                   }}
-                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-accent)]"
                 />
-                <span className="min-w-0">
-                  <span className="block text-[13px] text-secondary">{t("settings.gitMergeEngineObject")}</span>
-                  <span className="block text-[12px] text-muted">{t("settings.gitMergeEngineObjectDesc")}</span>
-                </span>
-              </label>
+              </div>
             </div>
           </div>
         </section>

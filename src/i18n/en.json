@@ -602,8 +602,6 @@
     "copy": "File Copy",
     "currentPreset": "Current Preset",
     "currentPresetDesc": "Switch the app to another preset and refresh active skills immediately.",
-    "defaultPreset": "Default Startup Preset",
-    "defaultPresetDesc": "Preset loaded automatically on app launch.",
     "theme": "Theme",
     "themeDesc": "Choose the app appearance.",
     "themeLight": "Light",

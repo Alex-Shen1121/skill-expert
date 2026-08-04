@@ -602,8 +602,6 @@
     "copy": "文件复制",
     "currentPreset": "当前 Preset",
     "currentPresetDesc": "立即切换应用当前使用的 Preset，并刷新 Skills 配置。",
-    "defaultPreset": "默认启动 Preset",
-    "defaultPresetDesc": "应用启动时自动加载的 Preset。",
     "theme": "主题",
     "themeDesc": "选择应用的外观主题。",
     "themeLight": "浅色",

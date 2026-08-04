@@ -553,8 +553,6 @@
     "copy": "檔案複製",
     "currentPreset": "當前 Preset",
     "currentPresetDesc": "立即切換應用當前使用的 Preset，並重新整理 Skills 設定。",
-    "defaultPreset": "預設啟動 Preset",
-    "defaultPresetDesc": "應用啟動時自動載入的 Preset。",
     "theme": "主題",
     "themeDesc": "選擇應用的外觀主題。",
     "themeLight": "淺色",
