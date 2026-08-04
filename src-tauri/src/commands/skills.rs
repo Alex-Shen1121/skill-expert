@@ -1171,18 +1171,21 @@ pub async fn check_all_skill_updates(
         // skill around that write — the same guard the pre-concurrent code used so
         // a concurrent manual install/update can't race the `update_status` write
         // — but now the lock is never held across a slow `ls-remote`, because the
-        // network happened off the lock in Phase A. Feeding the prefetched
-        // revision in keeps this path off the network entirely (the inline-resolve
-        // fallback in check_skill_update_internal_with_remote is unreachable here:
-        // any skill that needs a network check was resolved into Phase A's map).
-        // Lock contention is still reported per skill so the caller knows the
-        // check didn't complete for it.
+        // network happened off the lock in Phase A, and the apply step itself
+        // can't reach the network. A skill whose source moved (or whose TTL
+        // expired) between the two phases has no usable prefetch and is simply
+        // left for the next round. Lock contention is still reported per skill
+        // so the caller knows the check didn't complete for it.
         let mut failed = Vec::new();
         for skill in &skills {
             let prefetched = if matches!(skill.source_type.as_str(), "git" | "skillssh") {
-                git_source_from_skill(skill)
-                    .ok()
-                    .and_then(|source| remote_revisions.get(&RemoteKey::from(source)).cloned())
+                git_source_from_skill(skill).ok().and_then(|source| {
+                    let key = RemoteKey::from(source);
+                    remote_revisions
+                        .get(&key)
+                        .cloned()
+                        .map(|result| PrefetchedRemote { key, result })
+                })
             } else {
                 None
             };
@@ -1193,13 +1196,9 @@ pub async fn check_all_skill_updates(
                     continue;
                 }
             };
-            if let Err(err) = check_skill_update_internal_with_remote(
-                &store,
-                &skill.id,
-                force_check,
-                proxy_url.as_deref(),
-                prefetched,
-            ) {
+            if let Err(err) =
+                check_skill_update_internal_with_remote(&store, &skill.id, force_check, prefetched)
+            {
                 // Surface the real per-skill reason so a batch that "just fails"
                 // is diagnosable from the logs, not only the aggregated toast.
                 log::warn!("check all: {} failed: {}", skill.id, err.message);
@@ -1237,6 +1236,53 @@ impl From<GitSkillSource> for RemoteKey {
             branch: source.branch,
         }
     }
+}
+
+impl RemoteKey {
+    /// Whether `source` still points at this remote. Subpath is deliberately
+    /// ignored: two subdirectories of one repo share a head revision.
+    fn matches(&self, source: &GitSkillSource) -> bool {
+        self.clone_url == source.clone_url && self.branch == source.branch
+    }
+}
+
+/// A remote revision resolved off the central-repo lock, tagged with the remote
+/// it was resolved for. The tag is what makes it safe to apply later: a
+/// reinstall keeps a skill's row and repoints its source
+/// (`update_skill_after_reinstall`), so the applying side re-derives the key
+/// from the freshly read record and drops a prefetch that no longer matches.
+#[derive(Clone)]
+pub struct PrefetchedRemote {
+    key: RemoteKey,
+    result: Result<String, String>,
+}
+
+/// Resolve one skill's remote revision *before* the caller takes the
+/// central-repo lock. Every lock-holding update-check path goes through this:
+/// holding the lock across a slow `ls-remote` is what made an unrelated
+/// foreground operation fail with a 20s "repository is busy" (#315).
+///
+/// Returns `None` when there is nothing to resolve — a local skill, one still
+/// inside its check TTL, or an unparseable source — in which case the check
+/// itself does no network either.
+pub fn prefetch_skill_remote(
+    store: &SkillStore,
+    skill_id: &str,
+    force: bool,
+    proxy_url: Option<&str>,
+) -> Option<PrefetchedRemote> {
+    let skill = store.get_skill_by_id(skill_id).ok().flatten()?;
+    if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
+        return None;
+    }
+    if should_skip_update_check(store, &skill, force).unwrap_or(false) {
+        return None;
+    }
+    let key = RemoteKey::from(git_source_from_skill(&skill).ok()?);
+    let result =
+        git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
+            .map_err(|err| err.to_string());
+    Some(PrefetchedRemote { key, result })
 }
 
 /// Upper bound on concurrent `ls-remote` queries during a batch check. Collapses
@@ -1869,27 +1915,32 @@ pub fn store_installed_skill_unlocked(
     Ok(id)
 }
 
+/// Check one skill end to end: resolve its remote, then write the status.
+///
+/// The caller must **not** hold the central-repo lock — the resolution here is
+/// a network call. Paths that need the lock take it around
+/// [`check_skill_update_internal_with_remote`] only, after prefetching.
 pub fn check_skill_update_internal(
     store: &SkillStore,
     skill_id: &str,
     force: bool,
     proxy_url: Option<&str>,
 ) -> Result<ManagedSkillDto, AppError> {
-    check_skill_update_internal_with_remote(store, skill_id, force, proxy_url, None)
+    let prefetched = prefetch_skill_remote(store, skill_id, force, proxy_url);
+    check_skill_update_internal_with_remote(store, skill_id, force, prefetched)
 }
 
-/// Like [`check_skill_update_internal`], but accepts an already-resolved remote
-/// revision so a batch check can query each distinct remote once, concurrently
-/// and off the central-repo lock, then feed the result back in here. `prefetched`
-/// is `Some(Ok(rev))` / `Some(Err(message))` for a git-backed skill whose remote
-/// was resolved ahead of time, or `None` to resolve inline (the single-skill
-/// path and any skill Phase A didn't pre-resolve).
+/// Write one skill's update status from an already-resolved remote revision.
+///
+/// This never touches the network — [`prefetch_skill_remote`] does that off the
+/// central-repo lock, and callers hold the lock only for this write. A git
+/// skill whose `prefetched` is missing or points at a remote the skill no
+/// longer uses is left untouched for the next round.
 pub fn check_skill_update_internal_with_remote(
     store: &SkillStore,
     skill_id: &str,
     force: bool,
-    proxy_url: Option<&str>,
-    prefetched: Option<Result<String, String>>,
+    prefetched: Option<PrefetchedRemote>,
 ) -> Result<ManagedSkillDto, AppError> {
     let skill = store
         .get_skill_by_id(skill_id)
@@ -1919,16 +1970,25 @@ pub fn check_skill_update_internal_with_remote(
                     .map_err(AppError::db)?;
             }
 
-            // Use the pre-resolved revision when the batch check supplied one;
-            // otherwise resolve inline (single-skill path).
-            let remote_result = match prefetched {
-                Some(result) => result,
-                None => git_fetcher::resolve_remote_revision(
-                    &git_source.clone_url,
-                    git_source.branch.as_deref(),
-                    proxy_url,
-                )
-                .map_err(|err| err.to_string()),
+            // Apply the revision resolved off the lock — but only if the skill
+            // still points at the remote it was resolved for. A reinstall keeps
+            // the row and repoints its source, so a stale prefetch would record
+            // a status computed against the wrong remote.
+            //
+            // When nothing usable was prefetched, skip the skill instead of
+            // resolving here: every caller of this function holds the
+            // central-repo lock, and a network call under that lock is the
+            // 20s "busy" failure the off-lock split exists to remove (#315).
+            // The next round picks the skill up.
+            let Some(remote_result) = prefetched
+                .filter(|prefetched| prefetched.key.matches(&git_source))
+                .map(|prefetched| prefetched.result)
+            else {
+                log::debug!(
+                    "check update: no usable prefetched remote for {}, skipping this round",
+                    skill.id
+                );
+                return managed_skill_by_id(store, skill_id);
             };
             match remote_result {
                 Ok(remote_revision) => {
@@ -2770,5 +2830,85 @@ mod tests {
             "expected concurrent resolution, peak in-flight was {}",
             peak.load(Ordering::SeqCst)
         );
+    }
+
+    // ── Applying a prefetched remote under the lock ──
+
+    /// A git-backed skill pinned at `old-rev` on `remote_url`.
+    fn insert_git_skill(store: &SkillStore, id: &str, remote_url: &str) {
+        let dir = write_skill_dir(id);
+        let mut skill = sample_skill(id, id, &dir);
+        skill.source_type = "git".to_string();
+        skill.source_ref = Some(remote_url.to_string());
+        skill.source_ref_resolved = Some(remote_url.to_string());
+        skill.source_revision = Some("old-rev".to_string());
+        skill.update_status = "unknown".to_string();
+        store.insert_skill(&skill).unwrap();
+    }
+
+    fn prefetch(url: &str, revision: &str) -> Option<PrefetchedRemote> {
+        Some(PrefetchedRemote {
+            key: remote(url, None),
+            result: Ok(revision.to_string()),
+        })
+    }
+
+    /// The happy path: a prefetch resolved for the skill's own remote is applied.
+    #[test]
+    fn matching_prefetched_remote_is_applied() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/a.git");
+
+        let dto = check_skill_update_internal_with_remote(
+            &repo.store,
+            "skill-1",
+            false,
+            prefetch("https://example.test/a.git", "new-rev"),
+        )
+        .unwrap();
+
+        assert_eq!(dto.update_status, "update_available");
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.remote_revision.as_deref(), Some("new-rev"));
+    }
+
+    /// A reinstall between the off-lock resolve and this write keeps the skill's
+    /// row but repoints its source. The revision resolved for the *old* remote
+    /// must not be recorded against the new one — it would show a fabricated
+    /// "up to date"/"update available" for a source it was never read from.
+    #[test]
+    fn prefetched_remote_for_a_different_source_is_discarded() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/new.git");
+
+        let dto = check_skill_update_internal_with_remote(
+            &repo.store,
+            "skill-1",
+            false,
+            prefetch("https://example.test/old.git", "rev-of-old-remote"),
+        )
+        .unwrap();
+
+        assert_eq!(dto.update_status, "unknown", "status left for the next round");
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.remote_revision, None, "no revision from a stale remote");
+        assert_eq!(stored.last_checked_at, None, "the check did not complete");
+    }
+
+    /// Callers hold the central-repo lock across this write, so a git skill with
+    /// nothing prefetched must be skipped rather than resolved inline — that
+    /// inline call is the lock-held network round-trip behind the 20s "busy"
+    /// failures (#315).
+    #[test]
+    fn missing_prefetch_never_resolves_under_the_lock() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/a.git");
+
+        let dto =
+            check_skill_update_internal_with_remote(&repo.store, "skill-1", false, None).unwrap();
+
+        assert_eq!(dto.update_status, "unknown");
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.last_checked_at, None, "no network, no write");
     }
 }
