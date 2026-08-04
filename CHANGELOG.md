@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.4] - 2026-08-04
+
+### Release Overview
+- Interface consistency pass: a skill card now looks and behaves the same on every page, Settings and Backup adopt the shared controls, and a skill with a pending update is no longer indistinguishable from an up-to-date one in multi-select.
+
+### User-facing
+- **The skill card is one card again** — My Skills, Workspace, and a project's detail page each drew the same object differently. All of them now share one layout: a fixed leading slot that holds the status dot, the drag handle on hover, or the multi-select checkbox (so the title never shifts), the name, an amber "update" pill when one is pending, and a switch pinned to the top-right. The grid card's floating hover toolbar — which used to cover the skill name — is gone; drag, update, and delete moved into a "…" overflow menu, and deleting now asks for confirmation instead of acting immediately.
+- **A pending update stays visible while selecting** — In multi-select, the grid card hid the header update pill *and* suppressed the body badge, so a skill with an update looked exactly like one without. The badge now appears whenever the pill is hidden.
+- **A partially enabled skill no longer reads as disabled** — On a project page, a skill whose variants are only partly enabled showed as fully off. Its status dot is now amber for that in-between state, and the whole card no longer dims.
+- **Settings matches the rest of the app** — Row headings, help text, spacing, and dividers follow the same scale as every other page. Booleans that take effect immediately (tray icon, Git engine) are switches rather than checkboxes, language is a segmented control, and agent cards put their switch at the right edge and keep equal height whether or not the agent is installed. The redundant "enabled / disabled" pill is gone — the switch already says it; "not installed" stays, since the switch cannot express it.
+- **Behavior change: the "default startup preset" setting is removed** — It overrode whichever preset was active on every launch. Startup now simply restores the preset you last had active.
+- **Consistent corners across dialogs, sheets, and the sidebar** — Buttons, inputs, and navigation rows inside modals were noticeably squarer than the pages behind them; they now use the same radius scale.
+
+### Developer & Governance
+- The card rework introduces `CardActionMenu` (replacing the standalone `DeleteSkillButton`, which routed deletion outside `ConfirmDialog`) and three card tokens — `--color-border-faint`, `--shadow-card`, `--shadow-card-hover`. `ToggleSwitch` gained a `loading` prop so the agent toggle and Backup's auto-backup row keep their in-flight spinner; it replaced the last two private 28×16 switches with hardcoded emerald/zinc colors. An open card menu lifts its wrapper to `z-30`, because the card's hover transform creates a stacking context that would otherwise clip it.
+- Settings' local `fieldClass` / `actionButtonClass` / `segmentedButtonClass` constants now compose `.app-input` / `.app-button-secondary` / `.app-segmented-button` instead of redefining them at different sizes and radii.
+- Removing the default-startup-preset setting required deleting all three readers, not just the UI row: `ensure_default_startup_scenario` read `default_scenario` on every launch, so dropping only the frontend would have locked users into a preset with no way to change it. The CLI now falls back to the first preset. The stored settings row is left in place as inert data.
+- Arbitrary radii across `src/` drop from 101 to 27; the remainder are Agent icon cells (spec'd at `rounded-[4px]`, and three drifted cells are corrected here) and `HelpDialog`'s deliberate `rounded-[28px]`.
+- READMEs gained a Trendshift badge.
+- Backend Rust suite at 393 passing; frontend `npm run build` clean.
 ## [1.28.3] - 2026-07-13
 
 ### Release Overview
