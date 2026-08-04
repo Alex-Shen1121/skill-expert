@@ -1109,13 +1109,13 @@ pub async fn check_skill_update(
     let store = store.inner().clone();
     let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
+        let force = force.unwrap_or(false);
+        // Resolve first, take the lock second. Holding it across `ls-remote`
+        // meant one check of a slow remote could occupy the repository for the
+        // whole round-trip and fail every concurrent operation (#315).
+        let prefetched = prefetch_skill_remote(&store, &skill_id, force, proxy_url.as_deref());
         let _lock = RepoLock::acquire_foreground("check skill update").map_err(AppError::db)?;
-        check_skill_update_internal(
-            &store,
-            &skill_id,
-            force.unwrap_or(false),
-            proxy_url.as_deref(),
-        )
+        check_skill_update_internal_with_remote(&store, &skill_id, force, prefetched)
     })
     .await?
 }
