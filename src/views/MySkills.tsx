@@ -1194,6 +1194,9 @@ export function MySkills() {
             const badge = statusBadge(skill);
             const hasUpdate =
               skill.update_status === "update_available" && canRefresh(skill);
+            // The header pill is hidden in multi-select, so the body badge has to
+            // take over — otherwise the update state vanishes entirely.
+            const showUpdatePill = hasUpdate && !isMultiSelect;
             const isMissingLocalSource =
               skill.update_status === "source_missing"
               && (skill.source_type === "local" || skill.source_type === "import");
@@ -1258,7 +1261,7 @@ export function MySkills() {
                     >
                       {displayName}
                     </h3>
-                    {hasUpdate && !isMultiSelect && (
+                    {showUpdatePill && (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleRefreshSkill(skill); }}
                         disabled={updatingSkillId === skill.id}
@@ -1320,7 +1323,7 @@ export function MySkills() {
                     <p className="text-[13px] leading-[18px] text-muted truncate">
                       {skill.description || "—"}
                     </p>
-                    {((badge && !hasUpdate) || conflictIds.has(skill.id)) && (
+                    {((badge && !showUpdatePill) || conflictIds.has(skill.id)) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {conflictIds.has(skill.id) && (
                           <button
@@ -1331,7 +1334,7 @@ export function MySkills() {
                             {t("mySkills.needsAttention")}
                           </button>
                         )}
-                        {badge && !hasUpdate && (
+                        {badge && !showUpdatePill && (
                           <span
                             className={cn(
                               "rounded-full px-2 py-0.5 text-[13px] font-medium",
