@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   FolderOpen,
@@ -203,16 +203,22 @@ export function ProjectDetail() {
     return skill.id;
   }, []);
 
+  // Scanning a project is slow enough that switching projects can let the older
+  // scan land last, swapping another project's skills in under this route — and
+  // now also pruning this project's tag filter against the other one's tags.
+  // Same request-id guard as WorkspaceView's local-skill load.
+  const skillsRequestRef = useRef(0);
   const loadSkills = useCallback(async () => {
     if (!id) return;
+    const requestId = ++skillsRequestRef.current;
     setLoading(true);
     try {
       const result = await api.getProjectSkills(id);
-      setSkills(result);
+      if (skillsRequestRef.current === requestId) setSkills(result);
     } catch (e) {
       console.error("Failed to load project skills:", e);
     } finally {
-      setLoading(false);
+      if (skillsRequestRef.current === requestId) setLoading(false);
     }
   }, [id]);
 
