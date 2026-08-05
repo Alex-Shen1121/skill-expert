@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] - 2026-08-05
+
+### Release Overview
+- macOS builds are now signed with an Apple Developer ID certificate and notarized by Apple. Downloading the app and opening it just works — no "unidentified developer" dialog, no trip through System Settings, no Terminal commands.
+
+### User-facing
+- **macOS no longer blocks the app on first launch** — Previous builds were ad-hoc signed, which is enough to avoid the "app is damaged" error but not enough for Gatekeeper: every user still had to click through "Apple could not verify … is free of malware" and find **Open Anyway** in System Settings → Privacy & Security. Builds are now signed with a Developer ID Application certificate, submitted to Apple for notarization, and have the resulting ticket stapled to the bundle, which is what lets Gatekeeper approve them silently.
+- **One-time keychain re-authorization when you upgrade** — Moving to a Developer ID certificate changes the app's code signature, and macOS ties keychain permissions to that signature. The first launch after upgrading asks again for access to the `skills-manager-git-backup` entry (the GitHub backup token). Choose **Always Allow**; because the signing identity is now stable across releases, later updates should not ask again.
+- Releases up to and including v1.28.5 are unaffected and still need the workarounds documented in the README.
+
+### Developer & Governance
+- Release builds sign with `APPLE_SIGNING_IDENTITY` from repository secrets instead of the hard-coded ad-hoc `-` identity that was introduced to work around #138.
+- Notarization authenticates with an App Store Connect API key rather than an Apple ID plus app-specific password. The key is scoped to notarization instead of the whole Apple account, and — unlike app-specific passwords, which Apple revokes automatically whenever the account password changes — it does not silently break the release pipeline later.
+- A new pre-build step validates every required macOS secret and fails the job by name if one is missing. Without it a missing secret makes `tauri-action` fall back to a linker-only signature that has no sealed resources and fails `codesign --verify`, which is exactly the #138 failure mode.
+- The same step decodes the API key into `$RUNNER_TEMP/private_keys/AuthKey_<KeyID>.p8` (Tauri wants a path, not the key contents), restricts it to mode 600, and rejects a value that does not decode to a PEM private key.
+- Signing credentials are exposed as step-level environment variables, so the checkout, Node, Rust toolchain, and cache actions never see them.
+- Post-build verification now asserts the signing authority is a Developer ID Application certificate and that the hardened runtime is enabled, then runs `xcrun stapler validate` and `spctl --assess` — the same check macOS performs at first launch.
+- Both READMEs describe the notarized behaviour and scope the old Gatekeeper workarounds to the releases that actually need them.
+
 ## [1.28.5] - 2026-08-04
 
 ### Release Overview

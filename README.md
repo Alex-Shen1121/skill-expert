@@ -249,20 +249,24 @@ npm run cli:build
 
 ### macOS: Gatekeeper blocks the app on first launch
 
-Skills Manager is ad-hoc signed but not notarized (no paid Apple Developer ID), so macOS Gatekeeper will warn the first time you open it.
+Starting with **v1.29.0**, releases are signed with an Apple Developer ID certificate and notarized by Apple, so Gatekeeper lets them open normally — no warning, no Terminal commands.
+
+Releases **up to and including v1.28.5** predate notarization, and macOS blocks them:
 
 <p align="center">
   <img src="assets/CleanShot_20260530_093302@2x.png" width="320" alt="macOS Gatekeeper warning: Apple could not verify skills-manager.app is free of malware" />
 </p>
 
-- **"Apple could not verify … is free of malware"** or **"App can't be opened because it is from an unidentified developer"** (releases from v1.20.0 onward) — On macOS 15 (Sequoia) the dialog above only offers **Move to Trash** / **Done**: click **Done**, then open **System Settings → Privacy & Security** and click **Open Anyway** (it appears after the first blocked launch). On older macOS you can instead right-click the app in Finder and choose **Open**, then confirm in the dialog.
-- **"App is damaged and can't be opened"** (releases up to and including v1.19.0) — Run this in Terminal, then open the app again:
+- **"Apple could not verify … is free of malware"** or **"App can't be opened because it is from an unidentified developer"** (v1.20.0 – v1.28.5) — On macOS 15 (Sequoia) the dialog above only offers **Move to Trash** / **Done**: click **Done**, then open **System Settings → Privacy & Security** and click **Open Anyway** (it appears after the first blocked launch). On older macOS you can instead right-click the app in Finder and choose **Open**, then confirm in the dialog.
+- **"App is damaged and can't be opened"** (v1.19.0 and earlier) — Run this in Terminal, then open the app again:
 
   ```bash
   xattr -cr /Applications/skills-manager.app
   ```
 
   Replace the path with wherever you placed the `.app` file if it's not in `/Applications`.
+
+Upgrading to a notarized build changes the app's code signature, so macOS may ask again for permission to read the `skills-manager-git-backup` keychain entry. Click **Always Allow** — the signing identity is stable from v1.29.0 onward, so later updates should not ask again.
 
 ## Star History
 

@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.29.0] - 2026-08-05
+
+### 发布概览
+- macOS 版现在使用 Apple Developer ID 证书签名，并通过了 Apple 公证。下载后直接双击就能打开——不再有「无法验证开发者」的弹窗，不用绕去系统设置，也不用在终端里敲命令。
+
+### 用户可见更新
+- **macOS 首次启动不再被拦截** —— 此前的构建只做了 ad-hoc 签名，这足以避开「应用已损坏」，但过不了 Gatekeeper：每个用户仍要先点掉「无法验证 App 是否包含恶意软件」，再去系统设置 → 隐私与安全性里找**仍要打开**。现在的构建用 Developer ID Application 证书签名，提交给 Apple 公证，并把返回的票据 staple 进应用包——这正是 Gatekeeper 静默放行所需要的。
+- **升级时钥匙串会要求重新授权一次** —— 换成 Developer ID 证书后应用的代码签名变了，而 macOS 的钥匙串权限是绑定在签名上的。升级后第一次启动会再问一次是否允许访问 `skills-manager-git-backup` 条目（GitHub 备份令牌）。请选择**始终允许**；由于签名身份此后跨版本保持稳定，后续更新应该不会再问。
+- v1.28.5 及之前的版本不受影响，仍需按 README 里记录的方式手动放行。
+
+### 开发者与治理更新
+- 发布构建改用仓库 secret 里的 `APPLE_SIGNING_IDENTITY` 签名，不再使用当初为绕过 #138 而写死的 ad-hoc `-` 身份。
+- 公证改用 App Store Connect API Key 认证，而不是 Apple ID + App 专用密码。API Key 的权限仅限公证，不像 App 专用密码那样覆盖整个 Apple 账户；而且 App 专用密码在账户改密码时会被 Apple 自动全部吊销，会在毫无关联的时间点让发布流水线突然失效。
+- 新增构建前置校验步骤：逐项检查 macOS 所需 secret，缺失时按名字报错并终止。没有这道校验，缺 secret 会让 `tauri-action` 退回到只有链接器签名、没有 sealed resources 的产物并使 `codesign --verify` 失败——正是 #138 的故障形态。
+- 同一步骤把 API Key 解码到 `$RUNNER_TEMP/private_keys/AuthKey_<KeyID>.p8`（Tauri 需要的是路径而非密钥内容），权限收紧为 600，并在内容不是 PEM 私钥时直接失败。
+- 签名凭据以 step 级环境变量注入，checkout、Node、Rust 工具链与缓存这几个 action 运行时都接触不到。
+- 构建后校验新增两项断言：签名机构必须是 Developer ID Application 证书、必须启用 hardened runtime；随后执行 `xcrun stapler validate` 与 `spctl --assess`——后者正是 macOS 首次启动时跑的同一个检查。
+- 两份 README 同步说明公证后的行为，并把旧的 Gatekeeper 手动放行步骤限定到确实需要它们的版本区间。
+
 ## [1.28.5] - 2026-08-04
 
 ### 发布概览
