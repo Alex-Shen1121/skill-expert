@@ -5,9 +5,10 @@ import zh from "./zh.json";
 import zhTW from "./zh-TW.json";
 import en from "./en.json";
 import es from "./es.json";
+import ko from "./ko.json";
 
 const LANGUAGE_STORAGE_KEY = "language";
-const SUPPORTED_LANGUAGES = ["zh", "zh-TW", "en", "es"] as const;
+const SUPPORTED_LANGUAGES = ["zh", "zh-TW", "en", "es", "ko"] as const;
 type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 function isSupportedLanguage(lang: string | null): lang is SupportedLanguage {
@@ -64,6 +65,7 @@ export const i18nReady = (async () => {
       "zh-TW": { translation: zhTW },
       en: { translation: en },
       es: { translation: es },
+      ko: { translation: ko },
     },
     lng,
     // zh-TW is a partial locale, so it still falls back to Simplified
