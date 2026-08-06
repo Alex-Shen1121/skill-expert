@@ -75,10 +75,12 @@ const MAINSTREAM_AGENT_KEYS = new Set([
   "opencode",
   "hermes",
   "openclaw",
+  "workbuddy",
   "windsurf",
   "kiro",
   "antigravity",
   "amp",
+  "pi",
 ]);
 
 function compactHomePath(path: string) {
