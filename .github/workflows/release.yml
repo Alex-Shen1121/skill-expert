@@ -30,6 +30,11 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     name: Build (${{ matrix.label }})
+    # Apple's notary service can leave a submission "In Progress" indefinitely and
+    # `notarytool submit --wait` has no timeout of its own, so v1.29.0 burned the
+    # full 6-hour GitHub limit on both macOS legs. The slowest healthy build so far
+    # is Windows at ~17 minutes, so an hour caps a hang while leaving real headroom.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -196,7 +201,12 @@ jobs:
           tagName: v__VERSION__
           releaseName: 'Skills Manager v__VERSION__'
           releaseBody: ${{ steps.changelog.outputs.body }}
-          releaseDraft: false
+          # Publish only after every platform is verified. v1.29.0 shipped with
+          # Windows and Linux assets while both macOS legs were still notarizing,
+          # because assets go public the moment each leg finishes. tauri-action
+          # looks a draft up by listing releases, so concurrent matrix legs still
+          # converge on one draft rather than creating four.
+          releaseDraft: true
           prerelease: false
           updaterJsonKeepUniversal: true
           args: --target ${{ matrix.target }}
@@ -250,40 +260,87 @@ jobs:
       - name: Validate updater metadata and signatures
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          api_url="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
-          release_json=$(curl -fsSL \
+          # The release is still a draft at this point, and /releases/tags/{tag}
+          # returns 404 for drafts, so it has to be located by listing.
+          releases_json=$(curl -fsSL \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "$api_url")
+            "https://api.github.com/repos/${REPO}/releases?per_page=100")
+
+          release_json=$(echo "$releases_json" | jq --arg t "$TAG" '.[] | select(.tag_name == $t)')
+          if [ -z "$release_json" ]; then
+            echo "No release found for tag ${TAG}" >&2
+            exit 1
+          fi
 
           asset_names=$(echo "$release_json" | jq -r '.assets[]?.name')
+          echo "Assets on the draft release:"
+          echo "$asset_names" | sed 's/^/  /'
 
           if ! echo "$asset_names" | grep -qx 'latest.json'; then
-            echo "Missing updater metadata asset: latest.json"
+            echo "Missing updater metadata asset: latest.json" >&2
             exit 1
           fi
 
           if ! echo "$asset_names" | grep -q '\.sig'; then
-            echo "Missing updater signature assets (*.sig)"
+            echo "Missing updater signature assets (*.sig)" >&2
             exit 1
           fi
 
-          latest_url="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/latest.json"
-          curl -fsSL "$latest_url" >/tmp/latest.json
+          # Draft assets are not served from the public download host, so fetch
+          # latest.json through the authenticated asset endpoint.
+          asset_id=$(echo "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" -o /tmp/latest.json
 
-          if ! jq -e 'has("platforms") and (.platforms | has("windows-x86_64"))' /tmp/latest.json >/dev/null; then
-            echo "latest.json does not include windows-x86_64 updater entry"
-            cat /tmp/latest.json
-            exit 1
-          fi
+          # v1.29.0 published with no darwin entries at all because only Windows
+          # and Linux were asserted here, so every shipped platform is checked now.
+          fail=0
+          for platform in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
+            if ! jq -e --arg p "$platform" '.platforms[$p].signature and .platforms[$p].url' /tmp/latest.json >/dev/null; then
+              echo "latest.json is missing a signed updater entry for ${platform}" >&2
+              fail=1
+            fi
+          done
 
-          if ! jq -e '.platforms["windows-x86_64"].signature and .platforms["windows-x86_64"].url' /tmp/latest.json >/dev/null; then
-            echo "windows-x86_64 updater entry is missing signature/url"
-            cat /tmp/latest.json
+          # A macOS leg that dies during notarization still leaves the release
+          # looking plausible, so require its user-facing artifacts too.
+          for pattern in '\.dmg$' '\.app\.tar\.gz$'; do
+            if ! echo "$asset_names" | grep -qE "$pattern"; then
+              echo "Missing macOS asset matching ${pattern}" >&2
+              fail=1
+            fi
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "--- latest.json ---" >&2
+            cat /tmp/latest.json >&2
             exit 1
           fi
 
           echo "Updater assets validation passed"
+
+  publish-release:
+    needs: [build, verify-updater-assets]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    name: Publish release
+    steps:
+      # Every platform built, signed, notarized and verified by this point, so
+      # this is the step that actually makes the release visible to users.
+      - name: Publish the verified draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+          echo "Published ${{ github.ref_name }}"
