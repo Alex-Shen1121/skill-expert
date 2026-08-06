@@ -205,9 +205,9 @@ npm run cli:build
 
 ## 常见问题
 
-### macOS 首次启动被 Gatekeeper 拦截
+### macOS 首次启动被 Gatekeeper 拦截（v1.28.5 及之前）
 
-从 **v1.29.0** 起，发布的版本使用 Apple Developer ID 证书签名并经过 Apple 公证，Gatekeeper 会直接放行——不会有提示，也不需要在终端里敲命令。
+**v1.29.0** 起的版本使用 Apple Developer ID 证书签名并经过 Apple 公证，可以直接打开——不会有提示，也不需要在终端里敲命令。如果你还在用旧版本，升级即可解决。
 
 **v1.28.5 及之前的版本**发布于公证之前，会被 macOS 拦截：
 

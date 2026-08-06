@@ -247,9 +247,9 @@ npm run cli:build
 
 ## Troubleshooting
 
-### macOS: Gatekeeper blocks the app on first launch
+### macOS: Gatekeeper blocks the app on first launch (v1.28.5 and earlier)
 
-Starting with **v1.29.0**, releases are signed with an Apple Developer ID certificate and notarized by Apple, so Gatekeeper lets them open normally — no warning, no Terminal commands.
+Releases from **v1.29.0** onward are signed with an Apple Developer ID certificate and notarized by Apple, so they open normally — no warning, no Terminal commands. If you are on an older build, upgrading is the fix.
 
 Releases **up to and including v1.28.5** predate notarization, and macOS blocks them:
 
