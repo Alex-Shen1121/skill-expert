@@ -74,24 +74,6 @@ const CAN_INSTALL_IN_APP = IS_WINDOWS || IS_MACOS;
 
 const RESTART_TOAST_ID = "app-update-restart";
 
-const MAINSTREAM_AGENT_KEYS = new Set([
-  "claude_code",
-  "cursor",
-  "codex",
-  "grok",
-  "gemini_cli",
-  "github_copilot",
-  "opencode",
-  "hermes",
-  "openclaw",
-  "workbuddy",
-  "windsurf",
-  "kiro",
-  "antigravity",
-  "amp",
-  "pi",
-]);
-
 function compactHomePath(path: string) {
   return path
     .replace(/\/Users\/[^/]+/, "~")
@@ -798,12 +780,18 @@ export function Settings() {
   ] as const;
   const customTools = useMemo(() => tools.filter((tool) => tool.is_custom), [tools]);
   const builtInTools = useMemo(() => tools.filter((tool) => !tool.is_custom), [tools]);
-  const mainstreamTools = useMemo(
-    () => builtInTools.filter((tool) => MAINSTREAM_AGENT_KEYS.has(tool.key)),
+  // Grouped by what is actually on this machine rather than by a hand-kept
+  // "mainstream" list. A settings page reader cares about the agents they have,
+  // and that list stays correct without anyone re-curating it as products rise
+  // and fall. Both groups keep the backend's order, which is ranked by how
+  // widely used each agent is (see DEFAULT_PRIORITY_ORDER) and overridden by
+  // whatever the user has dragged.
+  const detectedTools = useMemo(
+    () => builtInTools.filter((tool) => tool.installed),
     [builtInTools]
   );
-  const secondaryTools = useMemo(
-    () => builtInTools.filter((tool) => !MAINSTREAM_AGENT_KEYS.has(tool.key)),
+  const undetectedTools = useMemo(
+    () => builtInTools.filter((tool) => !tool.installed),
     [builtInTools]
   );
 
@@ -1181,21 +1169,23 @@ export function Settings() {
           )}
 
           <div className="space-y-4">
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-[13px] font-medium text-secondary">{t("settings.builtInAgents")}</h3>
-                <span className="text-[12px] text-muted">{mainstreamTools.length}</span>
+            {detectedTools.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-[13px] font-medium text-secondary">{t("settings.detectedAgentsSection")}</h3>
+                  <span className="text-[12px] text-muted tabular-nums">{detectedTools.length}</span>
+                </div>
+                <AgentGroupDnd
+                  items={detectedTools}
+                  sensors={dragSensors}
+                  dragLabel={t("settings.dragToReorder")}
+                  onDragEnd={handleAgentDragEnd}
+                  renderAgentCard={renderAgentCard}
+                />
               </div>
-              <AgentGroupDnd
-                items={mainstreamTools}
-                sensors={dragSensors}
-                dragLabel={t("settings.dragToReorder")}
-                onDragEnd={handleAgentDragEnd}
-                renderAgentCard={renderAgentCard}
-              />
-            </div>
+            )}
 
-            {secondaryTools.length > 0 && (
+            {undetectedTools.length > 0 && (
               <div>
                 <button
                   type="button"
@@ -1203,11 +1193,11 @@ export function Settings() {
                   className="mb-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-secondary outline-none"
                 >
                   {showMoreAgents ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  {t("settings.moreAgentsSection", { count: secondaryTools.length })}
+                  {t("settings.otherAgentsSection", { count: undetectedTools.length })}
                 </button>
                 {showMoreAgents && (
                   <AgentGroupDnd
-                    items={secondaryTools}
+                    items={undetectedTools}
                     sensors={dragSensors}
                     dragLabel={t("settings.dragToReorder")}
                     onDragEnd={handleAgentDragEnd}

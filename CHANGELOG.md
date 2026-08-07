@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Release Overview
 - macOS can now install updates from inside the app, and every platform tells you when a new version exists. Updating stays a decision you make: nothing is ever downloaded or installed on its own.
+- The agent list in Settings leads with the agents actually found on your machine instead of a hand-kept "mainstream" list.
 
 ### User-facing
 - **In-app updates on macOS** — When an update is available, Settings offers **Install Update** instead of only a link to GitHub. This became possible once builds were signed with a Developer ID certificate and notarized, because the replacement bundle now carries a signature macOS keeps trusting. The **Download** link stays alongside it for anyone who prefers installing by hand. Linux still links to the release page: only the AppImage can be replaced in place, and a .deb or .rpm install is indistinguishable from it here.
@@ -17,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Restarting after an update is your call** — Once an update is installed, a notification offers **Restart Now** and waits. Nothing restarts on its own, so an update can never interrupt what you were doing.
 - **Updates work behind a proxy** — The installer now uses the proxy configured in Settings. Previously the version *check* honoured that proxy while the *download* did not, so anyone reaching GitHub through one was told a new version existed and then could not install it.
 - **A clear message instead of a failed update** — Updating from inside a mounted .dmg, or from a copy macOS is running in its quarantine sandbox, cannot work: the replaced app is written somewhere that gets discarded. The app now detects this and asks you to move it to Applications first, rather than downloading the update and failing at the end.
+- **The agent list groups by what you actually have** — Settings used to split agents into "Built-in" and "More Agents" by a hand-kept list, which had drifted: Pi and WorkBuddy sat up top while OpenHands, Cline, Goose and Continue — each far more widely used — were folded away. The split is now **Detected Agents** (found on this machine) and **Other Supported Agents**, so the top of the list is the agents you can actually sync to, and it stays accurate on its own as you install or remove them.
+- **The rest of the list is ordered by how widely used each agent is** — The collapsed section reads as a "what else could I install" list, so it is ranked rather than arbitrary. Your own drag-and-drop ordering still wins wherever you have set one.
 
 ### Developer & Governance
 - `restart_app` and `quit_app` share `teardown_before_exit`, so the exit-time local backup commit cannot be skipped by restarting instead of quitting — restarting outright would have silently dropped it.
@@ -25,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The macOS release job now unpacks the `.app.tar.gz` it produced and runs the full signature, hardened-runtime, staple and `spctl` assertions against the extracted bundle. That archive, not the `.app` or the `.dmg`, is what the updater unpacks over a running install, so it is the artifact whose signature decides whether an updated copy still launches. The assertions were factored into a shared shell function rather than duplicated.
 - The version check and the updater keep separate sources (GitHub Releases API and `latest.json`). Collapsing them onto the updater's `check()` would mean a missing platform entry or a failed updater request reports "you're on the latest version" and hides the download link too.
 - No `tauri-plugin-process` dependency: `AppHandle::restart` is in Tauri core, and the plugin only wraps it for IPC.
+- `MAINSTREAM_AGENT_KEYS` is gone. Grouping now reads `ToolInfo.installed`, which the backend already reported, so nobody has to re-curate a membership list as products rise and fall — the previous one had gone stale within days of being edited.
+- `DEFAULT_PRIORITY_ORDER` grew from 9 entries to a ranked head of 23, measured 2026-08-07 from GitHub stars for the open-source agents and market position for the closed-source ones. The rationale, the numbers and the caveat that stars overstate general-purpose assistants are recorded next to the list, so the next edit starts from evidence rather than impressions. Existing saved orders still take precedence; this only changes what a user who has never dragged sees.
 
 ## [1.29.0] - 2026-08-05
 
