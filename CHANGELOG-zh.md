@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.30.0] - 2026-08-07
 
 ### 发布概览
 - macOS 现在可以在应用内完成更新，各平台都会在有新版本时主动提醒。更新与否始终由你决定：不会自行下载，也不会自行安装。
