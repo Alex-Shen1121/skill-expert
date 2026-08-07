@@ -215,33 +215,61 @@ jobs:
         if: startsWith(matrix.platform, 'macos')
         run: |
           set -euo pipefail
-          APP_PATH="src-tauri/target/${{ matrix.target }}/release/bundle/macos/skills-manager.app"
-          if [ ! -d "$APP_PATH" ]; then
-            echo "Expected app bundle not found at $APP_PATH" >&2
+          verify_bundle() {
+            local label="$1" app="$2"
+            echo "=== Verifying $label: $app ==="
+            if [ ! -d "$app" ]; then
+              echo "Expected app bundle not found at $app" >&2
+              return 1
+            fi
+            codesign --verify --deep --strict --verbose=2 "$app"
+            # Capture once and match against the string: piping into `grep -q` lets
+            # grep exit first, and the SIGPIPE it sends codesign would surface as a
+            # spurious pipeline failure under `set -o pipefail`.
+            local sig_info
+            sig_info="$(codesign -dvvv "$app" 2>&1)"
+            grep -E 'Authority|Signature|Sealed Resources|Identifier|Timestamp' <<<"$sig_info"
+            # An unexpected fallback identity still yields a structurally valid
+            # signature, so assert the one Gatekeeper actually accepts.
+            grep -q 'Authority=Developer ID Application:' <<<"$sig_info" || {
+              echo "$label is not signed with a Developer ID Application certificate" >&2
+              return 1
+            }
+            # Notarization is rejected without the hardened runtime, so assert the flag
+            # rather than discovering it from a failed submission log.
+            grep -qE 'flags=[^)]*runtime' <<<"$sig_info" || {
+              echo "Hardened runtime is not enabled on $label" >&2
+              return 1
+            }
+            # The stapled ticket is what lets Gatekeeper approve a downloaded copy
+            # offline; spctl is the same check macOS performs on first launch.
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          }
+
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          verify_bundle "built bundle" "$BUNDLE_DIR/skills-manager.app"
+
+          # The .app.tar.gz — not the .app or the .dmg — is what the in-app
+          # updater downloads and unpacks over the running install, so it is the
+          # artifact whose signature and stapled ticket actually decide whether
+          # an updated copy still launches. Verifying only the build directory
+          # would not catch an archive that lost either one.
+          TAR_PATH="$(find "$BUNDLE_DIR" -maxdepth 1 -name '*.app.tar.gz' | head -1)"
+          if [ -z "$TAR_PATH" ]; then
+            echo "No updater archive (*.app.tar.gz) was produced" >&2
             exit 1
           fi
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          # Capture once and match against the string: piping into `grep -q` lets
-          # grep exit first, and the SIGPIPE it sends codesign would surface as a
-          # spurious pipeline failure under `set -o pipefail`.
-          sig_info="$(codesign -dvvv "$APP_PATH" 2>&1)"
-          grep -E 'Authority|Signature|Sealed Resources|Identifier|Timestamp' <<<"$sig_info"
-          # An unexpected fallback identity still yields a structurally valid
-          # signature, so assert the one Gatekeeper actually accepts.
-          grep -q 'Authority=Developer ID Application:' <<<"$sig_info" || {
-            echo "Bundle is not signed with a Developer ID Application certificate" >&2
+          EXTRACT_DIR="$(mktemp -d)"
+          tar -xzf "$TAR_PATH" -C "$EXTRACT_DIR"
+          EXTRACTED_APP="$(find "$EXTRACT_DIR" -maxdepth 1 -name '*.app' | head -1)"
+          if [ -z "$EXTRACTED_APP" ]; then
+            echo "No .app found inside $TAR_PATH" >&2
             exit 1
-          }
-          # Notarization is rejected without the hardened runtime, so assert the flag
-          # rather than discovering it from a failed submission log.
-          grep -qE 'flags=[^)]*runtime' <<<"$sig_info" || {
-            echo "Hardened runtime is not enabled on the bundle" >&2
-            exit 1
-          }
-          # The stapled ticket is what lets Gatekeeper approve a downloaded copy
-          # offline; spctl is the same check macOS runs on first launch.
-          xcrun stapler validate "$APP_PATH"
-          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          fi
+          verify_bundle "updater archive ($(basename "$TAR_PATH"))" "$EXTRACTED_APP"
+          rm -rf "$EXTRACT_DIR"
+
           # `|| true`: with pipefail a missing dmg directory would abort the step
           # with a bare exit 1 and no diagnostic.
           DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Release Overview
+- macOS can now install updates from inside the app, and every platform tells you when a new version exists. Updating stays a decision you make: nothing is ever downloaded or installed on its own.
+
+### User-facing
+- **In-app updates on macOS** — When an update is available, Settings offers **Install Update** instead of only a link to GitHub. This became possible once builds were signed with a Developer ID certificate and notarized, because the replacement bundle now carries a signature macOS keeps trusting. The **Download** link stays alongside it for anyone who prefers installing by hand. Linux still links to the release page: only the AppImage can be replaced in place, and a .deb or .rpm install is indistinguishable from it here.
+- **This change first pays off when updating _from_ this release** — Which buttons the update section shows is part of the app you already have installed, so v1.29.0 still sends macOS users to GitHub for this one upgrade. From this release onward, macOS updates happen in place.
+- **A new version now announces itself** — The app checks for a newer version shortly after launch and, if one exists, shows a notification and marks Settings in the sidebar. It only tells you; downloading and installing still require your click. There is no automatic app update, and none is planned. (The separate *Skill* Auto-Update setting is unchanged and still governs skills only.)
+- **Restarting after an update is your call** — Once an update is installed, a notification offers **Restart Now** and waits. Nothing restarts on its own, so an update can never interrupt what you were doing.
+- **Updates work behind a proxy** — The installer now uses the proxy configured in Settings. Previously the version *check* honoured that proxy while the *download* did not, so anyone reaching GitHub through one was told a new version existed and then could not install it.
+- **A clear message instead of a failed update** — Updating from inside a mounted .dmg, or from a copy macOS is running in its quarantine sandbox, cannot work: the replaced app is written somewhere that gets discarded. The app now detects this and asks you to move it to Applications first, rather than downloading the update and failing at the end.
+
+### Developer & Governance
+- `restart_app` and `quit_app` share `teardown_before_exit`, so the exit-time local backup commit cannot be skipped by restarting instead of quitting — restarting outright would have silently dropped it.
+- Restart goes through `AppHandle::request_restart` rather than `restart`. On the main thread the latter spawns the replacement process and exits without emitting `RunEvent::Exit`, and `tauri-plugin-single-instance` removes its socket only on that event. The old process normally exits before the new one can connect, but nothing enforces that ordering, and losing the race means the new instance sees a live singleton and exits — taking the app down instead of restarting it.
+- `update_install_blocker` reports only the two states the updater cannot recover from: a Gatekeeper-translocated copy, and an `EROFS` failure when probing the bundle's parent directory. A general writability test was rejected deliberately — a `/Applications` copy owned by another admin account is not writable by this process either, and there the updater's own privileged prompt succeeds.
+- The macOS release job now unpacks the `.app.tar.gz` it produced and runs the full signature, hardened-runtime, staple and `spctl` assertions against the extracted bundle. That archive, not the `.app` or the `.dmg`, is what the updater unpacks over a running install, so it is the artifact whose signature decides whether an updated copy still launches. The assertions were factored into a shared shell function rather than duplicated.
+- The version check and the updater keep separate sources (GitHub Releases API and `latest.json`). Collapsing them onto the updater's `check()` would mean a missing platform entry or a failed updater request reports "you're on the latest version" and hides the download link too.
+- No `tauri-plugin-process` dependency: `AppHandle::restart` is in Tauri core, and the plugin only wraps it for IPC.
+
 ## [1.29.0] - 2026-08-05
 
 ### Release Overview
