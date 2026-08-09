@@ -339,28 +339,32 @@ jobs:
           codesign --force --options runtime --timestamp \
             --sign "$APPLE_SIGNING_IDENTITY" "$CLI_PATH"
           codesign --verify --strict --verbose=2 "$CLI_PATH"
+          CLI_SIG_INFO="$(codesign -dvvv "$CLI_PATH" 2>&1)"
+          grep -E 'Authority|Identifier|Timestamp|flags=' <<<"$CLI_SIG_INFO"
+          grep -q 'Authority=Developer ID Application:' <<<"$CLI_SIG_INFO" || {
+            echo "CLI is not signed with a Developer ID Application certificate" >&2
+            exit 1
+          }
+          grep -qE 'flags=[^)]*runtime' <<<"$CLI_SIG_INFO" || {
+            echo "Hardened runtime is not enabled on the CLI" >&2
+            exit 1
+          }
           CLI_ARCHIVE="$RUNNER_TEMP/skills-manager-cli-${{ matrix.label }}.zip"
           ditto -c -k --keepParent "$CLI_PATH" "$CLI_ARCHIVE"
-          xcrun notarytool submit "$CLI_ARCHIVE" \
+          NOTARY_RESULT="$(xcrun notarytool submit "$CLI_ARCHIVE" \
             --key "$APPLE_API_KEY_PATH" \
             --key-id "$APPLE_API_KEY" \
             --issuer "$APPLE_API_ISSUER" \
-            --wait
-          # Standalone executables cannot carry a stapled ticket. Gatekeeper
-          # therefore checks Apple's online service, which can lag briefly after
-          # a successful notarization response. Retry that propagation window,
-          # but still fail the release if the ticket never becomes visible.
-          for attempt in {1..5}; do
-            if spctl --assess --type execute --verbose=4 "$CLI_PATH"; then
-              break
-            fi
-            if [ "$attempt" -eq 5 ]; then
-              echo "Gatekeeper did not accept the notarized CLI after 5 attempts" >&2
-              exit 1
-            fi
-            echo "Gatekeeper ticket not visible yet; retrying in 15 seconds (${attempt}/5)"
-            sleep 15
-          done
+            --wait --output-format json)"
+          printf '%s\n' "$NOTARY_RESULT"
+          jq -e '.status == "Accepted"' <<<"$NOTARY_RESULT" >/dev/null || {
+            echo "Apple did not accept the CLI notarization submission" >&2
+            exit 1
+          }
+          # A standalone executable cannot carry a stapled ticket, and
+          # `spctl --type execute` classifies a bare CLI as "not an app" even
+          # after notarization succeeds. The release gate is therefore the
+          # verified Developer ID signature plus Apple's explicit Accepted status.
 
       - name: Upload CLI binary to draft release
         if: startsWith(github.ref, 'refs/tags/')
