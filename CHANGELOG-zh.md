@@ -19,7 +19,7 @@
 ### 开发者与治理更新
 - Preset CRUD 与成员管理、标签修改、Agent 开关都抽出为 Tauri 命令和 CLI 共用的内部实现。桌面应用保留现有 active preset 切换行为，CLI 的组织类命令则不附带部署副作用。
 - 取消部署时按真实 `skill_targets` 记录选择和验证目标，因此 Agent 被禁用或移除后，残留部署仍可发现并清理。审计只写入已经验证且确实发生变化的组合；部分失败返回前也会保存其中的成功项。
-- Release workflow 会为四个平台 target 构建 Rust CLI，以不会冲突的平台文件名上传，签名并公证 macOS 可执行文件，并在缺少任何 CLI 或 updater 产物时拒绝发布 draft。`release:prepare` 现在会同步 Cargo package、lockfile 与应用版本。
+- Release workflow 会为四个平台 target 构建 Rust CLI，以不会冲突的平台文件名上传；独立 macOS CLI 的签名和公证会把 Developer ID 证书导入隔离的临时 keychain，并在缺少任何 CLI 或 updater 产物时拒绝发布 draft。`release:prepare` 现在会同步 Cargo package、lockfile 与应用版本。
 - 内置 `manage-skills` skill 和中英文 README 补齐 CLI 安装方式、状态模型、安全工作流，以及「禁用整个 Agent」「取消部署单个 skill」「取消部署 preset」三者的区别。
 
 ## [1.30.0] - 2026-08-07

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Developer & Governance
 - Preset CRUD and membership, tag mutation, and Agent toggles now expose shared internal implementations used by both Tauri commands and the CLI. The desktop app keeps its existing active-preset transitions while CLI organization commands remain side-effect-free.
 - Deployment selection and verification use actual `skill_targets` rows when removing files, so stale deployments remain discoverable after an Agent is disabled or removed. Audits are emitted only for verified pairs that really changed, including successful pairs before a partial-failure response.
-- The release workflow builds the Rust CLI for all four target triples, gives every asset a collision-free platform name, signs and notarizes macOS executables, and refuses to publish a draft missing any CLI or updater artifact. `release:prepare` now keeps Cargo package and lockfile versions aligned with the app version.
+- The release workflow builds the Rust CLI for all four target triples, gives every asset a collision-free platform name, imports the Developer ID certificate into an isolated temporary keychain for standalone macOS CLI signing and notarization, and refuses to publish a draft missing any CLI or updater artifact. `release:prepare` now keeps Cargo package and lockfile versions aligned with the app version.
 - The bundled `manage-skills` skill and both READMEs document the CLI installation paths, state model, safe workflows, and the difference between disabling an Agent, undeploying a skill, and undeploying a preset.
 
 ## [1.30.0] - 2026-08-07
