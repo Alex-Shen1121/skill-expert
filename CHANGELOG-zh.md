@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.31.0] - 2026-08-09
+
+### 发布概览
+- Skills Manager 现在提供面向 Agent 的完整 CLI：无需操作桌面界面，即可管理共享技能库、各 Agent 的真实部署、preset、标签和 Agent 可用状态。
+
+### 用户可见更新
+- **Claude Code、Codex 等 Agent 可以直接管理 Skills Manager** —— CLI 可列出和筛选技能、查看部署状态、批量部署或取消部署技能、启用或禁用 Agent，并创建、编辑、删除、查看、部署或取消部署 preset。标签操作补齐 set、rename 和带保护的 delete。
+- **Preset 部署改为可叠加** —— 多个 preset 可以同时部署。创建 preset 或修改成员只负责整理技能库，绝不会隐式改动 Agent 文件；不指定 Agent 的 `presets undeploy` 会按真实 target 记录在所有位置关闭该 preset，包括已禁用、未安装或已取消注册的自定义 Agent。
+- **自动化接口更安全、更适合机器读取** —— `--json` 返回稳定错误码，批量破坏性操作支持 `--dry-run`，preset 成员修改保持原子性；部署命令会核对数据库记录和文件系统状态后才报告成功。批量任务部分失败时，已经成功的组合仍会被准确记录。
+- **每次发布都附带独立 CLI** —— Release assets 新增 macOS arm64/x64、Windows x64、Linux x64 的 `skills-manager-cli`。macOS CLI 与桌面应用一样经过 Developer ID 签名、公证和 Gatekeeper 校验。
+
+### 开发者与治理更新
+- Preset CRUD 与成员管理、标签修改、Agent 开关都抽出为 Tauri 命令和 CLI 共用的内部实现。桌面应用保留现有 active preset 切换行为，CLI 的组织类命令则不附带部署副作用。
+- 取消部署时按真实 `skill_targets` 记录选择和验证目标，因此 Agent 被禁用或移除后，残留部署仍可发现并清理。审计只写入已经验证且确实发生变化的组合；部分失败返回前也会保存其中的成功项。
+- Release workflow 会为四个平台 target 构建 Rust CLI，以不会冲突的平台文件名上传，签名并公证 macOS 可执行文件，并在缺少任何 CLI 或 updater 产物时拒绝发布 draft。`release:prepare` 现在会同步 Cargo package、lockfile 与应用版本。
+- 内置 `manage-skills` skill 和中英文 README 补齐 CLI 安装方式、状态模型、安全工作流，以及「禁用整个 Agent」「取消部署单个 skill」「取消部署 preset」三者的区别。
+
 ## [1.30.0] - 2026-08-07
 
 ### 发布概览
