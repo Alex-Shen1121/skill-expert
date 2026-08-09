@@ -165,7 +165,7 @@ npm run cli -- skills show db
 npm run cli -- skills install ./my-skill                       # local path
 npm run cli -- skills install https://github.com/foo/bar.git   # git URL
 npm run cli -- skills install vercel-labs/agent-skills@react-best-practices  # skills.sh
-npm run cli -- skills install foo/bar --sync                   # add to active preset + sync to agents
+npm run cli -- skills deploy <ref> --agent claude_code --agent codex  # deploy to both agents
 
 # Update / check from upstream (git skills re-clone, local skills re-import source)
 npm run cli -- skills update --all
@@ -178,11 +178,15 @@ npm run cli -- skills search react --limit 5
 npm run cli -- skills remove <ref> --dry-run
 npm run cli -- skills remove <ref> --yes
 
-# Enable / disable skills by changing preset membership
+# Organize preset membership (does not change agent files)
 npm run cli -- presets add-skill <preset> <ref>
 npm run cli -- presets remove-skill <preset> <ref>
 
-# Sync the active preset out to enabled agents
+# Inspect or change actual per-agent deployments
+npm run cli -- skills status <ref>
+npm run cli -- skills undeploy <ref> --agent codex --dry-run
+
+# Legacy exclusive active-preset sync
 npm run cli -- skills sync --dry-run
 npm run cli -- skills sync --tool claude_code
 
@@ -192,12 +196,18 @@ npm run cli -- skills adopt ~/.claude/skills
 
 # Tag
 npm run cli -- skills tag add <ref> web frontend
+npm run cli -- skills tag set <ref> web frontend
+npm run cli -- skills tag rename frontend web
+npm run cli -- skills tag delete obsolete --dry-run
 npm run cli -- skills tag list
 
-# Presets
+# Presets (CRUD and membership are organization-only; deploy changes agent files)
 npm run cli -- presets list
-npm run cli -- presets preview Default
-npm run cli -- presets apply Default
+npm run cli -- presets create "Web Dev" --description "Frontend work"
+npm run cli -- presets update "Web Dev" --name Frontend
+npm run cli -- presets deploy Frontend --agent codex
+npm run cli -- presets undeploy Frontend --agent claude_code
+npm run cli -- presets status Frontend
 npm run cli -- presets add-skill <preset> <skill>
 npm run cli -- presets remove-skill <preset> <skill>
 
@@ -212,9 +222,9 @@ npm run cli -- git commit -m "chore: update skills"
 
 Available command groups:
 - `repo` — inspect or change the configured base directory
-- `tools` — list detected tool targets and paths
-- `skills` — manage skills in the central library (`list / show / install / update / check / remove / enable / disable / sync / search / adopt / tag / export`)
-- `presets` — list presets, preview / apply, add or remove skills from a preset
+- `agents` (`tools` alias) — list agents and globally enable or disable them
+- `skills` — manage the central library and real per-agent deployments (`deploy / undeploy / status`)
+- `presets` — create, update, delete, organize, deploy, undeploy, and inspect presets
 - `git` — operate on the git-backed `skills/` repository (`clone`, `pull`, `push`, `commit`, `versions`, `restore`)
 
 Extra flags:
@@ -237,9 +247,11 @@ npm run cli:install
 
 This drops the binary at `~/.cargo/bin/skills-manager-cli`. Re-run after pulling updates to refresh it.
 
+Official releases also publish standalone CLI binaries for macOS arm64/x64, Windows x64, and Linux x64. Download the matching `skills-manager-cli-*` asset, make it executable on macOS/Linux, and place it on PATH.
+
 #### Concurrent use with the desktop app
 
-The CLI and desktop app share the same SQLite database. SQLite serializes writes safely, but the running app does not auto-refresh its in-memory caches when the CLI mutates state — restart or trigger a manual refresh in the app after `presets apply`, `git pull`, or other CLI write operations.
+The CLI and desktop app share the same SQLite database and repository lock. The app's filesystem watcher normally refreshes after CLI metadata or deployment changes. If the app was suspended while a command ran, trigger one manual refresh.
 
 ### Build
 

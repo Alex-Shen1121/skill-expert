@@ -13,10 +13,10 @@ use crate::core::sync_engine;
 use crate::core::timing::should_log_first_or_slow;
 use crate::core::tool_adapters::{self, CustomToolDef, ToolCategory};
 use crate::core::tool_service::{
-    self, ToolInfo, get_custom_tool_paths, get_custom_tool_project_paths, get_custom_tools,
+    self, get_custom_tool_paths, get_custom_tool_project_paths, get_custom_tools,
     get_disabled_tools, get_tool_order, normalize_project_relative_skills_dir_input,
     normalize_skills_dir_input, set_custom_tool_paths, set_custom_tool_project_paths,
-    set_custom_tools, set_disabled_tools, set_tool_order,
+    set_custom_tools, set_disabled_tools, set_tool_order, ToolInfo,
 };
 
 #[derive(Debug, Serialize)]
@@ -106,25 +106,38 @@ pub async fn set_tool_enabled(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut disabled = get_disabled_tools(&store);
-        if enabled {
-            disabled.retain(|k| k != &key);
-            set_disabled_tools(&store, &disabled)?;
-            sync_active_scenario_to_tool(&store, &key);
-            Ok(())
-        } else {
-            if !disabled.contains(&key) {
-                disabled.push(key.clone());
-            }
-            unsync_all_for_tool(&store, &key);
-            set_disabled_tools(&store, &disabled)
-        }
+        set_tool_enabled_internal(&store, &key, enabled)
     })
     .await?;
     if result.is_ok() {
         refresh_tray_menu_best_effort(&app);
     }
     result
+}
+
+/// Shared GUI/CLI implementation for the global agent toggle.
+pub fn set_tool_enabled_internal(
+    store: &SkillStore,
+    key: &str,
+    enabled: bool,
+) -> Result<(), AppError> {
+    if tool_adapters::find_adapter_with_store(store, key).is_none() {
+        return Err(AppError::not_found(format!("Unknown agent: {key}")));
+    }
+
+    let mut disabled = get_disabled_tools(store);
+    if enabled {
+        disabled.retain(|item| item != key);
+        set_disabled_tools(store, &disabled)?;
+        sync_active_scenario_to_tool(store, key);
+        Ok(())
+    } else {
+        if !disabled.iter().any(|item| item == key) {
+            disabled.push(key.to_string());
+        }
+        unsync_all_for_tool(store, key);
+        set_disabled_tools(store, &disabled)
+    }
 }
 
 #[tauri::command]

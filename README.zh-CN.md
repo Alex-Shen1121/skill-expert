@@ -154,10 +154,15 @@ npm run cli -- repo status
 npm run cli -- skills list
 npm run cli -- skills show db
 
-# 用 shared core 预览或应用某个 scenario
-npm run cli -- scenarios list
-npm run cli -- scenarios preview Default
-npm run cli -- scenarios apply Default
+# 把中央库 skill 部署给具体 Agent
+npm run cli -- skills deploy db --agent claude_code --agent codex
+npm run cli -- skills status db
+
+# 管理和部署 Preset（CRUD/成员调整只整理数据，deploy 才修改 Agent 文件）
+npm run cli -- presets create "Web Dev" --description "前端开发"
+npm run cli -- presets add-skill "Web Dev" db
+npm run cli -- presets deploy "Web Dev" --agent codex
+npm run cli -- presets status "Web Dev"
 
 # 导出单个技能到其他 agent 工作目录
 npm run cli -- skills export db --dest ~/.claude/skills/db
@@ -170,9 +175,9 @@ npm run cli -- git commit -m "chore: update skills"
 
 可用命令分组：
 - `repo`：查看或修改当前 base directory
-- `tools`：列出已检测到的工具目标与路径
-- `skills`：列出、查看、导出技能
-- `scenarios`：列出 scenario、预览同步目标，或将某个 scenario 应用到默认工具路径
+- `agents`（兼容别名 `tools`）：列出 Agent，并全局启用或禁用 Agent
+- `skills`：管理中央库、标签，以及 skill 在各 Agent 中的真实部署
+- `presets`：创建、修改、删除、整理、部署或撤下 Preset
 - `git`：操作 git 管理的 `skills/` 仓库（`clone`、`pull`、`push`、`commit`、`versions`、`restore`）
 
 额外参数：
@@ -195,9 +200,11 @@ npm run cli:install
 
 二进制会装到 `~/.cargo/bin/skills-manager-cli`。代码更新后再跑一次即可刷新。
 
+正式 Release 也会提供 macOS arm64/x64、Windows x64、Linux x64 的独立 CLI 文件。下载对应的 `skills-manager-cli-*`，在 macOS/Linux 添加可执行权限后放入 PATH 即可。
+
 #### 与桌面应用并发使用
 
-CLI 和桌面应用共享同一个 SQLite 数据库。SQLite 会串行化写入，所以数据是安全的，但运行中的应用不会自动刷新它的内存缓存 —— 在 CLI 跑完 `scenarios apply`、`git pull` 等会改状态的命令后，重启应用或手动刷新一次。
+CLI 和桌面应用共享同一个 SQLite 数据库及仓库锁。CLI 修改 metadata 或 Agent 部署后，桌面应用通常会通过文件监听自动刷新；如果应用当时处于休眠状态，手动刷新一次即可。
 
 ### 构建
 

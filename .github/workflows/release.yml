@@ -81,6 +81,13 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
+      - name: Build CLI binary
+        run: >-
+          cargo build --release
+          --manifest-path src-tauri/Cargo.toml
+          --bin skills-manager-cli
+          --target ${{ matrix.target }}
+
       - name: Extract changelog for current version
         id: changelog
         shell: bash
@@ -279,6 +286,61 @@ jobs:
             xcrun stapler validate "$DMG_PATH" || echo "Note: .dmg itself is not stapled"
           fi
 
+      - name: Sign and notarize macOS CLI binary
+        if: startsWith(matrix.platform, 'macos')
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          CLI_PATH="src-tauri/target/${{ matrix.target }}/release/skills-manager-cli"
+          codesign --force --options runtime --timestamp \
+            --sign "$APPLE_SIGNING_IDENTITY" "$CLI_PATH"
+          codesign --verify --strict --verbose=2 "$CLI_PATH"
+          CLI_ARCHIVE="$RUNNER_TEMP/skills-manager-cli-${{ matrix.label }}.zip"
+          ditto -c -k --keepParent "$CLI_PATH" "$CLI_ARCHIVE"
+          xcrun notarytool submit "$CLI_ARCHIVE" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          # Standalone executables cannot carry a stapled ticket. Gatekeeper
+          # therefore checks Apple's online service, which can lag briefly after
+          # a successful notarization response. Retry that propagation window,
+          # but still fail the release if the ticket never becomes visible.
+          for attempt in {1..5}; do
+            if spctl --assess --type execute --verbose=4 "$CLI_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Gatekeeper did not accept the notarized CLI after 5 attempts" >&2
+              exit 1
+            fi
+            echo "Gatekeeper ticket not visible yet; retrying in 15 seconds (${attempt}/5)"
+            sleep 15
+          done
+
+      - name: Upload CLI binary to draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            CLI_PATH="src-tauri/target/${{ matrix.target }}/release/skills-manager-cli.exe"
+            CLI_ASSET="skills-manager-cli-${{ matrix.label }}.exe"
+          else
+            CLI_PATH="src-tauri/target/${{ matrix.target }}/release/skills-manager-cli"
+            CLI_ASSET="skills-manager-cli-${{ matrix.label }}"
+          fi
+          CLI_UPLOAD="$RUNNER_TEMP/$CLI_ASSET"
+          cp "$CLI_PATH" "$CLI_UPLOAD"
+          gh release upload "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            "$CLI_UPLOAD" --clobber
+
   verify-updater-assets:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -320,6 +382,18 @@ jobs:
             exit 1
           fi
 
+          fail=0
+          for cli_asset in \
+            skills-manager-cli-macOS-arm64 \
+            skills-manager-cli-macOS-x64 \
+            skills-manager-cli-Windows-x64.exe \
+            skills-manager-cli-Linux-x64; do
+            if ! echo "$asset_names" | grep -qx "$cli_asset"; then
+              echo "Missing CLI release asset: ${cli_asset}" >&2
+              fail=1
+            fi
+          done
+
           # Draft assets are not served from the public download host, so fetch
           # latest.json through the authenticated asset endpoint.
           asset_id=$(echo "$release_json" | jq -r '.assets[] | select(.name == "latest.json") | .id')
@@ -330,7 +404,6 @@ jobs:
 
           # v1.29.0 published with no darwin entries at all because only Windows
           # and Linux were asserted here, so every shipped platform is checked now.
-          fail=0
           for platform in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
             if ! jq -e --arg p "$platform" '.platforms[$p].signature and .platforms[$p].url' /tmp/latest.json >/dev/null; then
               echo "latest.json is missing a signed updater entry for ${platform}" >&2
