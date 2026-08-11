@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] - 2026-08-11
+
+### Release Overview
+- Deploying a skill can no longer delete a directory Skills Manager did not create. Every write to an Agent directory now has to prove the target is ours before replacing it, and anything it cannot vouch for is left untouched and reported.
+
+### User-facing
+- **Deployment refuses to overwrite content that is not ours (#363)** — A skill whose name collides with a directory you created yourself was silently deleted, and the operation reported success. Deployment now replaces only an absent target, a link already pointing at the skill, or a deployment the app has a record of. Anything else is left byte-for-byte intact and the reason is shown. Adopt the existing directory into the library, or move it aside, to continue.
+- **`skills export --dest` no longer wipes the destination** — Exporting to a path that already existed deleted it recursively; `--dest ~/Documents` left nothing but a `SKILL.md`. A non-empty destination is now refused, with `--force` to overwrite deliberately.
+- **Turning a skill off keeps content that replaced it** — Undeploy, preset switching, and the Agent toggle deleted whatever the app's records pointed at. If you had replaced a managed skill with your own directory, that directory is now preserved and reported instead of deleted.
+- **Failures explain themselves** — Adding skills from the library, or applying a preset, used to report only "N skills failed". The affected path, the reason, and what to do about it now appear in the message.
+- **Switching an already-deployed skill from symlink to copy mode works** — It previously failed every time with a spurious "infinite recursion" error.
+
+### Developer & Governance
+- `sync_engine::sync_skill` takes an explicit `ReplacePolicy` (`NoClobber` / `Recorded { mode }` / `UserConfirmed`), so all nine call sites must state what they are authorized to destroy. Removal is type-specific, closing the window where an object swapped in after the check could be recursively deleted.
+- Batch deployment preflights every pair before writing anything and pools ownership evidence per target path, so Agents sharing one skills directory deploy correctly while contradictory records refuse.
+- Ownership refusals are reported rather than thrown from `sync_desired_targets`; startup logs them and cannot be blocked from launching by a collision, while explicit user actions surface them as errors.
+- 17 regression tests covering the authorization table, startup behavior, shared skills directories, contradictory records, and preservation on undeploy.
+- Documentation: link the official site at skillsmanager.dev, and correct the supported agent count to 51.
 ## [1.31.0] - 2026-08-09
 
 ### Release Overview
