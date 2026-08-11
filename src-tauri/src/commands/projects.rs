@@ -997,13 +997,29 @@ pub async fn export_skill_to_project(
         }
 
         let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
+        // Two agents can resolve to the same project skills root, in which case
+        // the second pass would find the directory the first just wrote and
+        // refuse it. The artifact is already correct, so skip instead.
+        let mut written: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         for agent_key in &agent_keys {
             let (skills_root, _) = resolve_agent_skills_roots(&store, &project, agent_key)
                 .ok_or_else(|| AppError::not_found(format!("Unknown agent: {}", agent_key)))?;
             let target_dir = skills_root.join(&dir_name);
+            if !written.insert(target_dir.clone()) {
+                continue;
+            }
             std::fs::create_dir_all(&skills_root)?;
             let mode = sync_engine::sync_mode_for_tool(agent_key, configured_mode.as_deref());
-            sync_engine::sync_skill(&source, &target_dir, mode).map_err(AppError::io)?;
+            // NoClobber: the loop above already refused every pre-existing
+            // target, so nothing here should need replacing. Belt and braces —
+            // `exists()` misses dangling links and is racy against this write.
+            sync_engine::sync_skill(
+                &source,
+                &target_dir,
+                mode,
+                sync_engine::ReplacePolicy::NoClobber,
+            )
+            .map_err(AppError::io)?;
         }
 
         Ok(())
@@ -1065,7 +1081,17 @@ pub async fn update_project_skill_from_center(
         let source = PathBuf::from(&managed.central_path);
         let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
         let mode = sync_engine::sync_mode_for_tool(&agent, configured_mode.as_deref());
-        sync_engine::sync_skill(&source, &target_path, mode).map_err(AppError::io)?;
+        // UserConfirmed: this intentionally replaces an existing project copy
+        // the user chose to update, and project deployments never create
+        // `skill_targets` rows, so no record could vouch for it. The
+        // project_newer check above is the guard that makes this safe.
+        sync_engine::sync_skill(
+            &source,
+            &target_path,
+            mode,
+            sync_engine::ReplacePolicy::UserConfirmed,
+        )
+        .map_err(AppError::io)?;
         Ok(())
     })
     .await?

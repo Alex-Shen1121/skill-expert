@@ -152,7 +152,16 @@ pub async fn set_all_tools_enabled(
             set_disabled_tools(&store, &[])?;
             // Re-sync active scenario skills to all (now-enabled) installed tools
             if let Ok(Some(active_id)) = store.get_active_scenario_id() {
-                sync_scenario_skills(&store, &active_id).ok();
+                // Enabling the tools succeeded either way; a target we may not
+                // replace is reported, not fatal (#363).
+                match sync_scenario_skills(&store, &active_id) {
+                    Ok(refusals) => {
+                        for refusal in refusals {
+                            log::warn!("enable-all-tools sync skipped a target: {refusal}");
+                        }
+                    }
+                    Err(e) => log::warn!("enable-all-tools sync failed: {e}"),
+                }
             }
             Ok(())
         } else {

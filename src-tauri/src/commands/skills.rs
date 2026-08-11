@@ -2298,10 +2298,16 @@ pub fn resync_copy_targets(store: &SkillStore, skill_id: &str) -> Result<(), App
             continue;
         }
 
+        // Recorded: this walks existing rows, so each path is one we wrote.
+        // The row's mode is filtered to "copy" above, and sync_engine still
+        // refuses if what is on disk no longer matches that record.
         sync_engine::sync_skill(
             &source,
             Path::new(&target.target_path),
             sync_engine::SyncMode::Copy,
+            sync_engine::ReplacePolicy::Recorded {
+                mode: target.mode.as_str(),
+            },
         )
         .map_err(AppError::io)?;
 

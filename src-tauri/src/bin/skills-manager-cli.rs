@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use app_lib::commands::{presets as preset_cmd, skills as cmd, tools as tool_cmd};
 use app_lib::core::{
     app_state, audit_log::AuditDraft, central_repo, error::AppError, git_backup, git_fetcher,
@@ -98,6 +98,10 @@ enum SkillsCommand {
         reference: String,
         #[arg(long)]
         dest: PathBuf,
+        /// Overwrite the destination if it already exists. Without this, an
+        /// existing destination is left untouched and the command fails.
+        #[arg(long)]
+        force: bool,
     },
     Install {
         /// Ref: local path, git URL, or owner/repo[@skill] / owner/repo/skill
@@ -411,11 +415,16 @@ struct SkillDeploymentReport {
     pair_count: usize,
     changed_pairs: usize,
     skills: Vec<String>,
+    /// Paths left in place because they no longer match the deployment we
+    /// recorded — someone else's content now lives there (#363).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    preserved: Vec<String>,
 }
 
 struct DeploymentVerification {
     succeeded: std::collections::HashSet<(String, String)>,
     failures: Vec<String>,
+    preserved: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -464,6 +473,9 @@ struct PresetDeploymentReport {
     skill_count: usize,
     pair_count: usize,
     changed_pairs: usize,
+    /// See [`SkillDeploymentReport::preserved`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    preserved: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -786,8 +798,12 @@ fn run_skills(args: SkillsArgs, store: &SkillStore, json: bool) -> anyhow::Resul
             json,
         ),
         SkillsCommand::Show { reference } => print_json(&show_skill(store, &reference)?, json),
-        SkillsCommand::Export { reference, dest } => {
-            let result = export_skill(store, &reference, &dest)?;
+        SkillsCommand::Export {
+            reference,
+            dest,
+            force,
+        } => {
+            let result = export_skill(store, &reference, &dest, force)?;
             print_json(
                 &serde_json::json!({"ok": true, "destination": result}),
                 json,
@@ -1134,6 +1150,7 @@ fn run_skill_deployment(
         .collect();
     let changed_pairs = changed.len();
 
+    let mut preserved: Vec<String> = Vec::new();
     if !dry_run {
         scenario_service::apply_skills_to_tools(
             store,
@@ -1164,6 +1181,7 @@ fn run_skill_deployment(
                 }
             }
         }
+        preserved = verification.preserved.clone();
         if !verification.failures.is_empty() {
             bail!(
                 "deployment incomplete: {} pair(s) verified, {} verification issue(s): {}",
@@ -1183,6 +1201,7 @@ fn run_skill_deployment(
         pair_count,
         changed_pairs,
         skills: skills.into_iter().map(|skill| skill.name).collect(),
+        preserved,
     })
 }
 
@@ -1195,6 +1214,7 @@ fn verify_deployment_state(
 ) -> anyhow::Result<DeploymentVerification> {
     let current_targets = store.get_all_targets()?;
     let mut failures = Vec::new();
+    let mut preserved = Vec::new();
     let mut succeeded = std::collections::HashSet::new();
 
     for skill_id in skill_ids {
@@ -1238,9 +1258,24 @@ fn verify_deployment_state(
                 if !still_referenced {
                     match std::fs::symlink_metadata(&previous.target_path) {
                         Ok(_) => {
-                            pair_succeeded = false;
-                            failures
-                                .push(format!("{skill_id}@{agent_key}: target path still exists"));
+                            // A path that survived undeploy is a failure only
+                            // if it is still our deployment. If something else
+                            // took it over, keeping it was the correct call and
+                            // reporting it as a failure would train users to
+                            // ignore the warning (#363).
+                            let preserved_deliberately = !sync_engine::matches_recorded_deployment(
+                                Path::new(&previous.target_path),
+                                &previous.mode,
+                            )
+                            .unwrap_or(true);
+                            if preserved_deliberately {
+                                preserved.push(previous.target_path.clone());
+                            } else {
+                                pair_succeeded = false;
+                                failures.push(format!(
+                                    "{skill_id}@{agent_key}: target path still exists"
+                                ));
+                            }
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) => {
@@ -1261,16 +1296,41 @@ fn verify_deployment_state(
     Ok(DeploymentVerification {
         succeeded,
         failures,
+        preserved,
     })
 }
 
-fn export_skill(store: &SkillStore, reference: &str, dest: &Path) -> anyhow::Result<String> {
+fn export_skill(
+    store: &SkillStore,
+    reference: &str,
+    dest: &Path,
+    force: bool,
+) -> anyhow::Result<String> {
     let skill = resolve_skill(store, reference)?;
-    sync_engine::sync_skill(
-        Path::new(&skill.central_path),
-        dest,
-        sync_engine::SyncMode::Copy,
-    )?;
+    let source = PathBuf::from(&skill.central_path);
+
+    // `dest` is an arbitrary user-supplied path, so an unguarded export is a
+    // recursive delete of whatever they typed (#363) — `--dest ~/Documents`
+    // used to wipe it and leave a SKILL.md. Nothing at an export destination
+    // is ever "ours", so overwriting has to be asked for explicitly.
+    if !force {
+        let state = sync_engine::classify_target(dest, Some(&source))
+            .with_context(|| format!("Cannot inspect export destination {}", dest.display()))?;
+        if state != sync_engine::TargetState::Absent {
+            bail!(
+                "Export destination {} already exists; refusing to overwrite it. \
+                 Choose a path that does not exist, or pass --force to replace it.",
+                dest.display()
+            );
+        }
+    }
+
+    let policy = if force {
+        sync_engine::ReplacePolicy::UserConfirmed
+    } else {
+        sync_engine::ReplacePolicy::NoClobber
+    };
+    sync_engine::sync_skill(&source, dest, sync_engine::SyncMode::Copy, policy)?;
     Ok(dest.to_string_lossy().to_string())
 }
 
@@ -1840,9 +1900,13 @@ fn run_sync(
         let all_targets = scenario_service::collect_scenario_sync_targets(store, &preset.id)
             .map_err(map_app_err)?;
         let desired: Vec<_> = all_targets.into_iter().filter(|tg| tg.tool == t).collect();
-        scenario_service::sync_desired_targets(store, &desired).map_err(map_app_err)?;
+        let refusals =
+            scenario_service::sync_desired_targets(store, &desired).map_err(map_app_err)?;
+        scenario_service::refusals_to_error(refusals).map_err(map_app_err)?;
     } else {
-        scenario_service::apply_scenario_to_default(store, &preset.id).map_err(map_app_err)?;
+        let refusals =
+            scenario_service::apply_scenario_to_default(store, &preset.id).map_err(map_app_err)?;
+        scenario_service::refusals_to_error(refusals).map_err(map_app_err)?;
     }
 
     Ok(SyncReport {
@@ -2336,7 +2400,9 @@ fn run_presets(args: PresetArgs, store: &SkillStore, json: bool) -> anyhow::Resu
         }
         PresetCommand::Apply { reference } => {
             let preset = resolve_scenario(store, &reference)?;
-            scenario_service::apply_scenario_to_default(store, &preset.id).map_err(map_app_err)?;
+            let refusals = scenario_service::apply_scenario_to_default(store, &preset.id)
+                .map_err(map_app_err)?;
+            scenario_service::refusals_to_error(refusals).map_err(map_app_err)?;
             print_json(&current_preset(store)?, json);
         }
         PresetCommand::Deactivate { reference } => {
@@ -2348,8 +2414,11 @@ fn run_presets(args: PresetArgs, store: &SkillStore, json: bool) -> anyhow::Resu
             if is_active {
                 let next_active = replacement_preset_after_deactivate(store, &preset.id)?;
                 if let Some(next) = next_active.as_ref() {
-                    scenario_service::apply_scenario_to_default(store, &next.id)
-                        .map_err(map_app_err)?;
+                    for refusal in scenario_service::apply_scenario_to_default(store, &next.id)
+                        .map_err(map_app_err)?
+                    {
+                        eprintln!("warning: {refusal}");
+                    }
                 } else {
                     scenario_service::unsync_scenario_skills(store, &preset.id)
                         .map_err(map_app_err)?;
@@ -2362,8 +2431,13 @@ fn run_presets(args: PresetArgs, store: &SkillStore, json: bool) -> anyhow::Resu
                 // targets are restored.
                 scenario_service::unsync_scenario_skills(store, &preset.id).map_err(map_app_err)?;
                 if let Some(active_id) = active.as_deref() {
-                    scenario_service::sync_scenario_skills(store, active_id)
-                        .map_err(map_app_err)?;
+                    // The delete already happened; a refusal here must not fail
+                    // the command, only be reported.
+                    for refusal in scenario_service::sync_scenario_skills(store, active_id)
+                        .map_err(map_app_err)?
+                    {
+                        eprintln!("warning: {refusal}");
+                    }
                 }
             }
 
@@ -2647,6 +2721,7 @@ fn run_preset_deployment(
         .collect();
     let changed_pairs = changed.len();
 
+    let mut preserved: Vec<String> = Vec::new();
     if !dry_run {
         scenario_service::apply_skills_to_tools(
             store,
@@ -2685,6 +2760,7 @@ fn run_preset_deployment(
                 }
             }
         }
+        preserved = verification.preserved.clone();
         if !verification.failures.is_empty() {
             bail!(
                 "deployment incomplete: {} pair(s) verified, {} verification issue(s): {}",
@@ -2705,6 +2781,7 @@ fn run_preset_deployment(
         skill_count: skill_ids.len(),
         pair_count,
         changed_pairs,
+        preserved,
     })
 }
 

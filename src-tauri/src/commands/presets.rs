@@ -272,7 +272,11 @@ fn delete_preset_with_active_fallback_internal(
         let remaining = store.get_all_scenarios().map_err(AppError::db)?;
         if let Some(first) = remaining.first() {
             store.set_active_scenario(&first.id).map_err(AppError::db)?;
-            sync_scenario_skills(store, &first.id)?;
+            // The preset is already deleted and the fallback already active, so
+            // a refusal here cannot undo any of that — report it, don't fail.
+            for refusal in sync_scenario_skills(store, &first.id)? {
+                log::warn!("fallback preset sync skipped a target: {refusal}");
+            }
         }
     }
 
@@ -315,10 +319,14 @@ async fn apply_preset_to_default_impl(
         scenario_service::apply_scenario_to_default(&store, &id)
     })
     .await?;
-    if result.is_ok() {
-        refresh_tray_menu_best_effort(&app);
-    }
-    result
+    // Refresh even on failure. `apply_scenario_to_default` commits the active
+    // preset before syncing, and syncing now reports ownership refusals as an
+    // error (#363) — so an error here still means the preset switched and most
+    // skills deployed. Gating the refresh on success would leave the tray
+    // showing the old preset while the app is on the new one. Failures that
+    // happen before the switch make this a harmless no-op refresh.
+    refresh_tray_menu_best_effort(&app);
+    result.and_then(scenario_service::refusals_to_error)
 }
 
 #[tauri::command]
@@ -454,7 +462,10 @@ pub async fn reorder_preset_skills(
 
 // ── Internal helpers ──
 
-pub(crate) fn sync_scenario_skills(store: &SkillStore, scenario_id: &str) -> Result<(), AppError> {
+pub(crate) fn sync_scenario_skills(
+    store: &SkillStore,
+    scenario_id: &str,
+) -> Result<Vec<String>, AppError> {
     scenario_service::sync_scenario_skills(store, scenario_id)
 }
 
