@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] - 2026-08-12
+
+### Release Overview
+- A skill you wrote locally and later published to git can now be pointed at that repository without being reinstalled, so it starts receiving updates while keeping its tags, presets and deployments.
+
+### User-facing
+- **`skills set-source` re-points an installed skill at a git source in place** — Converting a local skill to a git-backed one previously had no safe path: `install` allocates `<name>-2` and leaves you with a duplicate, `remove` + `install` drops the skill id and with it the tags, preset membership and per-agent deployments, and the desktop app's relink is local-to-local only. The new command updates the skill in place, so everything keyed to its id survives and `update` works from then on.
+- **The re-point refuses to guess** — A `--subpath` that does not exist, is not a skill directory, or resolves outside the checkout is an error, never a silent fallback to scanning the whole repository. `--dry-run` reports what would change without needing `--force`, and content that differs from the library copy is only overwritten with `--force`.
+
+### Developer & Governance
+- `set_git_source_internal` reuses `update_skill_after_reinstall`, so the row is updated by id. The clone runs outside the repo lock and the row is re-read after locking, refusing to apply a decision made against a stale snapshot; identical content skips file work entirely rather than rewriting the central copy for a metadata-only change.
+- Strict subpath resolution is guarded by `path_guard::is_path_safe`, covering absolute paths, `..` traversal and symlinks escaping the checkout, with 7 unit tests.
+- CI: publishing a release now triggers a rebuild of skillsmanager.dev.
+- Documentation: `skills set-source` in both READMEs; demo screenshots refreshed for the 1.32 UI.
 ## [1.32.0] - 2026-08-11
 
 ### Release Overview

@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.33.0] - 2026-08-12
+
+### 发布概览
+- 本地写的技能后来发布到了 git，现在可以直接改指过去，不用重装：标签、preset 归属和已有部署全部保留，从此能正常收到更新。
+
+### 用户可见更新
+- **`skills set-source` 原地把已安装的技能改指向 git 源** —— 把本地技能转成 git 托管此前没有安全的做法：`install` 会另建 `<name>-2`，留下一个重复条目；`remove` + `install` 会丢掉技能 id，连带标签、preset 归属和各 Agent 的部署一起消失；桌面端的 relink 又只支持本地目录之间。新命令原地更新技能，所有挂在 id 上的东西都保留，之后 `update` 也能正常工作。
+- **改指源时不做猜测** —— `--subpath` 指向不存在的路径、不是技能目录、或解析到检出目录之外，一律报错，绝不静默回退成「扫描整个仓库找一个技能」。`--dry-run` 无需 `--force` 就能查看将要发生的变化；内容与库中副本不同时，只有显式 `--force` 才会覆盖。
+
+### 开发者与治理更新
+- `set_git_source_internal` 复用 `update_skill_after_reinstall`，按 id 更新数据行。克隆在仓库锁之外进行，拿到锁后重新读取数据行，拒绝执行基于陈旧快照做出的决定；内容一致时完全跳过文件操作，不会因为一次纯元数据改动就重写中心副本。
+- 严格的 subpath 解析由 `path_guard::is_path_safe` 兜底，覆盖绝对路径、`..` 上跳和指向检出目录之外的符号链接，配 7 个单元测试。
+- CI：发布 release 时自动触发 skillsmanager.dev 站点重建。
+- 文档：两份 README 补充 `skills set-source`；演示截图更新为 1.32 的界面。
 ## [1.32.0] - 2026-08-11
 
 ### 发布概览
