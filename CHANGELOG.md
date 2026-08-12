@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.1] - 2026-08-12
+
+### Release Overview
+- Security fix: a crafted git URL could make an install copy a directory from outside the cloned repository into your library. Update if you install skills from links other people share.
+
+### User-facing
+- **Installing from a git URL can no longer reach outside the repository** — The path part of a `…/tree/<branch>/<path>` URL was joined onto the clone without checking that it stayed inside it, so a URL whose path climbed far enough resolved to an arbitrary directory on your machine, which was then copied into the library and reported as a successful install. Because the library can be backed up to a git remote, content pulled in this way could also leave the machine. The same applies to a skills.sh shorthand whose `@` part contains a path. Both are now refused. This affected the desktop app and the CLI equally.
+- **A git URL pointing at a directory that does not exist is now an error** — It used to fall back to searching the whole repository, which for a repository that groups its skills installed the entire `skills/` container as a single entry. Installing `…/tree/main/artifacts-builder` from a repo whose real path is `skills/web-artifacts-builder` now says so instead of quietly installing 17 unrelated skills as one.
+- **Updates no longer substitute a different directory when a skill moves upstream** — If a skills.sh skill's recorded path was taken over by a container or an unrelated directory, an update copied that over your installed skill. The recorded path is now used only when it still holds a skill; otherwise the skill is looked up at its new home, as it already was when the path disappeared entirely.
+
+### Developer & Governance
+- `resolve_skill_dir` validates both the requested subpath and the directory finally resolved by `find_skill_dir` with `path_guard::is_path_safe`, covering the locator route as well: `parse_skillssh_shorthand` does not constrain the part after `@` to a single path segment, and `find_skill_dir` joins that id onto the checkout in three places.
+- 10 regression tests: `..`, absolute-path and symlink escapes with and without a locator; a missing path with no locator; locator recovery after an upstream move; a locator finding nothing (preserving the #278 assertions); and container enumeration for the preview/confirm install flow.
 ## [1.33.0] - 2026-08-12
 
 ### Release Overview
