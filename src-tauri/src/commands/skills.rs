@@ -3219,6 +3219,160 @@ mod tests {
             .exists());
     }
 
+    /// The whole point of the preflight: it must see the user's file in the
+    /// library *and* the one in an agent's deployed copy, and say which is
+    /// which — a bare filename does not tell anyone where to go and rescue it.
+    #[test]
+    fn the_preflight_covers_the_library_and_every_deployed_copy() {
+        let repo = test_repo();
+        let central = write_skill_dir("ppt-master");
+        fs::create_dir_all(central.join("templates")).unwrap();
+        fs::write(central.join("templates/mine.pptx"), "user work").unwrap();
+        repo.store
+            .insert_skill(&sample_skill("skill-1", "ppt-master", &central))
+            .unwrap();
+
+        // A copy-mode deployment the user has also written into.
+        let target_dir = repo._tmp.path().join("agent/ppt-master");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("SKILL.md"), "x").unwrap();
+        fs::write(target_dir.join("notes.md"), "notes in the agent copy").unwrap();
+        repo.store
+            .insert_target(&SkillTargetRecord {
+                id: "t1".to_string(),
+                skill_id: "skill-1".to_string(),
+                tool: "claude_code".to_string(),
+                target_path: target_dir.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: None,
+            })
+            .unwrap();
+
+        // The new version carries only SKILL.md.
+        let staged = repo._tmp.path().join("staged");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("SKILL.md"), "v2").unwrap();
+
+        let skill = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        let pending = pending_removals_for(&repo.store, &skill, Some(&staged)).unwrap();
+
+        let found: Vec<(String, String)> = pending
+            .iter()
+            .map(|p| (p.location.clone(), p.path.replace('\\', "/")))
+            .collect();
+        assert!(
+            found.contains(&(LIBRARY_LOCATION.to_string(), "templates/".to_string())),
+            "the library's own directory must be reported: {found:?}"
+        );
+        assert!(
+            found.contains(&("claude_code".to_string(), "notes.md".to_string())),
+            "the agent copy is torn down and rebuilt too: {found:?}"
+        );
+    }
+
+    /// With no content change nothing is swapped, so the library keeps what it
+    /// has — but the deployments are still rebuilt from it, which is its own way
+    /// to lose a file.
+    #[test]
+    fn a_metadata_only_update_still_checks_the_deployed_copies() {
+        let repo = test_repo();
+        let central = write_skill_dir("stable");
+        repo.store
+            .insert_skill(&sample_skill("skill-1", "stable", &central))
+            .unwrap();
+
+        let target_dir = repo._tmp.path().join("agent/stable");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("SKILL.md"), "x").unwrap();
+        fs::write(target_dir.join("mine.txt"), "only in the agent copy").unwrap();
+        repo.store
+            .insert_target(&SkillTargetRecord {
+                id: "t1".to_string(),
+                skill_id: "skill-1".to_string(),
+                tool: "cursor".to_string(),
+                target_path: target_dir.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: None,
+            })
+            .unwrap();
+
+        let skill = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        // `None` staged: the library is unchanged, and is itself the baseline.
+        let pending = pending_removals_for(&repo.store, &skill, None).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].location, "cursor");
+        assert_eq!(pending[0].path, "mine.txt");
+    }
+
+    /// Symlink-mode deployments are not copied over, so they are not at risk and
+    /// must not generate noise.
+    #[test]
+    fn symlink_deployments_are_not_reported() {
+        let repo = test_repo();
+        let central = write_skill_dir("linked");
+        repo.store
+            .insert_skill(&sample_skill("skill-1", "linked", &central))
+            .unwrap();
+
+        let target_dir = repo._tmp.path().join("agent/linked");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(target_dir.join("whatever.md"), "x").unwrap();
+        repo.store
+            .insert_target(&SkillTargetRecord {
+                id: "t1".to_string(),
+                skill_id: "skill-1".to_string(),
+                tool: "grok".to_string(),
+                target_path: target_dir.to_string_lossy().to_string(),
+                mode: "symlink".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: None,
+            })
+            .unwrap();
+
+        let skill = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert!(pending_removals_for(&repo.store, &skill, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    /// An approval answers one exact question: this revision, this list.
+    #[test]
+    fn an_approval_does_not_carry_to_a_different_revision_or_list() {
+        let a = vec![PendingRemoval {
+            location: LIBRARY_LOCATION.to_string(),
+            path: "templates/mine.pptx".to_string(),
+        }];
+        let mut b = a.clone();
+        b.push(PendingRemoval {
+            location: LIBRARY_LOCATION.to_string(),
+            path: "templates/another.pptx".to_string(),
+        });
+
+        assert_eq!(
+            removal_approval_token("rev1", &a),
+            removal_approval_token("rev1", &a),
+            "the same question must produce the same token"
+        );
+        assert_ne!(
+            removal_approval_token("rev1", &a),
+            removal_approval_token("rev2", &a),
+            "upstream moved on"
+        );
+        assert_ne!(
+            removal_approval_token("rev1", &a),
+            removal_approval_token("rev1", &b),
+            "the skill wrote another file while the dialog was open"
+        );
+    }
+
     fn write_skill_at(root: &Path, rel: &str) -> PathBuf {
         let dir = root.join(rel);
         fs::create_dir_all(&dir).unwrap();
