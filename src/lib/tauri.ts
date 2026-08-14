@@ -355,10 +355,9 @@ export interface ReimportSkillResult {
   skill: ManagedSkill;
   /** Non-empty means nothing was changed — see UpdateSkillResult. */
   pending_removals: PendingRemoval[];
+  /** Approves exactly `pending_removals` — see UpdateSkillResult. */
+  removal_approval: string | null;
 }
-
-/** Approval sentinel for a re-import, which has no revision to bind to. */
-export const REIMPORT_APPROVAL = "reimport";
 
 export const reimportLocalSkill = (skillId: string, approvedRemovals?: string | null) =>
   invoke<ReimportSkillResult>("reimport_local_skill", {

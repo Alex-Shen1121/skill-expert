@@ -759,7 +759,7 @@ export function MySkills() {
           setPendingRemoval({
             skill,
             removals: result.pending_removals,
-            approval: api.REIMPORT_APPROVAL,
+            approval: result.removal_approval,
           });
           return;
         }

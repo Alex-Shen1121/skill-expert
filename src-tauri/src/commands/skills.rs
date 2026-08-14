@@ -41,10 +41,9 @@ pub struct UpdateSkillResult {
     pub removal_approval: Option<String>,
 }
 
-/// Approval sentinel for a re-import, which has no revision to bind to. The
-/// removals are recomputed on the approving call, so a file that appeared in the
-/// meantime still stops it.
-pub const REIMPORT_APPROVAL: &str = "reimport";
+/// Stands in for a revision when binding a re-import's approval: there is no
+/// remote to move on, but the removal set still has to be bound.
+const REIMPORT_APPROVAL_DOMAIN: &str = "reimport";
 
 /// Result of re-importing a local skill from its source path.
 #[derive(Debug, Serialize)]
@@ -52,6 +51,8 @@ pub struct ReimportSkillResult {
     pub skill: ManagedSkillDto,
     /// Non-empty means **nothing was changed** — see [`UpdateSkillResult`].
     pub pending_removals: Vec<PendingRemoval>,
+    /// Approves exactly `pending_removals` — see [`UpdateSkillResult`].
+    pub removal_approval: Option<String>,
 }
 
 /// Where a path about to be removed lives.
@@ -806,6 +807,17 @@ fn log_update_outcome(
 ) {
     let mut draft = AuditDraft::new("update").detail(source_label);
     match outcome {
+        Ok(result) if !result.pending_removals.is_empty() => {
+            // Held back, not applied. Recording it as a successful "unchanged"
+            // would make the audit trail disagree with what actually happened.
+            draft = draft
+                .skill(result.skill.id.clone(), result.skill.name.clone())
+                .detail(format!(
+                    "{source_label}; held back — would remove {} path(s)",
+                    result.pending_removals.len()
+                ))
+                .ok();
+        }
         Ok(result) => {
             draft = draft
                 .skill(result.skill.id.clone(), result.skill.name.clone())
@@ -836,6 +848,15 @@ fn log_reimport_outcome(
 ) {
     let mut draft = AuditDraft::new("update").detail("local");
     match outcome {
+        Ok(result) if !result.pending_removals.is_empty() => {
+            draft = draft
+                .skill(result.skill.id.clone(), result.skill.name.clone())
+                .detail(format!(
+                    "local; held back — would remove {} path(s)",
+                    result.pending_removals.len()
+                ))
+                .ok();
+        }
         Ok(result) => {
             draft = draft
                 .skill(result.skill.id.clone(), result.skill.name.clone())
@@ -1892,9 +1913,13 @@ pub fn update_git_skill_internal(
 
         let pending = pending_removals_for(store, &skill, install_result.is_some().then_some(staged_path.as_path()))?;
 
-        // A confirmation answers one exact question. If the remote moved on, or
-        // the skill wrote something new while the dialog was open, the list the
-        // user agreed to is not the list about to be deleted.
+        // A confirmation answers one exact question: this revision, this list.
+        // It closes the window while the dialog is open — a push, or a file the
+        // skill wrote in the meantime, re-asks. It cannot close the window
+        // between this scan and the removal itself: the repo lock holds off
+        // Skills Manager, not the agent processes writing into these very
+        // directories. Narrowing that further needs the directories frozen
+        // before the scan, not another scan.
         let approval = removal_approval_token(&remote_revision, &pending);
         if !pending.is_empty() && approved_removals != Some(approval.as_str()) {
             // Declining is not a failure: nothing was touched and the update is
@@ -1914,8 +1939,10 @@ pub fn update_git_skill_internal(
         }
 
         if let Some(install_result) = install_result {
-            staged_guard.release();
             swap_skill_directory(&staged_path, Path::new(&skill.central_path))?;
+            // Only now is it the library's. Releasing before the swap left the
+            // staged directory behind whenever its first rename failed.
+            staged_guard.release();
 
             store
                 .update_skill_source_metadata(
@@ -2237,10 +2264,9 @@ pub fn set_git_source_internal(
 
 /// Re-import a local skill from its recorded source path.
 ///
-/// `approved_removals` mirrors the git path: without it, a re-import that would
-/// take away files the source does not have stops and reports them. There is no
-/// revision to bind an approval to here, so the token is a fixed sentinel and
-/// the list is recomputed and re-checked on the approving call.
+/// `approved_removals` mirrors the git path: without it — or with one that no
+/// longer matches the recomputed list — a re-import that would take away files
+/// the source does not have stops and reports them.
 pub fn reimport_local_skill_internal(
     store: &SkillStore,
     skill_id: &str,
@@ -2278,7 +2304,7 @@ pub fn reimport_local_skill_internal(
         .update_skill_update_status(skill_id, "updating")
         .map_err(AppError::db)?;
 
-    let result = (|| -> Result<Vec<PendingRemoval>, AppError> {
+    let result = (|| -> Result<(Vec<PendingRemoval>, Option<String>), AppError> {
         let _lock = RepoLock::acquire_foreground("reimport local skill").map_err(AppError::db)?;
         let staged_path = staged_path_for(&skill.central_path);
         let install_result =
@@ -2294,15 +2320,21 @@ pub fn reimport_local_skill_internal(
         // library since — and for a local skill the "update" button runs this,
         // so leaving it uncovered would guard one path and not its twin.
         let pending = pending_removals_for(store, &skill, Some(&staged_path))?;
-        if !pending.is_empty() && approved_removals != Some(REIMPORT_APPROVAL) {
+        // Bound to the set itself, not to a constant. A constant would match on
+        // the approving call no matter what the recomputed list said, so a file
+        // written while the dialog was open would be deleted having never been
+        // shown — which is the whole failure this is here to prevent.
+        let approval = removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &pending);
+        if !pending.is_empty() && approved_removals != Some(approval.as_str()) {
             store
                 .update_skill_check_state(&skill.id, None, "local_only", None)
                 .map_err(AppError::db)?;
-            return Ok(pending);
+            return Ok((pending, Some(approval)));
         }
 
-        staged_guard.release();
         swap_skill_directory(&staged_path, Path::new(&skill.central_path))?;
+        // Only now is it the library's; before this the guard still owns it.
+        staged_guard.release();
         store
             .update_skill_after_install(
                 &skill.id,
@@ -2316,13 +2348,14 @@ pub fn reimport_local_skill_internal(
             .map_err(AppError::db)?;
         resync_copy_targets(store, &skill.id)?;
         sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
-        Ok(Vec::new())
+        Ok((Vec::new(), None))
     })();
 
     match result {
-        Ok(pending_removals) => Ok(ReimportSkillResult {
+        Ok((pending_removals, removal_approval)) => Ok(ReimportSkillResult {
             skill: managed_skill_by_id(store, skill_id)?,
             pending_removals,
+            removal_approval,
         }),
         Err(e) => {
             let _ = store.update_skill_check_state(skill_id, None, "error", Some(&e.message));
@@ -3370,6 +3403,28 @@ mod tests {
             removal_approval_token("rev1", &a),
             removal_approval_token("rev1", &b),
             "the skill wrote another file while the dialog was open"
+        );
+    }
+
+    /// A re-import's approval first bound to a constant, so the approving call
+    /// matched no matter what the recomputed list said — a file written while
+    /// the dialog was open was deleted having never been shown.
+    #[test]
+    fn a_reimport_approval_is_bound_to_its_own_list() {
+        let one = vec![PendingRemoval {
+            location: LIBRARY_LOCATION.to_string(),
+            path: "mine.pptx".to_string(),
+        }];
+        let mut two = one.clone();
+        two.push(PendingRemoval {
+            location: LIBRARY_LOCATION.to_string(),
+            path: "written-while-the-dialog-was-open.pptx".to_string(),
+        });
+
+        assert_ne!(
+            removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &one),
+            removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &two),
+            "approving one list must not approve a longer one"
         );
     }
 
