@@ -675,6 +675,9 @@ export function MySkills() {
     skill: ManagedSkill;
     removals: api.PendingRemoval[];
     approval: string | null;
+    /** Set when the pending replacement is a relink, so confirming re-uses the
+     *  directory the user already chose instead of asking for it again. */
+    relinkSource?: string;
   } | null>(null);
 
   const handleUpdateAvailableSkills = async () => {
@@ -791,13 +794,31 @@ export function MySkills() {
     }
   };
 
-  const handleRelinkSource = async (skill: ManagedSkill) => {
-    const selected = await dialogOpen({ directory: true, multiple: false });
+  const handleRelinkSource = async (
+    skill: ManagedSkill,
+    presetSource?: string,
+    approvedRemovals?: string,
+  ) => {
+    const selected =
+      presetSource ?? (await dialogOpen({ directory: true, multiple: false }));
     if (!selected || Array.isArray(selected)) return;
 
     setUpdatingSkillId(skill.id);
     try {
-      await api.relinkLocalSkillSource(skill.id, selected);
+      const result = await api.relinkLocalSkillSource(
+        skill.id,
+        selected,
+        approvedRemovals,
+      );
+      if (result.pending_removals.length > 0) {
+        setPendingRemoval({
+          skill,
+          removals: result.pending_removals,
+          approval: result.removal_approval,
+          relinkSource: selected,
+        });
+        return;
+      }
       toast.success(t("mySkills.updateActions.relinked"));
       await refreshManagedSkills();
     } catch (error: unknown) {
@@ -1773,8 +1794,14 @@ export function MySkills() {
         onConfirm={async () => {
           const target = pendingRemoval?.skill;
           const approval = pendingRemoval?.approval ?? undefined;
+          const relinkSource = pendingRemoval?.relinkSource;
           setPendingRemoval(null);
-          if (target) await handleRefreshSkill(target, approval);
+          if (!target) return;
+          if (relinkSource) {
+            await handleRelinkSource(target, relinkSource, approval);
+          } else {
+            await handleRefreshSkill(target, approval);
+          }
         }}
       />
       <ConfirmDialog

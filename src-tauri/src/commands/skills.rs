@@ -1634,11 +1634,17 @@ pub async fn batch_update_skills(
 }
 
 #[tauri::command]
+/// Re-point a local skill at a different source directory.
+///
+/// `approved_removals` behaves as on the update paths: choosing a new source is
+/// not a statement about discarding what the library has accumulated, so a
+/// replacement that would take files away stops and reports them first.
 pub async fn relink_local_skill_source(
     skill_id: String,
     source_path: String,
+    approved_removals: Option<String>,
     store: State<'_, Arc<SkillStore>>,
-) -> Result<ManagedSkillDto, AppError> {
+) -> Result<ReimportSkillResult, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let skill = store
@@ -1666,7 +1672,7 @@ pub async fn relink_local_skill_source(
             .update_skill_update_status(&skill_id, "updating")
             .map_err(AppError::db)?;
 
-        let result = (|| -> Result<(), AppError> {
+        let result = (|| -> Result<(Vec<PendingRemoval>, Option<String>), AppError> {
             let _lock = RepoLock::acquire_foreground("relink local skill").map_err(AppError::db)?;
             let staged_path = staged_path_for(&skill.central_path);
             let install_result = installer::install_from_local_to_destination(
@@ -1674,8 +1680,26 @@ pub async fn relink_local_skill_source(
                 Some(&skill.name),
                 &staged_path,
             )
+            .inspect_err(|_| {
+                let _ = remove_path_if_exists(&staged_path);
+            })
             .map_err(AppError::io)?;
+            let staged_guard = StagedPathGuard::new(&staged_path, true);
+
+            // Picking a new source says which source to follow. It does not say
+            // to discard whatever has accumulated in the library since — same
+            // replacement, same guard.
+            let pending = pending_removals_for(&store, &skill, Some(&staged_path))?;
+            let approval = removal_approval_token(&source_path, &pending);
+            if !pending.is_empty() && approved_removals.as_deref() != Some(approval.as_str()) {
+                store
+                    .update_skill_check_state(&skill.id, None, "local_only", None)
+                    .map_err(AppError::db)?;
+                return Ok((pending, Some(approval)));
+            }
+
             swap_skill_directory(&staged_path, Path::new(&skill.central_path))?;
+            staged_guard.release();
             store
                 .update_skill_after_reinstall(
                     &skill.id,
@@ -1694,11 +1718,15 @@ pub async fn relink_local_skill_source(
                 .map_err(AppError::db)?;
             resync_copy_targets(&store, &skill.id)?;
             sync_metadata::write_all_from_db_unlocked(&store).map_err(AppError::db)?;
-            Ok(())
+            Ok((Vec::new(), None))
         })();
 
         match result {
-            Ok(()) => managed_skill_by_id(&store, &skill_id),
+            Ok((pending_removals, removal_approval)) => Ok(ReimportSkillResult {
+                skill: managed_skill_by_id(&store, &skill_id)?,
+                pending_removals,
+                removal_approval,
+            }),
             Err(e) => {
                 let _ = store.update_skill_check_state(&skill_id, None, "error", Some(&e.message));
                 Err(e)

@@ -365,8 +365,16 @@ export const reimportLocalSkill = (skillId: string, approvedRemovals?: string | 
     approvedRemovals: approvedRemovals ?? null,
   });
 
-export const relinkLocalSkillSource = (skillId: string, sourcePath: string) =>
-  invoke<ManagedSkill>("relink_local_skill_source", { skillId, sourcePath });
+export const relinkLocalSkillSource = (
+  skillId: string,
+  sourcePath: string,
+  approvedRemovals?: string | null,
+) =>
+  invoke<ReimportSkillResult>("relink_local_skill_source", {
+    skillId,
+    sourcePath,
+    approvedRemovals: approvedRemovals ?? null,
+  });
 
 export const detachLocalSkillSource = (skillId: string) =>
   invoke<ManagedSkill>("detach_local_skill_source", { skillId });
