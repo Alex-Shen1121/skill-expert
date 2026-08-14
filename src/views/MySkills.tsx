@@ -754,7 +754,15 @@ export function MySkills() {
     setUpdatingSkillId(skill.id);
     try {
       if (skill.source_type === "local" || skill.source_type === "import") {
-        await api.reimportLocalSkill(skill.id);
+        const result = await api.reimportLocalSkill(skill.id, approvedRemovals);
+        if (result.pending_removals.length > 0) {
+          setPendingRemoval({
+            skill,
+            removals: result.pending_removals,
+            approval: api.REIMPORT_APPROVAL,
+          });
+          return;
+        }
         toast.success(t("mySkills.updateActions.reimported"));
       } else {
         const result = await api.updateSkill(skill.id, approvedRemovals);

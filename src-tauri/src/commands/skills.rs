@@ -41,6 +41,19 @@ pub struct UpdateSkillResult {
     pub removal_approval: Option<String>,
 }
 
+/// Approval sentinel for a re-import, which has no revision to bind to. The
+/// removals are recomputed on the approving call, so a file that appeared in the
+/// meantime still stops it.
+pub const REIMPORT_APPROVAL: &str = "reimport";
+
+/// Result of re-importing a local skill from its source path.
+#[derive(Debug, Serialize)]
+pub struct ReimportSkillResult {
+    pub skill: ManagedSkillDto,
+    /// Non-empty means **nothing was changed** — see [`UpdateSkillResult`].
+    pub pending_removals: Vec<PendingRemoval>,
+}
+
 /// Where a path about to be removed lives.
 #[derive(Debug, Clone, Serialize)]
 pub struct PendingRemoval {
@@ -63,6 +76,54 @@ enum UpdateOutcome {
         pending: Vec<PendingRemoval>,
         approval: String,
     },
+}
+
+/// Everything a replacement would take away — from the library and from every
+/// copy-mode deployment of this skill.
+///
+/// `staged` is the tree about to be installed, or `None` when the library keeps
+/// what it already has. Even then the deployments are torn down and rebuilt from
+/// it, which loses files just as effectively, so they are always checked.
+///
+/// Compared against the *staged* tree rather than the source it came from: the
+/// installer drops `.git` and every symlink, so anything else would report a
+/// path as surviving that the swap goes on to remove.
+pub(crate) fn pending_removals_for(
+    store: &SkillStore,
+    skill: &SkillRecord,
+    staged: Option<&Path>,
+) -> Result<Vec<PendingRemoval>, AppError> {
+    let library = Path::new(&skill.central_path);
+    let mut pending = Vec::new();
+
+    if let Some(staged) = staged {
+        for path in crate::core::removals::removed_paths(library, staged).map_err(AppError::io)? {
+            pending.push(PendingRemoval {
+                location: LIBRARY_LOCATION.to_string(),
+                path,
+            });
+        }
+    }
+
+    let effective_new = staged.unwrap_or(library);
+    for target in store
+        .get_targets_for_skill(&skill.id)
+        .map_err(AppError::db)?
+    {
+        if target.mode != "copy" {
+            continue;
+        }
+        for path in
+            crate::core::removals::removed_paths(Path::new(&target.target_path), effective_new)
+                .map_err(AppError::io)?
+        {
+            pending.push(PendingRemoval {
+                location: target.tool.clone(),
+                path,
+            });
+        }
+    }
+    Ok(pending)
 }
 
 /// A stable name for one exact set of removals at one exact revision.
@@ -771,12 +832,14 @@ fn log_update_outcome(
 fn log_reimport_outcome(
     store: &SkillStore,
     skill_id: &str,
-    outcome: Result<&ManagedSkillDto, &AppError>,
+    outcome: Result<&ReimportSkillResult, &AppError>,
 ) {
     let mut draft = AuditDraft::new("update").detail("local");
     match outcome {
-        Ok(dto) => {
-            draft = draft.skill(dto.id.clone(), dto.name.clone()).ok();
+        Ok(result) => {
+            draft = draft
+                .skill(result.skill.id.clone(), result.skill.name.clone())
+                .ok();
         }
         Err(e) => {
             let name = store
@@ -1467,11 +1530,13 @@ pub async fn update_skill(
 #[tauri::command]
 pub async fn reimport_local_skill(
     skill_id: String,
+    approved_removals: Option<String>,
     store: State<'_, Arc<SkillStore>>,
-) -> Result<ManagedSkillDto, AppError> {
+) -> Result<ReimportSkillResult, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let outcome = reimport_local_skill_internal(&store, &skill_id);
+        let outcome =
+            reimport_local_skill_internal(&store, &skill_id, approved_removals.as_deref());
         log_reimport_outcome(&store, &skill_id, outcome.as_ref());
         outcome
     })
@@ -1523,9 +1588,12 @@ pub async fn batch_update_skills(
                     }
                 }
                 "local" | "import" => {
-                    let outcome = reimport_local_skill_internal(&store, &skill_id);
+                    let outcome = reimport_local_skill_internal(&store, &skill_id, None);
                     log_reimport_outcome(&store, &skill_id, outcome.as_ref());
                     match outcome {
+                        Ok(result) if !result.pending_removals.is_empty() => {
+                            held_back.push(skill.name.clone());
+                        }
                         Ok(_) => refreshed += 1,
                         Err(err) => failed.push(format!("{}: {}", skill.name, err.message)),
                     }
@@ -1822,47 +1890,7 @@ pub fn update_git_skill_internal(
         };
         let staged_guard = StagedPathGuard::new(&staged_path, install_result.is_some());
 
-        // What the library will hold afterwards. With no content change nothing
-        // is swapped, so it keeps what it has — but the copy targets are still
-        // torn down and rebuilt from it, which is its own way to lose files.
-        let effective_new: &Path = if install_result.is_some() {
-            &staged_path
-        } else {
-            Path::new(&skill.central_path)
-        };
-
-        let mut pending = Vec::new();
-        if install_result.is_some() {
-            for path in
-                crate::core::removals::removed_paths(Path::new(&skill.central_path), &staged_path)
-                    .map_err(AppError::io)?
-            {
-                pending.push(PendingRemoval {
-                    location: LIBRARY_LOCATION.to_string(),
-                    path,
-                });
-            }
-        }
-        // `resync_copy_targets` deletes each copy-mode deployment outright and
-        // re-copies it, in both branches. A file the user put in an agent's copy
-        // is destroyed there just as surely as one in the library.
-        for target in store
-            .get_targets_for_skill(&skill.id)
-            .map_err(AppError::db)?
-        {
-            if target.mode != "copy" {
-                continue;
-            }
-            for path in
-                crate::core::removals::removed_paths(Path::new(&target.target_path), effective_new)
-                    .map_err(AppError::io)?
-            {
-                pending.push(PendingRemoval {
-                    location: target.tool.clone(),
-                    path,
-                });
-            }
-        }
+        let pending = pending_removals_for(store, &skill, install_result.is_some().then_some(staged_path.as_path()))?;
 
         // A confirmation answers one exact question. If the remote moved on, or
         // the skill wrote something new while the dialog was open, the list the
@@ -2207,10 +2235,17 @@ pub fn set_git_source_internal(
     }
 }
 
+/// Re-import a local skill from its recorded source path.
+///
+/// `approved_removals` mirrors the git path: without it, a re-import that would
+/// take away files the source does not have stops and reports them. There is no
+/// revision to bind an approval to here, so the token is a fixed sentinel and
+/// the list is recomputed and re-checked on the approving call.
 pub fn reimport_local_skill_internal(
     store: &SkillStore,
     skill_id: &str,
-) -> Result<ManagedSkillDto, AppError> {
+    approved_removals: Option<&str>,
+) -> Result<ReimportSkillResult, AppError> {
     let skill = store
         .get_skill_by_id(skill_id)
         .map_err(AppError::db)?
@@ -2243,12 +2278,30 @@ pub fn reimport_local_skill_internal(
         .update_skill_update_status(skill_id, "updating")
         .map_err(AppError::db)?;
 
-    let result = (|| -> Result<(), AppError> {
+    let result = (|| -> Result<Vec<PendingRemoval>, AppError> {
         let _lock = RepoLock::acquire_foreground("reimport local skill").map_err(AppError::db)?;
         let staged_path = staged_path_for(&skill.central_path);
         let install_result =
             installer::install_from_local_to_destination(&path, Some(&skill.name), &staged_path)
+                .inspect_err(|_| {
+                    let _ = remove_path_if_exists(&staged_path);
+                })
                 .map_err(AppError::io)?;
+        let staged_guard = StagedPathGuard::new(&staged_path, true);
+
+        // Same replacement, same guard. Re-importing is explicit about the
+        // *source*, not about discarding whatever has accumulated in the
+        // library since — and for a local skill the "update" button runs this,
+        // so leaving it uncovered would guard one path and not its twin.
+        let pending = pending_removals_for(store, &skill, Some(&staged_path))?;
+        if !pending.is_empty() && approved_removals != Some(REIMPORT_APPROVAL) {
+            store
+                .update_skill_check_state(&skill.id, None, "local_only", None)
+                .map_err(AppError::db)?;
+            return Ok(pending);
+        }
+
+        staged_guard.release();
         swap_skill_directory(&staged_path, Path::new(&skill.central_path))?;
         store
             .update_skill_after_install(
@@ -2263,11 +2316,14 @@ pub fn reimport_local_skill_internal(
             .map_err(AppError::db)?;
         resync_copy_targets(store, &skill.id)?;
         sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
-        Ok(())
+        Ok(Vec::new())
     })();
 
     match result {
-        Ok(()) => managed_skill_by_id(store, skill_id),
+        Ok(pending_removals) => Ok(ReimportSkillResult {
+            skill: managed_skill_by_id(store, skill_id)?,
+            pending_removals,
+        }),
         Err(e) => {
             let _ = store.update_skill_check_state(skill_id, None, "error", Some(&e.message));
             Err(e)

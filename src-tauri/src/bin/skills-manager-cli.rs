@@ -1712,14 +1712,18 @@ fn run_update(
                     },
                 }
             }
-            "local" | "import" => match cmd::reimport_local_skill_internal(store, &skill.id) {
-                Ok(_) => UpdateReport {
+            "local" | "import" => match cmd::reimport_local_skill_internal(store, &skill.id, None) {
+                Ok(r) => UpdateReport {
                     skill_id: skill.id.clone(),
                     name: skill.name.clone(),
                     source_type: skill.source_type.clone(),
-                    refreshed: true,
+                    refreshed: r.pending_removals.is_empty(),
                     error: None,
-                    held_back_removals: Vec::new(),
+                    held_back_removals: r
+                        .pending_removals
+                        .iter()
+                        .map(|p| format!("{}: {}", p.location, p.path))
+                        .collect(),
                 },
                 Err(e) => UpdateReport {
                     skill_id: skill.id.clone(),

@@ -351,8 +351,20 @@ export interface BatchUpdateSkillsResult {
 export const batchUpdateSkills = (skillIds: string[]) =>
   invoke<BatchUpdateSkillsResult>("batch_update_skills", { skillIds });
 
-export const reimportLocalSkill = (skillId: string) =>
-  invoke<ManagedSkill>("reimport_local_skill", { skillId });
+export interface ReimportSkillResult {
+  skill: ManagedSkill;
+  /** Non-empty means nothing was changed — see UpdateSkillResult. */
+  pending_removals: PendingRemoval[];
+}
+
+/** Approval sentinel for a re-import, which has no revision to bind to. */
+export const REIMPORT_APPROVAL = "reimport";
+
+export const reimportLocalSkill = (skillId: string, approvedRemovals?: string | null) =>
+  invoke<ReimportSkillResult>("reimport_local_skill", {
+    skillId,
+    approvedRemovals: approvedRemovals ?? null,
+  });
 
 export const relinkLocalSkillSource = (skillId: string, sourcePath: string) =>
   invoke<ManagedSkill>("relink_local_skill_source", { skillId, sourcePath });
