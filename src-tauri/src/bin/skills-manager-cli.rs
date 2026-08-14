@@ -528,6 +528,11 @@ struct UpdateReport {
     source_type: String,
     refreshed: bool,
     error: Option<String>,
+    /// Present when the update was held back because it would have removed
+    /// these paths (#256). Nothing changed; re-run with `--force` to accept.
+    /// A bare `refreshed: false` would read as "already up to date".
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    held_back_removals: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1684,13 +1689,14 @@ fn run_update(
     for skill in targets {
         let report = match skill.source_type.as_str() {
             "git" | "skillssh" => {
-                match cmd::update_git_skill_internal(store, &skill.id, proxy_url.as_deref(), None) {
+                match cmd::update_git_skill_internal(store, &skill.id, proxy_url.as_deref(), None, false) {
                     Ok(r) => UpdateReport {
                         skill_id: skill.id.clone(),
                         name: skill.name.clone(),
                         source_type: skill.source_type.clone(),
                         refreshed: r.content_changed,
                         error: None,
+                        held_back_removals: r.pending_removals,
                     },
                     Err(e) => UpdateReport {
                         skill_id: skill.id.clone(),
@@ -1698,6 +1704,7 @@ fn run_update(
                         source_type: skill.source_type.clone(),
                         refreshed: false,
                         error: Some(e.message.clone()),
+                        held_back_removals: Vec::new(),
                     },
                 }
             }
@@ -1708,6 +1715,7 @@ fn run_update(
                     source_type: skill.source_type.clone(),
                     refreshed: true,
                     error: None,
+                    held_back_removals: Vec::new(),
                 },
                 Err(e) => UpdateReport {
                     skill_id: skill.id.clone(),
@@ -1715,6 +1723,7 @@ fn run_update(
                     source_type: skill.source_type.clone(),
                     refreshed: false,
                     error: Some(e.message.clone()),
+                    held_back_removals: Vec::new(),
                 },
             },
             other => UpdateReport {
@@ -1723,6 +1732,7 @@ fn run_update(
                 source_type: skill.source_type.clone(),
                 refreshed: false,
                 error: Some(format!("source type '{other}' cannot be refreshed")),
+                held_back_removals: Vec::new(),
             },
         };
         reports.push(report);

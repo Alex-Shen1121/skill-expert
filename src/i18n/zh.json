@@ -374,7 +374,10 @@
       "relinked": "已重新关联原路径",
       "detachSource": "转为本地副本",
       "detachedSource": "已取消原路径追踪",
-      "alreadyUpToDate": "Skill 内容未变化（版本已同步）"
+      "alreadyUpToDate": "Skill 内容未变化（版本已同步）",
+      "removalTitle": "这次更新会删除文件",
+      "removalMessage": "更新 {{name}} 会移除 {{count}} 个新版本里没有的文件。如果其中有你自己的东西，先把它移到 skill 文件夹以外——目前还没有任何改动。",
+      "removalConfirm": "仍然更新"
     },
     "gitConfigEntry": "同步配置",
     "filters": {
@@ -436,7 +439,8 @@
       "addButton": "添加",
       "clickToRemove": "点击标记为移除",
       "undoRemove": "点击保留此标签"
-    }
+    },
+    "batchHeldBack": "有 {{count}} 个 skill 未更新——更新会删除文件（{{names}}）。逐个更新可以看到具体是哪些。"
   },
   "install": {
     "title": "安装 Skills",

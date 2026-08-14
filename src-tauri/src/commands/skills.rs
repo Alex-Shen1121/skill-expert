@@ -28,6 +28,12 @@ pub struct UpdateSkillResult {
     /// Whether the skill's file content actually changed.
     /// False when a monorepo commit didn't touch this skill's subdirectory.
     pub content_changed: bool,
+    /// Paths the update would remove, when it declined to run because of them
+    /// (#256). Non-empty means **nothing was changed** and the caller should
+    /// show these to the user and re-run with `force` if they accept.
+    ///
+    /// Empty on every ordinary update, including forced ones.
+    pub pending_removals: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +41,10 @@ pub struct BatchUpdateSkillsResult {
     pub refreshed: usize,
     pub unchanged: usize,
     pub failed: Vec<String>,
+    /// Skills left alone because updating would have removed files the new
+    /// version does not have. Named so the user can go and look, rather than
+    /// wondering why the badge did not clear.
+    pub held_back: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1342,9 +1352,15 @@ where
     results.into_inner().unwrap_or_default()
 }
 
+/// Update one skill.
+///
+/// `force` accepts removals a previous call reported. The first call from the UI
+/// passes `false`; if it comes back with `pending_removals`, the user is shown
+/// what would disappear and only then is it called again with `true`.
 #[tauri::command]
 pub async fn update_skill(
     skill_id: String,
+    force: bool,
     store: State<'_, Arc<SkillStore>>,
     cancel_registry: State<'_, Arc<InstallCancelRegistry>>,
 ) -> Result<UpdateSkillResult, AppError> {
@@ -1357,7 +1373,7 @@ pub async fn update_skill(
 
     tauri::async_runtime::spawn_blocking(move || {
         let outcome =
-            update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), Some(&cancel));
+            update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), Some(&cancel), force);
         log_update_outcome(&store, &skill_id, "git", outcome.as_ref());
         outcome
     })
@@ -1389,6 +1405,7 @@ pub async fn batch_update_skills(
         let mut refreshed = 0usize;
         let mut unchanged = 0usize;
         let mut failed = Vec::new();
+        let mut held_back = Vec::new();
 
         for skill_id in skill_ids {
             let skill = match store.get_skill_by_id(&skill_id).map_err(AppError::db)? {
@@ -1402,9 +1419,15 @@ pub async fn batch_update_skills(
             match skill.source_type.as_str() {
                 "git" | "skillssh" => {
                     let outcome =
-                        update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), None);
+                        update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), None, false);
                     log_update_outcome(&store, &skill_id, "git", outcome.as_ref());
                     match outcome {
+                        Ok(result) if !result.pending_removals.is_empty() => {
+                            // Held back rather than applied: it would have taken
+                            // away files the new version does not have, and a
+                            // batch has nobody to ask.
+                            held_back.push(skill.name.clone());
+                        }
                         Ok(result) => {
                             if result.content_changed {
                                 refreshed += 1;
@@ -1431,6 +1454,7 @@ pub async fn batch_update_skills(
             refreshed,
             unchanged,
             failed,
+            held_back,
         })
     })
     .await?
@@ -1625,11 +1649,19 @@ pub fn managed_skill_by_id(
     Ok(managed_skill_to_dto(store, skill, &all_targets, &tags_map))
 }
 
+/// Update an installed git-sourced skill.
+///
+/// `force` accepts the removals reported by a previous non-forced call. Without
+/// it, an update that would take away files the new version does not have stops
+/// and reports them instead — see [`crate::core::removals`]. Unattended callers
+/// pass `false` and simply do not update: nobody is there to be asked, and
+/// silently destroying the user's files is what #256 was.
 pub fn update_git_skill_internal(
     store: &SkillStore,
     skill_id: &str,
     proxy_url: Option<&str>,
     cancel: Option<&Arc<AtomicBool>>,
+    force: bool,
 ) -> Result<UpdateSkillResult, AppError> {
     let skill = store
         .get_skill_by_id(skill_id)
@@ -1671,7 +1703,7 @@ pub fn update_git_skill_internal(
         proxy_url,
     )
     .map_err(AppError::classify_git_error)?;
-    let update_result = (|| -> Result<bool, AppError> {
+    let update_result = (|| -> Result<(bool, Vec<String>), AppError> {
         git_fetcher::checkout_revision(&temp_dir, &remote_revision).map_err(AppError::git)?;
         let skill_dir = resolve_skill_dir(
             &temp_dir,
@@ -1684,6 +1716,18 @@ pub fn update_git_skill_internal(
         let content_changed = skill.content_hash.as_deref() != Some(new_hash.as_str());
         let source_subpath = git_fetcher::relative_subpath(&temp_dir, &skill_dir);
         let _lock = RepoLock::acquire_foreground("update installed skill").map_err(AppError::db)?;
+
+        // Both trees are on disk here, so the one question worth asking before
+        // replacing anything is cheap: what exists now that the new version
+        // simply does not have?
+        if content_changed && !force {
+            let removals =
+                crate::core::removals::removed_paths_between(&skill.central_path, &skill_dir)
+                    .map_err(AppError::io)?;
+            if !removals.is_empty() {
+                return Ok((false, removals));
+            }
+        }
 
         if content_changed {
             let staged_path = staged_path_for(&skill.central_path);
@@ -1730,16 +1774,27 @@ pub fn update_git_skill_internal(
             resync_copy_targets(store, &skill.id)?;
             sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
         }
-        Ok(content_changed)
+        Ok((content_changed, Vec::new()))
     })();
     git_fetcher::cleanup_temp(&temp_dir);
 
     match update_result {
-        Ok(content_changed) => {
+        Ok((content_changed, pending_removals)) => {
+            // A refusal is not a failed update: nothing was touched, and the
+            // skill still has an update waiting for it.
+            if !pending_removals.is_empty() {
+                let _ = store.update_skill_check_state(
+                    skill_id,
+                    Some(&remote_revision),
+                    "update_available",
+                    None,
+                );
+            }
             let skill = managed_skill_by_id(store, skill_id)?;
             Ok(UpdateSkillResult {
                 skill,
                 content_changed,
+                pending_removals,
             })
         }
         Err(e) => {

@@ -343,7 +343,10 @@
       "relinked": "已重新關聯原路徑",
       "detachSource": "轉為本機副本",
       "detachedSource": "已取消原路徑追蹤",
-      "alreadyUpToDate": "Skill 內容未變化（版本已同步）"
+      "alreadyUpToDate": "Skill 內容未變化（版本已同步）",
+      "removalTitle": "這次更新會刪除檔案",
+      "removalMessage": "更新 {{name}} 會移除 {{count}} 個新版本裡沒有的檔案。如果其中有你自己的東西，先把它移到 skill 資料夾以外——目前還沒有任何改動。",
+      "removalConfirm": "仍然更新"
     },
     "gitConfigEntry": "同步設定",
     "filters": {
@@ -393,7 +396,8 @@
     "batchEnable": "啟用 {{count}} 個",
     "batchDisable": "停用 {{count}} 個",
     "batchEnabled": "已啟用 {{count}} 個 Skill",
-    "batchDisabled": "已停用 {{count}} 個 Skill"
+    "batchDisabled": "已停用 {{count}} 個 Skill",
+    "batchHeldBack": "有 {{count}} 個 skill 未更新——更新會刪除檔案（{{names}}）。逐個更新可以看到具體是哪些。"
   },
   "install": {
     "title": "安裝 Skills",

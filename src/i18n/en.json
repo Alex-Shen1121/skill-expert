@@ -374,7 +374,10 @@
       "relinked": "Source path relinked",
       "detachSource": "Keep local copy",
       "detachedSource": "Source tracking removed",
-      "alreadyUpToDate": "Skill content unchanged (version synced)"
+      "alreadyUpToDate": "Skill content unchanged (version synced)",
+      "removalTitle": "This update removes files",
+      "removalMessage": "Updating {{name}} will remove {{count}} file(s) that the new version does not have. If any of them are yours, move them somewhere outside the skill folder first — nothing has changed yet.",
+      "removalConfirm": "Update anyway"
     },
     "gitConfigEntry": "Sync Config",
     "filters": {
@@ -436,7 +439,8 @@
       "addButton": "Add",
       "clickToRemove": "Click to mark for removal",
       "undoRemove": "Click to keep this tag"
-    }
+    },
+    "batchHeldBack": "{{count}} skill(s) were left alone — updating them would remove files ({{names}}). Update them one at a time to see what."
   },
   "install": {
     "title": "Install Skills",

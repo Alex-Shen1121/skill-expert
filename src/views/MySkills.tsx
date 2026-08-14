@@ -651,6 +651,14 @@ export function MySkills() {
       if (result.unchanged > 0) {
         toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
       }
+      if (result.held_back.length > 0) {
+        toast.warning(
+          t("mySkills.batchHeldBack", {
+            count: result.held_back.length,
+            names: result.held_back.slice(0, 3).join("、"),
+          })
+        );
+      }
       if (result.failed.length > 0) {
         toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
       }
@@ -661,6 +669,12 @@ export function MySkills() {
       setBatchUpdating(false);
     }
   };
+
+  /** The update the user has been asked to confirm, and what it would remove. */
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    skill: ManagedSkill;
+    paths: string[];
+  } | null>(null);
 
   const handleUpdateAvailableSkills = async () => {
     const updatableSkills = skills.filter(
@@ -676,6 +690,14 @@ export function MySkills() {
       }
       if (result.unchanged > 0) {
         toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
+      }
+      if (result.held_back.length > 0) {
+        toast.warning(
+          t("mySkills.batchHeldBack", {
+            count: result.held_back.length,
+            names: result.held_back.slice(0, 3).join("、"),
+          })
+        );
       }
       if (result.failed.length > 0) {
         toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
@@ -727,14 +749,20 @@ export function MySkills() {
     }
   };
 
-  const handleRefreshSkill = async (skill: ManagedSkill) => {
+  const handleRefreshSkill = async (skill: ManagedSkill, force = false) => {
     setUpdatingSkillId(skill.id);
     try {
       if (skill.source_type === "local" || skill.source_type === "import") {
         await api.reimportLocalSkill(skill.id);
         toast.success(t("mySkills.updateActions.reimported"));
       } else {
-        const result = await api.updateSkill(skill.id);
+        const result = await api.updateSkill(skill.id, force);
+        // Nothing was changed: the update would have taken away files the new
+        // version does not have. Show them and let the user decide (#256).
+        if (result.pending_removals.length > 0) {
+          setPendingRemoval({ skill, paths: result.pending_removals });
+          return;
+        }
         if (result.content_changed) {
           toast.success(t("mySkills.updateActions.updated"));
         } else {
@@ -1714,6 +1742,23 @@ export function MySkills() {
         onProjectsChanged={refreshProjects}
       />
 
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        tone="warning"
+        title={t("mySkills.updateActions.removalTitle")}
+        message={t("mySkills.updateActions.removalMessage", {
+          name: pendingRemoval?.skill.name ?? "",
+          count: pendingRemoval?.paths.length ?? 0,
+        })}
+        details={pendingRemoval?.paths.slice(0, 20)}
+        confirmLabel={t("mySkills.updateActions.removalConfirm")}
+        onClose={() => setPendingRemoval(null)}
+        onConfirm={async () => {
+          const target = pendingRemoval?.skill;
+          setPendingRemoval(null);
+          if (target) await handleRefreshSkill(target, true);
+        }}
+      />
       <ConfirmDialog
         open={batchDeleteConfirm}
         message={t("mySkills.batchDeleteConfirm", { count: selectedIds.size })}

@@ -315,14 +315,22 @@ export interface UpdateSkillResult {
   skill: ManagedSkill;
   /** False when a monorepo commit didn't touch this skill's subdirectory. */
   content_changed: boolean;
+  /**
+   * Paths the update would remove. Non-empty means **nothing was changed** —
+   * show these and call again with `force` if the user accepts.
+   */
+  pending_removals: string[];
 }
 
-export const updateSkill = (skillId: string) =>
-  invoke<UpdateSkillResult>("update_skill", { skillId });
+/** `force` accepts the removals a previous non-forced call reported. */
+export const updateSkill = (skillId: string, force = false) =>
+  invoke<UpdateSkillResult>("update_skill", { skillId, force });
 
 export interface BatchUpdateSkillsResult {
   refreshed: number;
   unchanged: number;
+  /** Skills left alone because updating would have removed files. */
+  held_back: string[];
   failed: string[];
 }
 
