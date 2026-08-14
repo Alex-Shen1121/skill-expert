@@ -673,7 +673,8 @@ export function MySkills() {
   /** The update the user has been asked to confirm, and what it would remove. */
   const [pendingRemoval, setPendingRemoval] = useState<{
     skill: ManagedSkill;
-    paths: string[];
+    removals: api.PendingRemoval[];
+    approval: string | null;
   } | null>(null);
 
   const handleUpdateAvailableSkills = async () => {
@@ -749,18 +750,22 @@ export function MySkills() {
     }
   };
 
-  const handleRefreshSkill = async (skill: ManagedSkill, force = false) => {
+  const handleRefreshSkill = async (skill: ManagedSkill, approvedRemovals?: string) => {
     setUpdatingSkillId(skill.id);
     try {
       if (skill.source_type === "local" || skill.source_type === "import") {
         await api.reimportLocalSkill(skill.id);
         toast.success(t("mySkills.updateActions.reimported"));
       } else {
-        const result = await api.updateSkill(skill.id, force);
+        const result = await api.updateSkill(skill.id, approvedRemovals);
         // Nothing was changed: the update would have taken away files the new
         // version does not have. Show them and let the user decide (#256).
         if (result.pending_removals.length > 0) {
-          setPendingRemoval({ skill, paths: result.pending_removals });
+          setPendingRemoval({
+            skill,
+            removals: result.pending_removals,
+            approval: result.removal_approval,
+          });
           return;
         }
         if (result.content_changed) {
@@ -1748,15 +1753,20 @@ export function MySkills() {
         title={t("mySkills.updateActions.removalTitle")}
         message={t("mySkills.updateActions.removalMessage", {
           name: pendingRemoval?.skill.name ?? "",
-          count: pendingRemoval?.paths.length ?? 0,
+          count: pendingRemoval?.removals.length ?? 0,
         })}
-        details={pendingRemoval?.paths.slice(0, 20)}
+        // Every path, never a truncated sample: recognising one's own file is
+        // the whole point, and it might be the twenty-first.
+        details={pendingRemoval?.removals.map((r) =>
+          r.location === "library" ? r.path : `${r.location}: ${r.path}`
+        )}
         confirmLabel={t("mySkills.updateActions.removalConfirm")}
         onClose={() => setPendingRemoval(null)}
         onConfirm={async () => {
           const target = pendingRemoval?.skill;
+          const approval = pendingRemoval?.approval ?? undefined;
           setPendingRemoval(null);
-          if (target) await handleRefreshSkill(target, true);
+          if (target) await handleRefreshSkill(target, approval);
         }}
       />
       <ConfirmDialog

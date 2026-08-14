@@ -28,12 +28,89 @@ pub struct UpdateSkillResult {
     /// Whether the skill's file content actually changed.
     /// False when a monorepo commit didn't touch this skill's subdirectory.
     pub content_changed: bool,
-    /// Paths the update would remove, when it declined to run because of them
-    /// (#256). Non-empty means **nothing was changed** and the caller should
-    /// show these to the user and re-run with `force` if they accept.
+    /// What the update would remove, when it declined because of it (#256).
+    /// Non-empty means **nothing was changed**: show these and call again with
+    /// `approved_removals` set to `removal_approval` if the user accepts.
     ///
-    /// Empty on every ordinary update, including forced ones.
-    pub pending_removals: Vec<String>,
+    /// Empty on every ordinary update, including approved ones.
+    pub pending_removals: Vec<PendingRemoval>,
+    /// Identifies exactly what `pending_removals` describes. Passing it back
+    /// approves *that* list against *that* revision and nothing else — if the
+    /// remote moves on, or the skill writes another file while the dialog is
+    /// open, the approval no longer matches and the user is asked again.
+    pub removal_approval: Option<String>,
+}
+
+/// Where a path about to be removed lives.
+#[derive(Debug, Clone, Serialize)]
+pub struct PendingRemoval {
+    /// [`LIBRARY_LOCATION`], or the key of the agent whose deployed copy holds
+    /// it. The user needs to know which directory to go and rescue.
+    pub location: String,
+    pub path: String,
+}
+
+/// `PendingRemoval::location` for the central library, as opposed to an agent's
+/// deployed copy.
+pub const LIBRARY_LOCATION: &str = "library";
+
+enum UpdateOutcome {
+    Applied {
+        content_changed: bool,
+    },
+    /// Declined, having changed nothing.
+    Held {
+        pending: Vec<PendingRemoval>,
+        approval: String,
+    },
+}
+
+/// A stable name for one exact set of removals at one exact revision.
+fn removal_approval_token(revision: &str, pending: &[PendingRemoval]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(revision.as_bytes());
+    let mut rows: Vec<String> = pending
+        .iter()
+        .map(|p| format!("{}\u{0}{}", p.location, p.path))
+        .collect();
+    rows.sort();
+    for row in rows {
+        hasher.update(row.as_bytes());
+        hasher.update([0]);
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// Removes a staged directory unless the swap claimed it.
+struct StagedPathGuard<'a> {
+    path: &'a Path,
+    armed: std::cell::Cell<bool>,
+}
+
+impl<'a> StagedPathGuard<'a> {
+    fn new(path: &'a Path, armed: bool) -> Self {
+        Self {
+            path,
+            armed: std::cell::Cell::new(armed),
+        }
+    }
+
+    /// The swap is about to take ownership of it.
+    fn release(&self) {
+        self.armed.set(false);
+    }
+}
+
+impl Drop for StagedPathGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed.get() {
+            // Declining an update must leave nothing behind — a stray
+            // `.name.staged-<uuid>` inside the library is picked up by the
+            // metadata rebuild scan as a skill of its own.
+            let _ = remove_path_if_exists(self.path);
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1354,13 +1431,14 @@ where
 
 /// Update one skill.
 ///
-/// `force` accepts removals a previous call reported. The first call from the UI
-/// passes `false`; if it comes back with `pending_removals`, the user is shown
-/// what would disappear and only then is it called again with `true`.
+/// `approved_removals` carries back `removal_approval` from a call that
+/// declined. The first call from the UI passes `None`; if it comes back with
+/// `pending_removals`, the user is shown exactly what would disappear and only
+/// then is it called again with that token.
 #[tauri::command]
 pub async fn update_skill(
     skill_id: String,
-    force: bool,
+    approved_removals: Option<String>,
     store: State<'_, Arc<SkillStore>>,
     cancel_registry: State<'_, Arc<InstallCancelRegistry>>,
 ) -> Result<UpdateSkillResult, AppError> {
@@ -1373,7 +1451,13 @@ pub async fn update_skill(
 
     tauri::async_runtime::spawn_blocking(move || {
         let outcome =
-            update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), Some(&cancel), force);
+            update_git_skill_internal(
+                &store,
+                &skill_id,
+                proxy_url.as_deref(),
+                Some(&cancel),
+                approved_removals.as_deref(),
+            );
         log_update_outcome(&store, &skill_id, "git", outcome.as_ref());
         outcome
     })
@@ -1419,7 +1503,7 @@ pub async fn batch_update_skills(
             match skill.source_type.as_str() {
                 "git" | "skillssh" => {
                     let outcome =
-                        update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), None, false);
+                        update_git_skill_internal(&store, &skill_id, proxy_url.as_deref(), None, None);
                     log_update_outcome(&store, &skill_id, "git", outcome.as_ref());
                     match outcome {
                         Ok(result) if !result.pending_removals.is_empty() => {
@@ -1651,17 +1735,20 @@ pub fn managed_skill_by_id(
 
 /// Update an installed git-sourced skill.
 ///
-/// `force` accepts the removals reported by a previous non-forced call. Without
-/// it, an update that would take away files the new version does not have stops
-/// and reports them instead — see [`crate::core::removals`]. Unattended callers
-/// pass `false` and simply do not update: nobody is there to be asked, and
-/// silently destroying the user's files is what #256 was.
+/// `approved_removals` carries back the token from a previous call that
+/// declined, approving exactly the list it reported at exactly that revision.
+/// Without it — or with a stale one — an update that would take away files the
+/// new version does not have stops and reports them instead, having changed
+/// nothing. See [`crate::core::removals`].
+///
+/// Unattended callers pass `None` and simply do not update: nobody is there to
+/// be asked, and applying anyway is what #256 was.
 pub fn update_git_skill_internal(
     store: &SkillStore,
     skill_id: &str,
     proxy_url: Option<&str>,
     cancel: Option<&Arc<AtomicBool>>,
-    force: bool,
+    approved_removals: Option<&str>,
 ) -> Result<UpdateSkillResult, AppError> {
     let skill = store
         .get_skill_by_id(skill_id)
@@ -1703,7 +1790,7 @@ pub fn update_git_skill_internal(
         proxy_url,
     )
     .map_err(AppError::classify_git_error)?;
-    let update_result = (|| -> Result<(bool, Vec<String>), AppError> {
+    let update_result = (|| -> Result<UpdateOutcome, AppError> {
         git_fetcher::checkout_revision(&temp_dir, &remote_revision).map_err(AppError::git)?;
         let skill_dir = resolve_skill_dir(
             &temp_dir,
@@ -1717,23 +1804,89 @@ pub fn update_git_skill_internal(
         let source_subpath = git_fetcher::relative_subpath(&temp_dir, &skill_dir);
         let _lock = RepoLock::acquire_foreground("update installed skill").map_err(AppError::db)?;
 
-        // Both trees are on disk here, so the one question worth asking before
-        // replacing anything is cheap: what exists now that the new version
-        // simply does not have?
-        if content_changed && !force {
-            let removals =
-                crate::core::removals::removed_paths_between(&skill.central_path, &skill_dir)
-                    .map_err(AppError::io)?;
-            if !removals.is_empty() {
-                return Ok((false, removals));
+        // Stage first, then compare. The tree that lands in the library is the
+        // installer's output, not the raw checkout — it drops `.git` and every
+        // symlink — so comparing against the checkout would report a path as
+        // surviving that the swap then removes.
+        let staged_path = staged_path_for(&skill.central_path);
+        let install_result = if content_changed {
+            Some(
+                installer::install_skill_dir_to_destination(&skill_dir, &skill.name, &staged_path)
+                    .inspect_err(|_| {
+                        let _ = remove_path_if_exists(&staged_path);
+                    })
+                    .map_err(AppError::io)?,
+            )
+        } else {
+            None
+        };
+        let staged_guard = StagedPathGuard::new(&staged_path, install_result.is_some());
+
+        // What the library will hold afterwards. With no content change nothing
+        // is swapped, so it keeps what it has — but the copy targets are still
+        // torn down and rebuilt from it, which is its own way to lose files.
+        let effective_new: &Path = if install_result.is_some() {
+            &staged_path
+        } else {
+            Path::new(&skill.central_path)
+        };
+
+        let mut pending = Vec::new();
+        if install_result.is_some() {
+            for path in
+                crate::core::removals::removed_paths(Path::new(&skill.central_path), &staged_path)
+                    .map_err(AppError::io)?
+            {
+                pending.push(PendingRemoval {
+                    location: LIBRARY_LOCATION.to_string(),
+                    path,
+                });
+            }
+        }
+        // `resync_copy_targets` deletes each copy-mode deployment outright and
+        // re-copies it, in both branches. A file the user put in an agent's copy
+        // is destroyed there just as surely as one in the library.
+        for target in store
+            .get_targets_for_skill(&skill.id)
+            .map_err(AppError::db)?
+        {
+            if target.mode != "copy" {
+                continue;
+            }
+            for path in
+                crate::core::removals::removed_paths(Path::new(&target.target_path), effective_new)
+                    .map_err(AppError::io)?
+            {
+                pending.push(PendingRemoval {
+                    location: target.tool.clone(),
+                    path,
+                });
             }
         }
 
-        if content_changed {
-            let staged_path = staged_path_for(&skill.central_path);
-            let install_result =
-                installer::install_skill_dir_to_destination(&skill_dir, &skill.name, &staged_path)
-                    .map_err(AppError::io)?;
+        // A confirmation answers one exact question. If the remote moved on, or
+        // the skill wrote something new while the dialog was open, the list the
+        // user agreed to is not the list about to be deleted.
+        let approval = removal_approval_token(&remote_revision, &pending);
+        if !pending.is_empty() && approved_removals != Some(approval.as_str()) {
+            // Declining is not a failure: nothing was touched and the update is
+            // still waiting. Clear the `updating` marker here, inside the lock,
+            // rather than after releasing it — doing it later lets a concurrent
+            // update overwrite the state, and swallowing the error would leave
+            // the skill showing "updating" forever.
+            store
+                .update_skill_check_state(
+                    &skill.id,
+                    Some(&remote_revision),
+                    "update_available",
+                    None,
+                )
+                .map_err(AppError::db)?;
+            return Ok(UpdateOutcome::Held { pending, approval });
+        }
+
+        if let Some(install_result) = install_result {
+            staged_guard.release();
             swap_skill_directory(&staged_path, Path::new(&skill.central_path))?;
 
             store
@@ -1774,27 +1927,22 @@ pub fn update_git_skill_internal(
             resync_copy_targets(store, &skill.id)?;
             sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
         }
-        Ok((content_changed, Vec::new()))
+        Ok(UpdateOutcome::Applied { content_changed })
     })();
     git_fetcher::cleanup_temp(&temp_dir);
 
     match update_result {
-        Ok((content_changed, pending_removals)) => {
-            // A refusal is not a failed update: nothing was touched, and the
-            // skill still has an update waiting for it.
-            if !pending_removals.is_empty() {
-                let _ = store.update_skill_check_state(
-                    skill_id,
-                    Some(&remote_revision),
-                    "update_available",
-                    None,
-                );
-            }
+        Ok(outcome) => {
+            let (content_changed, pending_removals, removal_approval) = match outcome {
+                UpdateOutcome::Applied { content_changed } => (content_changed, Vec::new(), None),
+                UpdateOutcome::Held { pending, approval } => (false, pending, Some(approval)),
+            };
             let skill = managed_skill_by_id(store, skill_id)?;
             Ok(UpdateSkillResult {
                 skill,
                 content_changed,
                 pending_removals,
+                removal_approval,
             })
         }
         Err(e) => {

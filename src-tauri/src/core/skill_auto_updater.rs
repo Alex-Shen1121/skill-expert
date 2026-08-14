@@ -198,7 +198,7 @@ fn run_round_blocking(store: &SkillStore) -> Result<(), String> {
         available += 1;
 
         if apply {
-            match update_git_skill_internal(store, &skill_id, proxy.as_deref(), None, false) {
+            match update_git_skill_internal(store, &skill_id, proxy.as_deref(), None, None) {
                 Ok(result) if !result.pending_removals.is_empty() => {
                     held_back += 1;
                     log::info!(

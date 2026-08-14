@@ -45,12 +45,36 @@ fn is_regenerable(name: &str) -> bool {
 ///
 /// Sorted, so the same update always reads the same way.
 pub fn removed_paths(current: &Path, replacement: &Path) -> Result<Vec<String>> {
-    let mut out = Vec::new();
-    if current.is_dir() {
-        collect(current, replacement, Path::new(""), &mut out)?;
+    // `is_dir()` follows symlinks and folds every error into "no". Only a
+    // genuine absence may answer "nothing will be lost"; anything else — a
+    // dangling link, a plain file, an unreadable path — has to say so.
+    match std::fs::symlink_metadata(current) {
+        Ok(md) if md.is_dir() => {}
+        Ok(_) => return Ok(vec![display_path(Path::new(""), false)]),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(anyhow::Error::from(err)
+                .context(format!("Cannot inspect {:?} before replacing it", current)));
+        }
     }
+
+    let mut out = Vec::new();
+    collect(current, replacement, Path::new(""), &mut out)?;
     out.sort();
     Ok(out)
+}
+
+/// Coarse kind, so a path that changes shape counts as removed rather than
+/// surviving: replacing a file with a directory of the same name still takes
+/// the file's contents away.
+fn kind_of(md: &std::fs::Metadata) -> u8 {
+    if md.file_type().is_symlink() {
+        0
+    } else if md.is_dir() {
+        1
+    } else {
+        2
+    }
 }
 
 fn collect(
@@ -75,14 +99,19 @@ fn collect(
             .with_context(|| format!("Failed to inspect {:?}", entry.path()))?
             .is_dir();
 
+        let current_md = std::fs::symlink_metadata(entry.path())
+            .with_context(|| format!("Failed to inspect {:?}", entry.path()))?;
+
         match std::fs::symlink_metadata(replacement_root.join(&relative)) {
-            // Still there afterwards. Its contents may differ, which is what an
+            // Same path, same shape. Its contents may differ, which is what an
             // update is for; only look deeper if it is a directory.
-            Ok(_) => {
+            Ok(md) if kind_of(&md) == kind_of(&current_md) => {
                 if is_dir {
                     collect(current_root, replacement_root, &relative, out)?;
                 }
             }
+            // Same path, different shape: whatever is here now does not survive.
+            Ok(_) => out.push(display_path(&relative, is_dir)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 out.push(display_path(&relative, is_dir));
             }
@@ -102,7 +131,16 @@ fn collect(
 }
 
 fn display_path(relative: &Path, is_dir: bool) -> String {
+    // `\` is a legitimate filename character on unix, so only Windows'
+    // separators are normalised for display.
+    #[cfg(windows)]
     let mut shown = relative.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    let mut shown = relative.to_string_lossy().into_owned();
+
+    if shown.is_empty() {
+        shown.push('.');
+    }
     if is_dir {
         shown.push('/');
     }
@@ -193,6 +231,24 @@ mod tests {
         assert_eq!(
             removed_paths(&current, &replacement).unwrap(),
             vec![".gitignore", "scripts/"]
+        );
+    }
+
+    /// Replacing a file with a directory of the same name still takes the
+    /// file's contents away, and vice versa.
+    #[test]
+    fn a_path_that_changes_shape_counts_as_removed() {
+        let tmp = TempDir::new().unwrap();
+        let current = tmp.path().join("current");
+        let replacement = tmp.path().join("new");
+        write(&current.join("thing"), "a file the user edited");
+        write(&current.join("other/inner.txt"), "x");
+        write(&replacement.join("thing/inner.txt"), "now a directory");
+        write(&replacement.join("other"), "now a file");
+
+        assert_eq!(
+            removed_paths(&current, &replacement).unwrap(),
+            vec!["other/", "thing"]
         );
     }
 

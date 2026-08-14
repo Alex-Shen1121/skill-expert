@@ -316,15 +316,29 @@ export interface UpdateSkillResult {
   /** False when a monorepo commit didn't touch this skill's subdirectory. */
   content_changed: boolean;
   /**
-   * Paths the update would remove. Non-empty means **nothing was changed** —
-   * show these and call again with `force` if the user accepts.
+   * What the update would remove. Non-empty means **nothing was changed** —
+   * show these and call again with `removal_approval` if the user accepts.
    */
-  pending_removals: string[];
+  pending_removals: PendingRemoval[];
+  /**
+   * Identifies exactly what `pending_removals` describes. Passing it back
+   * approves that list at that revision and nothing else.
+   */
+  removal_approval: string | null;
 }
 
-/** `force` accepts the removals a previous non-forced call reported. */
-export const updateSkill = (skillId: string, force = false) =>
-  invoke<UpdateSkillResult>("update_skill", { skillId, force });
+export interface PendingRemoval {
+  /** `"library"`, or the agent key whose deployed copy holds it. */
+  location: string;
+  path: string;
+}
+
+/** `approvedRemovals` carries back `removal_approval` from a declined call. */
+export const updateSkill = (skillId: string, approvedRemovals?: string | null) =>
+  invoke<UpdateSkillResult>("update_skill", {
+    skillId,
+    approvedRemovals: approvedRemovals ?? null,
+  });
 
 export interface BatchUpdateSkillsResult {
   refreshed: number;

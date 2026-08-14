@@ -1689,14 +1689,18 @@ fn run_update(
     for skill in targets {
         let report = match skill.source_type.as_str() {
             "git" | "skillssh" => {
-                match cmd::update_git_skill_internal(store, &skill.id, proxy_url.as_deref(), None, false) {
+                match cmd::update_git_skill_internal(store, &skill.id, proxy_url.as_deref(), None, None) {
                     Ok(r) => UpdateReport {
                         skill_id: skill.id.clone(),
                         name: skill.name.clone(),
                         source_type: skill.source_type.clone(),
                         refreshed: r.content_changed,
                         error: None,
-                        held_back_removals: r.pending_removals,
+                        held_back_removals: r
+                            .pending_removals
+                            .iter()
+                            .map(|p| format!("{}: {}", p.location, p.path))
+                            .collect(),
                     },
                     Err(e) => UpdateReport {
                         skill_id: skill.id.clone(),
