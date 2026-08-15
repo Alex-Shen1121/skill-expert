@@ -158,7 +158,7 @@ impl<'a> StagedPathGuard<'a> {
         }
     }
 
-    /// The swap is about to take ownership of it.
+    /// The swap has taken ownership of it; there is nothing left to clean.
     fn release(&self) {
         self.armed.set(false);
     }
@@ -1692,8 +1692,13 @@ pub async fn relink_local_skill_source(
             let pending = pending_removals_for(&store, &skill, Some(&staged_path))?;
             let approval = removal_approval_token(&source_path, &pending);
             if !pending.is_empty() && approved_removals.as_deref() != Some(approval.as_str()) {
+                // Put back exactly what was there. Hardcoding a status loses
+                // `source_missing` — the only state relink is reachable from —
+                // so declining would hide the Relink and Detach buttons on the
+                // next refresh, and `check_state` would also clear the recorded
+                // error and check time that nothing here has re-established.
                 store
-                    .update_skill_check_state(&skill.id, None, "local_only", None)
+                    .update_skill_update_status(&skill.id, &skill.update_status)
                     .map_err(AppError::db)?;
                 return Ok((pending, Some(approval)));
             }
@@ -1941,9 +1946,11 @@ pub fn update_git_skill_internal(
 
         let pending = pending_removals_for(store, &skill, install_result.is_some().then_some(staged_path.as_path()))?;
 
-        // A confirmation answers one exact question: this revision, this list.
-        // It closes the window while the dialog is open — a push, or a file the
-        // skill wrote in the meantime, re-asks. It cannot close the window
+        // A confirmation answers one exact question: this revision, this list
+        // as shown. It closes the window while the dialog is open — a push, or
+        // a file that changes the list, re-asks. Note a directory the new
+        // version drops is one entry, so a file created *inside* it afterwards
+        // does not change the list; approving `outputs/` approves the subtree. It cannot close the window
         // between this scan and the removal itself: the repo lock holds off
         // Skills Manager, not the agent processes writing into these very
         // directories. Narrowing that further needs the directories frozen
@@ -2354,8 +2361,11 @@ pub fn reimport_local_skill_internal(
         // shown — which is the whole failure this is here to prevent.
         let approval = removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &pending);
         if !pending.is_empty() && approved_removals != Some(approval.as_str()) {
+            // Restore the status this started from rather than asserting one:
+            // declining changed nothing, so nothing about the skill's state
+            // should read differently afterwards.
             store
-                .update_skill_check_state(&skill.id, None, "local_only", None)
+                .update_skill_update_status(&skill.id, &skill.update_status)
                 .map_err(AppError::db)?;
             return Ok((pending, Some(approval)));
         }
@@ -3434,26 +3444,49 @@ mod tests {
         );
     }
 
-    /// A re-import's approval first bound to a constant, so the approving call
-    /// matched no matter what the recomputed list said — a file written while
-    /// the dialog was open was deleted having never been shown.
+    /// Drives the real `reimport_local_skill_internal`, because the bug this
+    /// guards against was in the wiring, not the hash: the approval was compared
+    /// against a constant, so the recomputed list was never consulted. A test
+    /// that only calls the token function twice passes either way.
     #[test]
-    fn a_reimport_approval_is_bound_to_its_own_list() {
-        let one = vec![PendingRemoval {
-            location: LIBRARY_LOCATION.to_string(),
-            path: "mine.pptx".to_string(),
-        }];
-        let mut two = one.clone();
-        two.push(PendingRemoval {
-            location: LIBRARY_LOCATION.to_string(),
-            path: "written-while-the-dialog-was-open.pptx".to_string(),
-        });
+    fn a_stale_reimport_approval_does_not_authorize_a_grown_list() {
+        let repo = test_repo();
+        let source = repo._tmp.path().join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "---\nname: gen\n---\n").unwrap();
 
-        assert_ne!(
-            removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &one),
-            removal_approval_token(REIMPORT_APPROVAL_DOMAIN, &two),
-            "approving one list must not approve a longer one"
+        let central = write_skill_dir("gen");
+        fs::write(central.join("mine.txt"), "user work").unwrap();
+        let mut record = sample_skill("skill-1", "gen", &central);
+        record.source_ref = Some(source.to_string_lossy().to_string());
+        repo.store.insert_skill(&record).unwrap();
+
+        // First attempt: held, with a token for the list the user is shown.
+        let first = reimport_local_skill_internal(&repo.store, "skill-1", None).unwrap();
+        assert_eq!(first.pending_removals.len(), 1);
+        let shown = first.removal_approval.clone().unwrap();
+        assert!(central.join("mine.txt").is_file(), "nothing may be touched");
+
+        // The skill writes another file while the dialog is open.
+        fs::write(central.join("appeared-later.txt"), "also mine").unwrap();
+
+        // The old approval must not cover it.
+        let second =
+            reimport_local_skill_internal(&repo.store, "skill-1", Some(&shown)).unwrap();
+        assert_eq!(
+            second.pending_removals.len(),
+            2,
+            "the grown list must be shown again, not silently applied"
         );
+        assert!(central.join("appeared-later.txt").is_file());
+        assert!(central.join("mine.txt").is_file());
+
+        // Approving the list actually shown does go through.
+        let approved = second.removal_approval.clone().unwrap();
+        let third =
+            reimport_local_skill_internal(&repo.store, "skill-1", Some(&approved)).unwrap();
+        assert!(third.pending_removals.is_empty());
+        assert!(!central.join("mine.txt").exists(), "the approved removal applies");
     }
 
     fn write_skill_at(root: &Path, rel: &str) -> PathBuf {
