@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-08-16
+
+### Release Overview
+- An update can no longer quietly take away files that live inside a skill's folder. When the new version does not have paths that exist now, the update stops and names them instead of applying.
+
+### User-facing
+- **An update that would remove files now stops and says which ones** (#256) — Updating replaces a skill's folder wholesale, so anything written inside it that the new version does not have was destroyed without warning. The reporter lost the PowerPoint templates `ppt-master` had generated into its own `templates/`, and only found out afterwards. Every update now first works out which paths exist today and are simply absent from the new version. If any are, nothing is applied: the desktop app lists them and lets you decide, and the skill stays exactly as it was until you do.
+- **Unattended updates never make that decision for you** — The startup batch, the background scheduler and the CLI hold the skill back rather than proceed. Its update badge stays, so nothing is lost or hidden; you see the paths when you update it yourself. The CLI reports them as `held_back_removals`.
+- **Deployed copies are covered, not just the library** — An agent you deploy to in copy mode gets its folder rebuilt on every sync, so files written into that copy were at the same risk. Each reported path says where it lives, so you know which directory to rescue it from.
+- **Re-importing a local skill and re-pointing its source are guarded the same way** — Both replace the whole folder, and the batch button calls the first one "update" as well.
+- **Known limit, worth stating plainly**: this compares paths, not contents. A file you edited that the new version also ships keeps its path, so it reads as surviving and your edits are still overwritten silently. Keep local modifications outside the skill folder, or back the library up before updating.
+- **DeepSeek Harness is supported** — Deploys to `~/.dsh/skills`. 52 agents out of the box.
+- **Git backup no longer tracks compiled Python artifacts** — A skill that runs Python scripts filled the backup repository with `__pycache__/` and `.pyc` files that change on every run. They are now ignored and untracked from existing backups.
+
+### Developer & Governance
+- `core/removals.rs` answers one question — which paths exist under the current tree and not under the replacement — and nothing else. It compares by path, since a file whose contents change still exists afterwards and listing it would bury the ones that do not; rolls a wholly-absent directory up to a single entry, so a nested `.git` cannot bury the dialog under thousands of object files; treats a file/directory/symlink shape change as a removal; and returns an error rather than guessing when a path can be neither confirmed present nor confirmed absent, because a wrong "nothing will be lost" is the exact failure it exists to prevent.
+- The comparison runs against the staged tree that actually lands, not the raw clone: `installer::copy_skill_dir` drops `.git` and every symlink, so comparing against the clone produced real false negatives.
+- Approving is bound to a SHA-256 over the revision and the exact sorted set of paths. The confirming call re-clones, re-stages and recomputes; a set that no longer matches asks again rather than acting on a stale answer. Re-import and relink bind to their own domains.
+- `StagedPathGuard` removes a declined skill's staged directory on drop, and is released only after the swap has succeeded, so a failure between the two cannot leave a `.staged-<uuid>` directory behind for the metadata rebuild to adopt as a new skill.
+- Audit logs record a held-back update as such instead of as a successful no-op.
+- The `manage-skills` skill documents the held-back shape, including that `held_back_removals` is omitted when empty and that no CLI flag accepts it — the field's own doc comment had pointed at a `--force` that `skills update` does not have.
+- DeepSeek Harness paths were read out of `packages/util/home-paths` and `packages/skill/skill-filesystem` rather than taken from its README; its shared `~/.agents/skills` root is registered for discovery only, as with Codex and Copilot.
+- 453 tests pass.
 ## [1.33.1] - 2026-08-12
 
 ### Release Overview
