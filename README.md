@@ -171,7 +171,10 @@ npm run cli -- skills install https://github.com/foo/bar.git   # git URL
 npm run cli -- skills install vercel-labs/agent-skills@react-best-practices  # skills.sh
 npm run cli -- skills deploy <ref> --agent claude_code --agent codex  # deploy to both agents
 
-# Update / check from upstream (git skills re-clone, local skills re-import source)
+# Update / check from upstream (git skills re-clone, local skills re-import source).
+# An update replaces the skill's folder, so if the new version lacks paths that
+# exist now, the CLI applies nothing and lists them as `held_back_removals`
+# instead — confirming the loss needs a person, so only the app can proceed.
 npm run cli -- skills update --all
 npm run cli -- skills check --all
 

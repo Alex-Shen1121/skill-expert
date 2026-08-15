@@ -529,8 +529,10 @@ struct UpdateReport {
     refreshed: bool,
     error: Option<String>,
     /// Present when the update was held back because it would have removed
-    /// these paths (#256). Nothing changed; re-run with `--force` to accept.
-    /// A bare `refreshed: false` would read as "already up to date".
+    /// these paths (#256). Nothing changed, and the CLI offers no way to
+    /// accept: approving means seeing the list, which needs a person, so it
+    /// only exists in the app. A bare `refreshed: false` would read as
+    /// "already up to date".
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     held_back_removals: Vec<String>,
 }
