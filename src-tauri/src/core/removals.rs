@@ -260,23 +260,34 @@ mod tests {
             .is_empty());
     }
 
-    /// A side that can be neither confirmed present nor confirmed absent must
-    /// refuse, not answer "nothing will be lost" — that is the exact failure
+    /// A path that can be neither confirmed present nor confirmed absent must
+    /// never come back as "nothing will be lost" — that is the exact failure
     /// this exists to prevent. Driven by pointing at a *file* where a directory
-    /// belongs, so the lookup fails with something other than NotFound.
+    /// belongs.
+    ///
+    /// The platforms refuse differently, and both are safe. Unix reports
+    /// `ENOTDIR`, which is neither presence nor absence, so the walk gives up.
+    /// Windows maps the same lookup to `ERROR_PATH_NOT_FOUND`, which arrives as
+    /// `NotFound`, so the path reads as absent and is listed as about to go.
+    /// The update is held back either way; what neither may do is answer empty.
     #[test]
-    fn refuses_rather_than_guess_when_a_path_cannot_be_classified() {
+    fn never_answers_nothing_will_be_lost_when_a_path_cannot_be_classified() {
         let tmp = TempDir::new().unwrap();
         let current = tmp.path().join("current");
         write(&current.join("SKILL.md"), "v1");
         let replacement = tmp.path().join("not-a-directory");
         write(&replacement, "this is a file");
 
-        let err = removed_paths(&current, &replacement).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("survives the update"),
-            "expected a refusal, got: {err:#}"
-        );
+        match removed_paths(&current, &replacement) {
+            Err(err) => assert!(
+                format!("{err:#}").contains("survives the update"),
+                "refused, but not for the reason expected: {err:#}"
+            ),
+            Ok(reported) => assert!(
+                reported.iter().any(|p| p == "SKILL.md"),
+                "an unclassifiable path was reported as safe: {reported:?}"
+            ),
+        }
     }
 
     #[cfg(unix)]
