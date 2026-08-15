@@ -14,6 +14,7 @@ const AGENT_ICON_FILES: Record<string, string> = {
   crush: "crush.png",
   cursor: "cursor.png",
   deepagents: "deepagents.png",
+  deepseek_harness: "deepseek_harness.svg",
   droid: "droid.svg",
   firebender: "firebender.svg",
   gemini_cli: "gemini_cli.svg",

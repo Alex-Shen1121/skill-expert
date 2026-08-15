@@ -111,7 +111,7 @@
 
 ## 支持的工具
 
-开箱支持 51 个 Agent，包括：
+开箱支持 52 个 Agent，包括：
 
 Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 

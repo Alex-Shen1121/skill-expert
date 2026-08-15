@@ -120,7 +120,7 @@ The Backup page offers three levels: **disconnect this machine** (other devices 
 
 ## Supported Tools
 
-51 agents are supported out of the box, including:
+52 agents are supported out of the box, including:
 
 Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 
