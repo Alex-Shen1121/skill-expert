@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.2] - 2026-08-16
+
+### Release Overview
+- A project copy you had just edited could be reported as the older side, and acting on that reading overwrote your edit. Both sides of the comparison now come from the files themselves.
+
+### User-facing
+- **Project sync status no longer judges the library by the wrong clock** — Freshness was decided by comparing the project copy's file timestamp against a database column that records when the library's row was written. Editing files in the library does not move that column, and a metadata-only write moves it while nothing changed, so a project copy you had just edited could be shown as "center is newer". Following that status and pulling from the center then replaced your edit. Both sides are now read from the files.
+- **The refusal that protects a newer local copy is more reliable** — "Pull from center" for an agent workspace declines when the local copy is ahead, and that check reads the same comparison, so a library whose row merely looked recent could defeat it.
+
+### Developer & Governance
+- `classify_sync_status` walks the center once and answers both the live-hash comparison and its newest content mtime from that walk — replacing one walk plus a database read, so there is no new cost and no cache needed to avoid one.
+- Diagnosis is from PR #328, which found it while building a much larger change. Only this part is taken: that PR also snapshots before overwriting and resolves conflicts newest-wins, both of which this project deliberately dropped — 1.34.0 answers the same moment by stopping and asking instead.
+- Two existing tests passed only because of the bug, each fabricating an `updated_at` old enough to stand in for age. They now build that age on disk and assert the database column cannot flip the answer. Reverse-verified in both directions.
 ## [1.34.1] - 2026-08-16
 
 ### Release Overview
