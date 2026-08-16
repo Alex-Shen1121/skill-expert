@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.34.1] - 2026-08-16
+
+### 发布概览
+- 修复 1.34.0 引入的回归：如果你此前已经手动把 DeepSeek Harness 添加为自定义 Agent，它的 skills 路径会变得无法修改。
+
+### 用户可见更新
+- **被新增内置 Agent 遮住的自定义 Agent，路径可以再次修改**（#378）—— 自定义 Agent 的 key 是从显示名派生的，所以名为「DeepSeek Harness」的自定义 Agent 会被存成 `deepseek_harness`——恰好是 1.34.0 新增的那个内置 key。此后应用解析和显示的都是内置的那份，而路径修改却被写进了被遮住的自定义定义里：保存提示成功，路径纹丝不动。现在两个路径都能正常修改，你不需要做任何清理。任何手动添加的 Agent 只要 key 撞上以后新增的内置 Agent，都会遇到同样的问题。
+
+### 开发者与治理更新
+- `find_adapter_with_store` 在同 key 时优先解析内置适配器，但两个路径写入函数都先查自定义工具，于是把修改存进了没人会读的地方。现在两者都改为先查内置；真正的自定义 Agent 仍然把路径存在自己的定义上。
+- 两个命令的 store 侧逻辑抽成 `apply_tool_skills_dir` 和 `apply_tool_project_skills_dir`，这样写入才能对着真实 store 测——命令本身是 async 且带 Tauri `State`，这正是它们此前一个测试都没有的原因。
+- 3 项回归测试，已反向验证：把任一写入函数改回旧优先级，对应测试即变红，而「真正的自定义 Agent」那条对照仍然通过。
 ## [1.34.0] - 2026-08-16
 
 ### 发布概览

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.1] - 2026-08-16
+
+### Release Overview
+- Fixes a regression in 1.34.0: if you had already added DeepSeek Harness as a custom agent by hand, its skills paths became impossible to change.
+
+### User-facing
+- **A custom agent shadowed by a new built-in can have its paths edited again** (#378) — A custom agent's key is derived from its display name, so an agent added as "DeepSeek Harness" was stored under `deepseek_harness` — the same key 1.34.0 shipped as a built-in. From then on the built-in was what the app resolved and displayed, while path edits were written to the hidden custom definition: the save reported success and the path never moved. Both paths are editable again, and no cleanup is needed. The same would have happened to anyone whose hand-added agent shared a key with any future built-in.
+
+### Developer & Governance
+- `find_adapter_with_store` resolves a built-in ahead of a custom tool of the same key, but both path writers checked custom tools first and stored the edit where nothing reads it. Both now consult built-ins first; a genuine custom agent still keeps its paths on its own definition.
+- The store side of each command is split into `apply_tool_skills_dir` and `apply_tool_project_skills_dir` so the writes can be exercised against a real store — the commands are async and take Tauri `State`, which is why neither had a test.
+- 3 regression tests, reverse-verified: restoring the old precedence in either writer fails its test while the genuine-custom-agent case keeps passing.
 ## [1.34.0] - 2026-08-16
 
 ### Release Overview
