@@ -50,7 +50,7 @@
 
 ## 功能
 
-- **统一技能库** — 从 Git 仓库、本地目录、`.zip` / `.skill` 文件或 [skills.sh](https://skills.sh) 市场安装技能，统一存放在 `~/.skills-manager`。
+- **统一技能库** — 从 Git 仓库、本地目录、`.zip` / `.skill` 文件或 [skills.sh](https://skills.sh) 市场安装技能，统一存放在 `~/.skill-expert`。
 - **Preset（预设）** — 将技能分组为命名 Preset。在任意工作区点击 Preset 标签，即可一键为当前 Agent 范围激活或停用其全部技能，激活的 Preset 显示 ✓，部分安装显示数量。
 - **全局工作区** — 每个 Agent 都有自己的页面，列出其全局目录里的所有 Skills（包括不是通过 Skills Manager 安装的），始终反映 Agent 实际看到的内容。可按 Agent 添加或移除 Skills，也可通过「全部 Agents」总览跨所有已安装 Agent 统一管理。
 - **项目工作区** — 查看并管理任意项目的本地 Skills 目录，支持与中央库双向同步。支持嵌套 Skill 目录和导出时按 Agent 分配。
@@ -190,7 +190,7 @@ npm run cli -- git commit -m "chore: update skills"
 - `git`：操作 git 管理的 `skills/` 仓库（`clone`、`pull`、`push`、`commit`、`versions`、`restore`）
 
 额外参数：
-- `--skills-root <path>`：直接针对某个已 clone / 已导出的 skills repo 操作，而不是本机 app 默认目录。manager 的状态（DB、scenarios、cache、logs）会落在 `~/.skills-manager/external/<name>-<hash>/`，按 skills root 的规范化路径分目录隔离，外部仓库本身保持干净。
+- `--skills-root <path>`：直接针对某个已 clone / 已导出的 skills repo 操作，而不是本机 app 默认目录。manager 的状态（DB、scenarios、cache、logs）会落在 `~/.skill-expert/external/<name>-<hash>/`，按 skills root 的规范化路径分目录隔离，外部仓库本身保持干净。
 - `--json`：给脚本 / agent 使用的机器可读输出
 
 ```bash
@@ -199,17 +199,17 @@ npm run -s cli -- --skills-root /path/to/my-skills --json skills list
 
 #### 把 CLI 二进制安装到 PATH
 
-如果 agent / 脚本直接调用 `skills-manager-cli`（而不是 `npm run`），需要先把二进制放到 PATH 上：
+如果 agent / 脚本直接调用 `skill-expert-cli`（而不是 `npm run`），需要先把二进制放到 PATH 上：
 
 ```bash
 npm run cli:install
 # 等价于：
-# cargo install --path src-tauri --bin skills-manager-cli --locked --force
+# cargo install --path src-tauri --bin skill-expert-cli --locked --force
 ```
 
-二进制会装到 `~/.cargo/bin/skills-manager-cli`。代码更新后再跑一次即可刷新。
+二进制会装到 `~/.cargo/bin/skill-expert-cli`。代码更新后再跑一次即可刷新。
 
-正式 Release 也会提供 macOS arm64/x64、Windows x64、Linux x64 的独立 CLI 文件。下载对应的 `skills-manager-cli-*`，在 macOS/Linux 添加可执行权限后放入 PATH 即可。
+正式 Release 也会提供 macOS arm64/x64、Windows x64、Linux x64 的独立 CLI 文件。下载对应的 `skill-expert-cli-*`，在 macOS/Linux 添加可执行权限后放入 PATH 即可。
 
 #### 与桌面应用并发使用
 

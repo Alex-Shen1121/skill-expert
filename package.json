@@ -1,5 +1,5 @@
 {
-  "name": "skills-manager",
+  "name": "skill-expert",
   "private": true,
   "version": "1.0.0",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "version:check": "node scripts/check-version-consistency.mjs",
     "desktop:identity:check": "node scripts/check-desktop-identity.mjs",
+    "cli:identity:check": "node scripts/check-cli-identity.mjs",
     "test:version": "node --test scripts/check-version-consistency.test.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",

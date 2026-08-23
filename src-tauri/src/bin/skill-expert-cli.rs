@@ -13,8 +13,8 @@ use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
 #[derive(Parser, Debug)]
-#[command(name = "skills-manager-cli")]
-#[command(about = "Shared-core CLI for skills-manager", version)]
+#[command(name = "skill-expert-cli")]
+#[command(about = "Skill Expert command-line interface", version)]
 struct Cli {
     #[arg(long, global = true)]
     json: bool,
@@ -3029,13 +3029,34 @@ mod tests {
     use super::*;
     use app_lib::core::skill_store::{ScenarioRecord, SkillRecord};
     use app_lib::core::tool_adapters::{CustomToolDef, ToolCategory};
+    use clap::CommandFactory;
     use std::fs;
     use tempfile::tempdir;
 
     #[test]
+    fn renders_the_skill_expert_cli_identity() {
+        let mut command = Cli::command();
+        assert_eq!(command.get_name(), "skill-expert-cli");
+        assert_eq!(command.get_version(), Some(env!("CARGO_PKG_VERSION")));
+
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+        assert!(help.contains("Skill Expert command-line interface"));
+        assert!(help.contains("Usage: skill-expert-cli"));
+        assert!(!help.contains("skills-manager-cli"));
+
+        let error = Cli::try_parse_from(["skill-expert-cli", "not-a-command"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Usage: skill-expert-cli"));
+        assert!(!error.contains("skills-manager-cli"));
+    }
+
+    #[test]
     fn parses_agent_friendly_commands_and_aliases() {
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "--json",
             "skills",
             "deploy",
@@ -3060,7 +3081,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "skills",
             "list",
             "--query",
@@ -3090,7 +3111,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "agents",
             "enable",
             "codex",
@@ -3105,7 +3126,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "presets",
             "open",
             "Web Dev",

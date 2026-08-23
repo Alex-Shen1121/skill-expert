@@ -35,6 +35,9 @@ jobs:
       - name: Check desktop identity
         run: npm run desktop:identity:check
 
+      - name: Check CLI identity
+        run: npm run cli:identity:check
+
       - name: Lint
         run: npm run lint
 

@@ -89,9 +89,9 @@ function updateCargoPackageVersion(cargoToml, nextVersion) {
 }
 
 function updateCargoLockVersion(cargoLock, nextVersion) {
-  const packagePattern = /(\[\[package\]\]\nname = "skills-manager"\nversion = ")[^"]+("\n)/;
+  const packagePattern = /(\[\[package\]\]\nname = "skill-expert"\nversion = ")[^"]+("\n)/;
   if (!packagePattern.test(cargoLock)) {
-    throw new Error('Missing skills-manager package entry in src-tauri/Cargo.lock');
+    throw new Error('Missing skill-expert package entry in src-tauri/Cargo.lock');
   }
   return cargoLock.replace(
     packagePattern,
