@@ -10,7 +10,7 @@ The external `xingkongliang/skills-manager` project, with its own decisions,
 versions, releases, and update channel.
 
 **Independent fork**:
-The `Alex-Shen1121/skills-manager` project, which owns a release line distinct
+The `Alex-Shen1121/skill-expert` project, which owns a release line distinct
 from the upstream project even when it incorporates upstream changes.
 
 **Skill Expert**:
@@ -46,3 +46,11 @@ _Avoid_: Latest main
 The merge-commit pull request that advances a release candidate from `main` to
 `release`; merging it is the approval to publish that candidate.
 _Avoid_: Release merge, tag push
+
+## Compatibility-only legacy markers
+
+The serialized backup protocol retains `.skills-manager` metadata paths,
+`refs/skills-manager/*` hidden refs, and the `created_by: "skills-manager"`
+schema marker so existing backups remain readable. These strings are protocol
+compatibility identifiers, not user-facing product or repository identities.
+Historical changelog entries remain unchanged as records of shipped releases.

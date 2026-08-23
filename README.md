@@ -2,62 +2,26 @@
   <img src="assets/icon.png" width="80" />
 </p>
 
-<h1 align="center">Skills Manager</h1>
+<h1 align="center">Skill Expert</h1>
 
 <p align="center">
   One app to manage AI agent skills across all your coding tools.
 </p>
 
 <p align="center">
-  <strong><a href="https://skillsmanager.dev">skillsmanager.dev</a></strong>
-</p>
-
-<p align="center">
-  🎬 <a href="https://www.youtube.com/watch?v=wfbCrfNASVU">Video intro (YouTube)</a>
+  <strong><a href="https://github.com/Alex-Shen1121/skill-expert">GitHub</a></strong>
   &nbsp;·&nbsp;
-  <a href="https://www.bilibili.com/video/BV1845F6REUu/">视频介绍 (Bilibili)</a>
-</p>
-
-<p align="center">
+  <a href="https://github.com/Alex-Shen1121/skill-expert/releases">Releases</a>
+  &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">中文说明</a>
-  &nbsp;·&nbsp;
-  <a href="https://x.com/JayTL00">@JayTL00 on X</a>
-  &nbsp;·&nbsp;
-  <a href="https://buymeacoffee.com/jaytl">Buy me a coffee</a>
 </p>
-
-<p align="center">
-  <a href="https://trendshift.io/repositories/23290?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-23290" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/23290" alt="xingkongliang%2Fskills-manager | Trendshift" width="250" height="55"/></a>
-</p>
-
-<p align="center">
-  <img src="assets/demo/library.png" width="800" alt="Skills Manager Library" />
-</p>
-
-<p align="center"><strong>Install Skills — Marketplace</strong></p>
-<p align="center"><img src="assets/demo/install-skills.png" width="800" alt="Install Skills Marketplace" /></p>
-
-<p align="center"><strong>Global Workspace</strong></p>
-<p align="center"><img src="assets/demo/global-workspace.png" width="800" alt="Global Workspace" /></p>
-
-<p align="center"><strong>Agent Workspace</strong></p>
-<p align="center"><img src="assets/demo/agent-workspace.png" width="800" alt="Agent Workspace" /></p>
-
-<p align="center"><strong>Project Workspace</strong></p>
-<p align="center"><img src="assets/demo/project-workspace.png" width="800" alt="Project Workspace" /></p>
-
-<p align="center"><strong>Backup & Multi-Device Sync</strong></p>
-<p align="center"><img src="assets/demo/backup.png" width="800" alt="Backup and multi-device sync" /></p>
-
-<p align="center"><strong>Settings</strong></p>
-<p align="center"><img src="assets/demo/settings.png" width="800" alt="Settings" /></p>
 
 ## Features
 
 - **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skill-expert` and can be customized in **Settings**.
 - **Marketplace** — Browse popular skills from the marketplace and find them with keyword search.
 - **Presets** — Group skills into named presets. In any workspace, click a preset pill to instantly activate or deactivate all its skills for the current agent scope. The sidebar lists all presets for quick access.
-- **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Skills Manager — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
+- **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Skill Expert — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
 - **Project Workspaces** — View and manage project-local skill folders for supported agents, compare them with your central library, and sync changes in either direction. Supports nested skill directories and per-agent assignment when exporting.
 - **Linked Workspaces** — Point to any directory as a skills root — useful for skills that live outside the default agent paths. Managed as a standalone workspace without participating in global preset sync.
 - **Multi-tool sync** — Sync skills to any supported tool via symlink or copy with a single click. Every skill card shows an agent icon badge per enabled agent — click a badge to install or remove that skill for that agent right from the card, with the badge reflecting live sync state.
@@ -79,7 +43,7 @@
 </p>
 
 - **Presets are reusable skill groups** — A preset is a named collection of skills. Activate a preset in any workspace to add all its skills to the selected agents; deactivate to remove them. Applying a preset is a one-time copy — not a live sync.
-- **Global Workspace manages per-agent global skills** — Each installed agent has its own global skills folder (e.g. `~/.claude/skills/` for Claude Code). Each agent page lists everything in that folder — even skills installed without Skills Manager — so you can add, remove, or adopt them; the All Agents overview manages every agent at once.
+- **Global Workspace manages per-agent global skills** — Each installed agent has its own global skills folder (e.g. `~/.claude/skills/` for Claude Code). Each agent page lists everything in that folder — even skills installed without Skill Expert — so you can add, remove, or adopt them; the All Agents overview manages every agent at once.
 - **Project Workspaces are project-local skill sets** — A project workspace manages the skills that live inside a specific project (e.g. `<project>/.claude/skills/`). Skills added here only apply to that project.
 - **Tags are for grouping and filtering** — Use tags to label similar skills, then filter by tag to find the subset you want quickly.
 - **Batch control works everywhere** — Multi-select skills in any workspace for bulk operations.
@@ -99,7 +63,7 @@ The **Backup** page (sidebar) keeps your skill library versioned in a Git reposi
 
 ### Connect
 
-- **Sign in with GitHub** (recommended): an 8-digit device-flow sign-in creates a private `skills-manager-backup` repository for you. The token is stored in the OS keychain — never in files or the repo config.
+- **Sign in with GitHub** (recommended): an 8-digit device-flow sign-in creates a private `skill-expert-backup` repository for you. The token is stored in the OS keychain — never in files or the repo config.
 - **Advanced**: paste any Git URL (HTTPS + PAT, SSH, self-hosted) under **Settings → Git Sync Configuration**.
 - On a new machine with an empty library, the first launch asks: **start fresh, or restore from a backup?**
 
@@ -272,36 +236,14 @@ npm run tauri:build
 npm run cli:build
 ```
 
-## Troubleshooting
+## Downloads and support
 
-### macOS: Gatekeeper blocks the app on first launch (v1.28.5 and earlier)
+Download current packages from [Skill Expert Releases](https://github.com/Alex-Shen1121/skill-expert/releases).
+Report reproducible problems with the in-app **Settings → Report Issue** action or in the
+[Skill Expert issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues).
 
-Releases from **v1.29.0** onward are signed with an Apple Developer ID certificate and notarized by Apple, so they open normally — no warning, no Terminal commands. If you are on an older build, upgrading is the fix.
-
-Releases **up to and including v1.28.5** predate notarization, and macOS blocks them:
-
-<p align="center">
-  <img src="assets/CleanShot_20260530_093302@2x.png" width="320" alt="macOS Gatekeeper warning: Apple could not verify skills-manager.app is free of malware" />
-</p>
-
-- **"Apple could not verify … is free of malware"** or **"App can't be opened because it is from an unidentified developer"** (v1.20.0 – v1.28.5) — On macOS 15 (Sequoia) the dialog above only offers **Move to Trash** / **Done**: click **Done**, then open **System Settings → Privacy & Security** and click **Open Anyway** (it appears after the first blocked launch). On older macOS you can instead right-click the app in Finder and choose **Open**, then confirm in the dialog.
-- **"App is damaged and can't be opened"** (v1.19.0 and earlier) — Run this in Terminal, then open the app again:
-
-  ```bash
-  xattr -cr /Applications/skills-manager.app
-  ```
-
-  Replace the path with wherever you placed the `.app` file if it's not in `/Applications`.
-
-Upgrading to a notarized build changes the app's code signature, so macOS may ask again for permission to read the `skills-manager-git-backup` keychain entry. Click **Always Allow** — the signing identity is stable from v1.29.0 onward, so later updates should not ask again.
-
-## Star History
-
-<p align="center">
-  <a href="https://github.com/xingkongliang/star-history-svg">
-    <img src="assets/star-history.svg" width="800" alt="Star History chart for xingkongliang/skills-manager" />
-  </a>
-</p>
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the issue,
+discussion, and pull-request workflow.
 
 ## License
 

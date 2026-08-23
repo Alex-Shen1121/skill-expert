@@ -1,5 +1,5 @@
 version = 1
-name = "Skills Manager"
+name = "Skill Expert"
 
 [setup]
 script = "npm ci"
