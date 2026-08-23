@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn repo_name_validation() {
-        assert!(is_valid_repo_name("skills-manager-backup"));
+        assert!(is_valid_repo_name("skill-expert-backup"));
         assert!(is_valid_repo_name("My_Backup.2026"));
         assert!(!is_valid_repo_name(""));
         assert!(!is_valid_repo_name("."));

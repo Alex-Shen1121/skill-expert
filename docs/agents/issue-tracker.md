@@ -2,7 +2,7 @@
 
 本项目的任务和规格说明记录在 GitHub Issues 中。
 
-目标仓库：`Alex-Shen1121/skills-manager`
+目标仓库：`Alex-Shen1121/skill-expert`
 
 所有操作使用 `gh` 命令行工具。
 

@@ -3,6 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "license": "MIT",
+  "homepage": "https://github.com/Alex-Shen1121/skill-expert#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alex-Shen1121/skill-expert.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Alex-Shen1121/skill-expert/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +21,8 @@
     "version:check": "node scripts/check-version-consistency.mjs",
     "desktop:identity:check": "node scripts/check-desktop-identity.mjs",
     "cli:identity:check": "node scripts/check-cli-identity.mjs",
+    "repository:identity:check": "node scripts/check-repository-identity.mjs",
+    "test:repository-identity": "node --test scripts/check-repository-identity.test.mjs",
     "test:version": "node --test scripts/check-version-consistency.test.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",

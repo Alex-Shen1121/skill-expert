@@ -38,6 +38,12 @@ jobs:
       - name: Check CLI identity
         run: npm run cli:identity:check
 
+      - name: Test repository identity contract
+        run: npm run test:repository-identity
+
+      - name: Check repository identity
+        run: npm run repository:identity:check
+
       - name: Lint
         run: npm run lint
 
