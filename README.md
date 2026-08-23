@@ -54,7 +54,7 @@
 
 ## Features
 
-- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skills-manager` and can be customized in **Settings**.
+- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skill-expert` and can be customized in **Settings**.
 - **Marketplace** — Browse popular skills from the marketplace and find them with keyword search.
 - **Presets** — Group skills into named presets. In any workspace, click a preset pill to instantly activate or deactivate all its skills for the current agent scope. The sidebar lists all presets for quick access.
 - **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Skills Manager — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
@@ -240,7 +240,7 @@ Available command groups:
 - `git` — operate on the git-backed `skills/` repository (`clone`, `pull`, `push`, `commit`, `versions`, `restore`)
 
 Extra flags:
-- `--skills-root <path>` — operate on a cloned/exported skills repo directly instead of the local app default. The manager's state (DB, presets, cache, logs) lives in `~/.skills-manager/external/<name>-<hash>/`, namespaced by the canonical path of the skills root, so the external checkout itself stays clean.
+- `--skills-root <path>` — operate on a cloned/exported skills repo directly instead of the local app default. The manager's state (DB, presets, cache, logs) lives in `~/.skill-expert/external/<name>-<hash>/`, namespaced by the canonical path of the skills root, so the external checkout itself stays clean.
 - `--json` — machine-readable output for scripts/agents
 
 ```bash
@@ -249,17 +249,17 @@ npm run -s cli -- --skills-root /path/to/my-skills --json skills list
 
 #### Install the binary on PATH
 
-Agents and scripts that invoke `skills-manager-cli` directly (without `npm run`) need the binary on PATH. Install it with:
+Agents and scripts that invoke `skill-expert-cli` directly (without `npm run`) need the binary on PATH. Install it with:
 
 ```bash
 npm run cli:install
 # equivalent to:
-# cargo install --path src-tauri --bin skills-manager-cli --locked --force
+# cargo install --path src-tauri --bin skill-expert-cli --locked --force
 ```
 
-This drops the binary at `~/.cargo/bin/skills-manager-cli`. Re-run after pulling updates to refresh it.
+This drops the binary at `~/.cargo/bin/skill-expert-cli`. Re-run after pulling updates to refresh it.
 
-Official releases also publish standalone CLI binaries for macOS arm64/x64, Windows x64, and Linux x64. Download the matching `skills-manager-cli-*` asset, make it executable on macOS/Linux, and place it on PATH.
+Official releases also publish standalone CLI binaries for macOS arm64/x64, Windows x64, and Linux x64. Download the matching `skill-expert-cli-*` asset, make it executable on macOS/Linux, and place it on PATH.
 
 #### Concurrent use with the desktop app
 

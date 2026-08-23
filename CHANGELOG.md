@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### User-facing
 - The application, windows, tray menu, settings, diagnostics, and localized UI now use the Skill Expert name.
 - Skill Expert uses isolated default storage and can be installed alongside the upstream Skills Manager application.
+- The supported agent-ready command is now `skill-expert-cli`; its npm/Cargo package identity, help, installation path, release assets, and managed-skill data paths use the Skill Expert identity.
 
 ### Developer & Governance
 - The desktop bundle identifier is `com.codingshen.skill-expert`.

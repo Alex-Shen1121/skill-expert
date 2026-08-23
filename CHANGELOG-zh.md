@@ -13,6 +13,7 @@
 ### 用户可见更新
 - 应用、窗口、托盘菜单、设置、诊断与三种语言界面统一显示 Skill Expert。
 - Skill Expert 使用隔离的默认存储位置，可与上游 Skills Manager 同时安装。
+- 面向 Agent 的受支持命令现为 `skill-expert-cli`；其 npm/Cargo 包身份、帮助、安装路径、Release 资产和托管 Skill 数据路径均使用 Skill Expert 身份。
 
 ### 开发者与治理更新
 - 桌面 bundle identifier 为 `com.codingshen.skill-expert`。
