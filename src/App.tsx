@@ -5,6 +5,7 @@ import { ThemeProvider, useThemeContext } from "./context/ThemeContext";
 import { HelpDialog } from "./components/HelpDialog";
 import { CloseActionGuard } from "./components/CloseActionGuard";
 import { FirstRunRestoreDialog } from "./components/FirstRunRestoreDialog";
+import { ExistingInstallationImportGate } from "./components/ExistingInstallationImportDialog";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./views/Dashboard";
 import { MySkills } from "./views/MySkills";
@@ -37,25 +38,27 @@ function App() {
     <ThemeProvider>
       <AppProvider>
         <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/my-skills" element={<MySkills />} />
-              <Route path="/global-workspace" element={<WorkspaceView config={CODING_WORKSPACE_CONFIG} />} />
-              <Route path="/global-workspace/:agentKey" element={<WorkspaceView config={CODING_WORKSPACE_CONFIG} />} />
-              <Route path="/lobster-workspace" element={<WorkspaceView config={LOBSTER_WORKSPACE_CONFIG} />} />
-              <Route path="/lobster-workspace/:agentKey" element={<WorkspaceView config={LOBSTER_WORKSPACE_CONFIG} />} />
-              <Route path="/install" element={<InstallSkills />} />
-              <Route path="/backup" element={<Backup />} />
-              <Route path="/project/:id" element={<ProjectDetail />} />
-              <Route path="/settings" element={<Settings />} />
-            </Route>
-          </Routes>
-          <HelpDialog />
-          <CloseActionGuard />
-          <FirstRunRestoreDialog />
+          <ExistingInstallationImportGate>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/my-skills" element={<MySkills />} />
+                <Route path="/global-workspace" element={<WorkspaceView config={CODING_WORKSPACE_CONFIG} />} />
+                <Route path="/global-workspace/:agentKey" element={<WorkspaceView config={CODING_WORKSPACE_CONFIG} />} />
+                <Route path="/lobster-workspace" element={<WorkspaceView config={LOBSTER_WORKSPACE_CONFIG} />} />
+                <Route path="/lobster-workspace/:agentKey" element={<WorkspaceView config={LOBSTER_WORKSPACE_CONFIG} />} />
+                <Route path="/install" element={<InstallSkills />} />
+                <Route path="/backup" element={<Backup />} />
+                <Route path="/project/:id" element={<ProjectDetail />} />
+                <Route path="/settings" element={<Settings />} />
+              </Route>
+            </Routes>
+            <HelpDialog />
+            <CloseActionGuard />
+            <FirstRunRestoreDialog />
+            <ThemedToaster />
+          </ExistingInstallationImportGate>
         </BrowserRouter>
-        <ThemedToaster />
       </AppProvider>
     </ThemeProvider>
   );

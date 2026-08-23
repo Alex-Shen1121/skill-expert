@@ -48,22 +48,51 @@ impl Default for StartupTimings {
 }
 
 pub fn initialize_store() -> Result<(Arc<SkillStore>, StartupTimings)> {
-    initialize_store_inner(true)
+    let caller = super::existing_install_import::ProcessCallerRole::Gui;
+    let import_lock_is_exclusive =
+        super::existing_install_import::acquire_process_lifetime_lock(caller)?;
+    initialize_store_inner(caller, import_lock_is_exclusive)
 }
 
 pub fn initialize_cli_store() -> Result<Arc<SkillStore>> {
-    initialize_store_inner(false).map(|(store, _)| store)
+    let caller = super::existing_install_import::ProcessCallerRole::Cli;
+    let import_lock_is_exclusive =
+        super::existing_install_import::acquire_process_lifetime_lock(caller)?;
+    initialize_store_inner(caller, import_lock_is_exclusive).map(|(store, _)| store)
 }
 
 fn initialize_store_inner(
-    apply_startup_default: bool,
+    caller: super::existing_install_import::ProcessCallerRole,
+    import_lock_is_exclusive: bool,
 ) -> Result<(Arc<SkillStore>, StartupTimings)> {
     let total_start = Instant::now();
     let mut timings = StartupTimings::default();
 
+    // Capture this before ensure_central_repo: a migration failure may install
+    // an internal fallback override for the app's own intact library. That is
+    // still the desktop library and must consume its pending import. A caller-
+    // supplied runtime override remains isolated from the desktop marker.
+    let isolated_runtime_library = central_repo::base_dir_override_active();
     let step = Instant::now();
     central_repo::ensure_central_repo().context("Failed to create central repo")?;
     timings.ensure_central_repo_ms = step.elapsed().as_millis();
+
+    // Resolve/migrate Skill Expert's own configured central library first so
+    // an approved upstream import always targets the final active path. An
+    // explicit runtime override is an isolated library and must not consume the
+    // desktop installation's pending marker. CLI callers have already been
+    // rejected at lock acquisition when that desktop marker is Pending.
+    if caller == super::existing_install_import::ProcessCallerRole::Gui
+        && !isolated_runtime_library
+        && import_lock_is_exclusive
+    {
+        super::existing_install_import::process_pending_before_store_open(caller)
+            .context("Existing-installation import failed before store open")?;
+    }
+    if caller == super::existing_install_import::ProcessCallerRole::Gui {
+        super::existing_install_import::downgrade_process_lifetime_lock_to_shared(caller)
+            .context("Failed to downgrade process lock before opening the Skill Expert database")?;
+    }
 
     let db_path = central_repo::db_path();
     let step = Instant::now();
@@ -99,7 +128,7 @@ fn initialize_store_inner(
     }
 
     let step = Instant::now();
-    if apply_startup_default {
+    if caller == super::existing_install_import::ProcessCallerRole::Gui {
         scenario_service::ensure_default_startup_scenario(&store)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .context("Failed to initialize startup scenario")?;

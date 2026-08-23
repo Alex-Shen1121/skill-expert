@@ -194,7 +194,7 @@ pub fn base_dir() -> PathBuf {
 /// Whether an explicit runtime base-dir override is active (CLI `--skills-root`
 /// / `--path`). Startup migration is skipped when it is — the caller chose a
 /// specific library and the app's shared pending-migration marker doesn't apply.
-fn base_dir_override_active() -> bool {
+pub(crate) fn base_dir_override_active() -> bool {
     BASE_DIR_OVERRIDE
         .get_or_init(|| Mutex::new(None))
         .lock()

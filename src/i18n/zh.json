@@ -221,6 +221,16 @@
     "restoreSuccess": "备份已恢复，技能已就绪。",
     "hint": "之后随时可以在侧边栏的「备份」页连接或恢复备份。"
   },
+  "existingInstallImport": {
+    "title": "要导入既有上游产品的数据吗？",
+    "subtitle": "Skill Expert 检测到既有的上游技能库。导入会把数据复制到 Skill Expert 的独立技能库，原目录保持不变。",
+    "safety": "导入会在安全重启后执行。启用导入副本前，Skill Expert 现有技能库会保留为可恢复备份。",
+    "backupPath": "可恢复备份：",
+    "loadErrorTitle": "技能库启动状态需要处理",
+    "loadErrorSubtitle": "Skill Expert 无法确认是否需要导入既有安装。请先修复所示问题或重试，再选择其他首次启动方式。",
+    "startFresh": "全新开始",
+    "import": "导入既有数据"
+  },
   "mySkills": {
     "title": "技能库",
     "applyToDefault": "应用 Preset",

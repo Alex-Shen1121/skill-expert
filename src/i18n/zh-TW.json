@@ -221,6 +221,16 @@
     "restoreSuccess": "備份已還原，技能已就緒。",
     "hint": "之後隨時可以在側邊欄的「備份」頁連線或還原備份。"
   },
+  "existingInstallImport": {
+    "title": "要匯入既有上游產品的資料嗎？",
+    "subtitle": "Skill Expert 偵測到既有的上游技能庫。匯入會把資料複製到 Skill Expert 的獨立技能庫，原目錄保持不變。",
+    "safety": "匯入會在安全重新啟動後執行。啟用匯入副本前，Skill Expert 現有技能庫會保留為可復原備份。",
+    "backupPath": "可復原備份：",
+    "loadErrorTitle": "技能庫啟動狀態需要處理",
+    "loadErrorSubtitle": "Skill Expert 無法確認是否需要匯入既有安裝。請先修正所示問題或重試，再選擇其他首次啟動方式。",
+    "startFresh": "全新開始",
+    "import": "匯入既有資料"
+  },
   "mySkills": {
     "title": "技能庫",
     "applyToDefault": "套用 Preset",
