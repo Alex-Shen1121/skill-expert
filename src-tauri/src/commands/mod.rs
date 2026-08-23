@@ -1,5 +1,6 @@
 pub mod agent_workspace;
 pub mod browse;
+pub mod existing_install_import;
 pub mod git_backup;
 pub mod presets;
 pub mod projects;

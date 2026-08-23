@@ -221,6 +221,16 @@
     "restoreSuccess": "Backup restored — your skills are ready.",
     "hint": "You can connect or restore a backup at any time from the Backup page in the sidebar."
   },
+  "existingInstallImport": {
+    "title": "Import data from the upstream product?",
+    "subtitle": "Skill Expert found an existing upstream library. Importing copies it into Skill Expert's independent library and leaves the original unchanged.",
+    "safety": "Import runs after a safe restart. Any existing Skill Expert library is preserved as a recoverable backup before the imported copy is activated.",
+    "backupPath": "Recoverable backup:",
+    "loadErrorTitle": "Skill library startup needs attention",
+    "loadErrorSubtitle": "Skill Expert could not verify whether an existing installation needs to be imported. Fix the reported problem or retry before choosing another first-run path.",
+    "startFresh": "Start Fresh",
+    "import": "Import Existing Data"
+  },
   "mySkills": {
     "title": "Library",
     "applyToDefault": "Apply Preset",

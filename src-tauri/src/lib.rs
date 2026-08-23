@@ -1060,6 +1060,9 @@ pub fn run() {
             commands::settings::app_exit,
             commands::settings::restart_app,
             commands::settings::hide_to_tray,
+            // Existing upstream installation import
+            commands::existing_install_import::get_existing_installation_import_status,
+            commands::existing_install_import::choose_existing_installation_import,
             // Git Backup
             commands::git_backup::git_backup_fetch,
             commands::git_backup::git_backup_status,
