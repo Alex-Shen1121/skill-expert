@@ -415,7 +415,9 @@ jobs:
 
           asset_names=$(echo "$release_json" | jq -r '.assets[]?.name')
           echo "Assets on the draft release:"
-          echo "$asset_names" | sed 's/^/  /'
+          while IFS= read -r asset_name; do
+            printf '  %s\n' "$asset_name"
+          done <<< "$asset_names"
 
           if ! echo "$asset_names" | grep -qx 'latest.json'; then
             echo "Missing updater metadata asset: latest.json" >&2

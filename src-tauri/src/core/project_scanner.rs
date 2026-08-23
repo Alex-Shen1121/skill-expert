@@ -51,7 +51,7 @@ pub fn read_project_skills(
 
     for config in agent_configs {
         let skills_dir = project_path.join(&config.relative_skills_dir);
-        let disabled_dir = project_path.join(format!("{}-disabled", &config.relative_skills_dir));
+        let disabled_dir = project_path.join(format!("{}-disabled", config.relative_skills_dir));
 
         read_skills_from_dir(
             &skills_dir,
@@ -71,7 +71,7 @@ pub fn read_project_skills(
         );
     }
 
-    skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    skills.sort_by_key(|skill| skill.name.to_lowercase());
     skills
 }
 
@@ -101,7 +101,7 @@ pub fn read_linked_workspace_skills(
             recursive,
         );
     }
-    skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    skills.sort_by_key(|skill| skill.name.to_lowercase());
     skills
 }
 
@@ -145,6 +145,9 @@ fn read_skills_from_dir(
     );
 }
 
+// Keeping the traversal state explicit makes recursion and cycle detection
+// auditable; grouping it into an opaque context would make those invariants less clear.
+#[allow(clippy::too_many_arguments)]
 fn read_skills_from_dir_recursive(
     root: &Path,
     current: &Path,

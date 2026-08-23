@@ -7,8 +7,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
     "preview": "vite preview",
+    "version:check": "node scripts/check-version-consistency.mjs",
+    "test:version": "node --test scripts/check-version-consistency.test.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
