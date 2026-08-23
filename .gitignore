@@ -33,7 +33,10 @@ dist-ssr
 
 .claude
 docs
+!docs/
+docs/*
+!docs/agents/
+!docs/agents/*.md
 reference
 CLAUDE.md
 .loop-log
-
