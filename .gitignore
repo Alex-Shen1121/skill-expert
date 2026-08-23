@@ -40,3 +40,6 @@ docs/*
 reference
 CLAUDE.md
 .loop-log
+
+# Local Git worktrees
+.worktrees/
