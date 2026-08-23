@@ -7,6 +7,9 @@ use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 
 const CONFIG_FILE_NAME: &str = "repo-config.json";
+const DEFAULT_BASE_DIR_NAME: &str = ".skill-expert";
+const CONFIG_DIR_NAME: &str = "skill-expert";
+const DATABASE_FILE_NAME: &str = "skill-expert.db";
 
 static BASE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static SKILLS_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -81,13 +84,13 @@ struct RepoPathConfig {
 fn default_base_dir() -> PathBuf {
     dirs::home_dir()
         .expect("Cannot determine home directory")
-        .join(".skills-manager")
+        .join(DEFAULT_BASE_DIR_NAME)
 }
 
 fn config_file_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(default_base_dir)
-        .join("skills-manager")
+        .join(CONFIG_DIR_NAME)
         .join(CONFIG_FILE_NAME)
 }
 
@@ -332,7 +335,7 @@ pub fn logs_dir() -> PathBuf {
 }
 
 pub fn db_path() -> PathBuf {
-    base_dir().join("skills-manager.db")
+    base_dir().join(DATABASE_FILE_NAME)
 }
 
 pub fn set_base_dir_override(path: Option<String>) -> Result<PathBuf> {
@@ -583,29 +586,6 @@ pub fn ensure_central_repo() -> Result<()> {
             set_runtime_base_dir_override(Some(source));
         }
     }
-    // Re-resolve: a fallback override above may have changed the base.
-    let current_base = base_dir();
-
-    // Legacy `.agent-skills` migration must run before create_dir_all below:
-    // it renames entries into `current_base` and skips ones that already
-    // exist, so pre-created empty dirs would silently swallow it (the old
-    // ordering made this branch dead code).
-    let legacy_path = dirs::home_dir().map(|home| home.join(".agent-skills"));
-    if let Some(old_path) = legacy_path {
-        if old_path.exists() && !current_base.join("skills").exists() {
-            log::info!("Migrating from old path {:?}", old_path);
-            fs::create_dir_all(&current_base)?;
-            if let Ok(entries) = fs::read_dir(&old_path) {
-                for entry in entries.flatten() {
-                    let dest = current_base.join(entry.file_name());
-                    if !dest.exists() {
-                        let _ = fs::rename(entry.path(), &dest);
-                    }
-                }
-            }
-        }
-    }
-
     let dirs = [skills_dir(), scenarios_dir(), cache_dir(), logs_dir()];
     for d in &dirs {
         fs::create_dir_all(d)?;
@@ -617,6 +597,30 @@ pub fn ensure_central_repo() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_state_defaults_use_skill_expert_namespace() {
+        assert_eq!(
+            default_base_dir()
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(".skill-expert")
+        );
+        assert_eq!(
+            config_file_path()
+                .parent()
+                .and_then(|dir| dir.file_name())
+                .and_then(|name| name.to_str()),
+            Some("skill-expert")
+        );
+
+        let _guard = test_base_dir_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let isolated_base = temp.path().join("skill-expert-state-test");
+        set_test_base_dir_override(Some(isolated_base.clone()));
+        assert_eq!(db_path(), isolated_base.join("skill-expert.db"));
+        set_test_base_dir_override(None);
+    }
 
     // ── migrate_repo_if_needed (#252) ──
 

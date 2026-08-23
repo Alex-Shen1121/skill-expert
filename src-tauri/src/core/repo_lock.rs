@@ -13,7 +13,7 @@ use super::central_repo;
 /// reclone flows, and on Windows mandatory file locking makes it impossible
 /// to rename a directory that contains a file held with an exclusive lock —
 /// see issue #99 (os error 5 / "Access is denied").
-const LOCK_FILE_NAME: &str = ".skills-manager.lock";
+const LOCK_FILE_NAME: &str = ".skill-expert.lock";
 
 /// How long a user-initiated ("foreground") operation waits for the central
 /// repository lock before giving up with a "busy" error. Background work holds
@@ -125,6 +125,7 @@ mod tests {
     /// flow used by "use existing remote backup".
     #[test]
     fn lock_file_lives_outside_skills_dir() {
+        assert_eq!(LOCK_FILE_NAME, ".skill-expert.lock");
         let _guard = central_repo::test_base_dir_lock();
         let tmp = tempdir().unwrap();
         let base = tmp.path().join("base");

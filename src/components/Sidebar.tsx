@@ -87,7 +87,7 @@ export function Sidebar() {
   useEffect(() => { setOrderedPresets(presets); }, [presets]);
   useEffect(() => { setOrderedProjects(projects); }, [projects]);
   useEffect(() => {
-    const stored = localStorage.getItem("skills-manager:tool-order");
+    const stored = localStorage.getItem("skill-expert:tool-order");
     const storedOrder: string[] = stored ? JSON.parse(stored) : [];
     const sorted = [
       ...storedOrder.flatMap((key) => {
@@ -99,7 +99,7 @@ export function Sidebar() {
     setOrderedCodingTools(sorted);
   }, [installedCodingTools]);
   useEffect(() => {
-    const stored = localStorage.getItem("skills-manager:lobster-tool-order");
+    const stored = localStorage.getItem("skill-expert:lobster-tool-order");
     const storedOrder: string[] = stored ? JSON.parse(stored) : [];
     const sorted = [
       ...storedOrder.flatMap((key) => {
@@ -157,10 +157,10 @@ export function Sidebar() {
     reordered.splice(result.destination.index, 0, moved);
     if (category === "lobster") {
       setOrderedLobsterTools(reordered);
-      localStorage.setItem("skills-manager:lobster-tool-order", JSON.stringify(reordered.map((t) => t.key)));
+      localStorage.setItem("skill-expert:lobster-tool-order", JSON.stringify(reordered.map((t) => t.key)));
     } else {
       setOrderedCodingTools(reordered);
-      localStorage.setItem("skills-manager:tool-order", JSON.stringify(reordered.map((t) => t.key)));
+      localStorage.setItem("skill-expert:tool-order", JSON.stringify(reordered.map((t) => t.key)));
     }
   };
 

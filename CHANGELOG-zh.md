@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.0] - 2026-08-24
+
+### 发布概览
+- 建立 Skill Expert 独立桌面产品及其单独的 1.0.0 版本线与安装身份。
+
+### 用户可见更新
+- 应用、窗口、托盘菜单、设置、诊断与三种语言界面统一显示 Skill Expert。
+- Skill Expert 使用隔离的默认存储位置，可与上游 Skills Manager 同时安装。
+
+### 开发者与治理更新
+- 桌面 bundle identifier 为 `com.codingshen.skill-expert`。
+- 更新元数据只读取独立的 `Alex-Shen1121/skill-expert` Release 契约。
+
 ## [1.34.2] - 2026-08-16
 
 ### 发布概览
