@@ -1,0 +1,20 @@
+version = 1
+name = "Skills Manager"
+
+[setup]
+script = "npm ci"
+
+[[actions]]
+name = "Run desktop app"
+icon = "run"
+command = "npm run tauri:dev"
+
+[[actions]]
+name = "Check frontend"
+icon = "test"
+command = "npm run lint && npm run build"
+
+[[actions]]
+name = "Run Rust tests"
+icon = "test"
+command = "cargo test --manifest-path src-tauri/Cargo.toml"
