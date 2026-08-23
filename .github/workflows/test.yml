@@ -50,10 +50,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: GOBIN="$RUNNER_TEMP/actionlint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
       - name: Validate workflows
-        run: "$(go env GOPATH)/bin/actionlint"
+        run: '"$RUNNER_TEMP/actionlint-bin/actionlint"'
 
   rust-quality:
     runs-on: ubuntu-22.04
