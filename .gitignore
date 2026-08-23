@@ -37,6 +37,8 @@ docs
 docs/*
 !docs/agents/
 !docs/agents/*.md
+!docs/adr/
+!docs/adr/*.md
 reference
 CLAUDE.md
 .loop-log
