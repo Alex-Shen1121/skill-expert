@@ -53,7 +53,7 @@ fn process_lock_path() -> Result<PathBuf> {
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
     let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
-    Ok(config_dir.join("skill-expert/process.lock"))
+    Ok(config_dir.join("skill-expert").join("process.lock"))
 }
 
 fn open_process_lock_file(path: &Path) -> Result<File> {
@@ -116,7 +116,9 @@ fn import_state_file_path() -> Result<PathBuf> {
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
     let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
-    Ok(config_dir.join("skill-expert/existing-installation-import.json"))
+    Ok(config_dir
+        .join("skill-expert")
+        .join("existing-installation-import.json"))
 }
 
 fn read_regular_control_file(path: &Path, label: &str) -> Result<Option<Vec<u8>>> {
@@ -289,9 +291,11 @@ fn production_environment() -> Result<ImportEnvironment> {
     let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
     Ok(ImportEnvironment {
         home_dir,
-        upstream_config_file: config_dir.join("skills-manager/repo-config.json"),
+        upstream_config_file: config_dir.join("skills-manager").join("repo-config.json"),
         target_base: super::central_repo::base_dir(),
-        state_file: config_dir.join("skill-expert/existing-installation-import.json"),
+        state_file: config_dir
+            .join("skill-expert")
+            .join("existing-installation-import.json"),
     })
 }
 
@@ -1302,7 +1306,11 @@ mod tests {
     #[test]
     fn normal_process_lifetime_shared_guards_can_coexist() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
 
         let first = try_acquire_process_lock_at(&lock_path, ProcessLockMode::Shared).unwrap();
         let second = try_acquire_process_lock_at(&lock_path, ProcessLockMode::Shared)
@@ -1315,7 +1323,11 @@ mod tests {
     #[test]
     fn pending_import_exclusive_lock_is_denied_while_a_shared_process_is_alive() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
 
         let shared = try_acquire_process_lock_at(&lock_path, ProcessLockMode::Shared).unwrap();
         let error =
@@ -1328,7 +1340,11 @@ mod tests {
     #[test]
     fn pending_import_exclusive_lock_waits_for_the_old_process_to_release() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let shared = try_acquire_process_lock_at(&lock_path, ProcessLockMode::Shared).unwrap();
         let release = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
@@ -1349,7 +1365,11 @@ mod tests {
     #[test]
     fn process_lifetime_lock_downgrades_to_shared_before_database_open() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let process_cell = OnceLock::new();
 
         acquire_process_lock_once(
@@ -1370,7 +1390,11 @@ mod tests {
     #[test]
     fn process_lifetime_lock_is_reentrant_for_repo_set_reset_in_one_process() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let process_cell = OnceLock::new();
 
         acquire_process_lock_once(
@@ -1395,10 +1419,16 @@ mod tests {
     #[test]
     fn corrupt_import_state_uses_shared_lock_and_remains_untouched_for_the_error_gate() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let state_path = temp
             .path()
-            .join("config/skill-expert/existing-installation-import.json");
+            .join("config")
+            .join("skill-expert")
+            .join("existing-installation-import.json");
         fs::create_dir_all(state_path.parent().unwrap()).unwrap();
         let corrupt = b"{ not valid import state";
         fs::write(&state_path, corrupt).unwrap();
@@ -1426,7 +1456,11 @@ mod tests {
     #[test]
     fn syntactically_valid_pending_state_requests_the_exclusive_startup_lock() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let environment = test_environment(temp.path());
         let import_id = uuid::Uuid::new_v4().to_string();
         let staging =
@@ -1464,7 +1498,11 @@ mod tests {
     #[test]
     fn cli_startup_refuses_a_gui_pending_import_without_mutating_recovery_state() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
         create_upstream_database(&upstream);
@@ -1516,9 +1554,15 @@ mod tests {
     fn test_environment(root: &std::path::Path) -> ImportEnvironment {
         ImportEnvironment {
             home_dir: root.join("home"),
-            upstream_config_file: root.join("config/skills-manager/repo-config.json"),
-            target_base: root.join("home/.skill-expert"),
-            state_file: root.join("config/skill-expert/existing-installation-import.json"),
+            upstream_config_file: root
+                .join("config")
+                .join("skills-manager")
+                .join("repo-config.json"),
+            target_base: root.join("home").join(".skill-expert"),
+            state_file: root
+                .join("config")
+                .join("skill-expert")
+                .join("existing-installation-import.json"),
         }
     }
 
@@ -1537,7 +1581,7 @@ mod tests {
     fn detects_a_usable_upstream_custom_central_library() {
         let temp = tempfile::tempdir().unwrap();
         let environment = test_environment(temp.path());
-        let custom = temp.path().join("custom/upstream-library");
+        let custom = temp.path().join("custom").join("upstream-library");
         create_upstream_database(&custom);
         fs::create_dir_all(environment.upstream_config_file.parent().unwrap()).unwrap();
         fs::write(
@@ -1691,7 +1735,8 @@ mod tests {
         fs::write(
             environment
                 .home_dir
-                .join(".skills-manager/skills-manager.db"),
+                .join(".skills-manager")
+                .join("skills-manager.db"),
             b"not sqlite",
         )
         .unwrap();
@@ -1730,10 +1775,16 @@ mod tests {
     #[cfg(unix)]
     fn fifo_import_state_uses_a_shared_startup_lock_without_waiting_for_a_writer() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("config/skill-expert/process.lock");
+        let lock_path = temp
+            .path()
+            .join("config")
+            .join("skill-expert")
+            .join("process.lock");
         let state_path = temp
             .path()
-            .join("config/skill-expert/existing-installation-import.json");
+            .join("config")
+            .join("skill-expert")
+            .join("existing-installation-import.json");
         fs::create_dir_all(state_path.parent().unwrap()).unwrap();
         assert!(std::process::Command::new("mkfifo")
             .arg(&state_path)
@@ -1840,8 +1891,8 @@ mod tests {
     fn pending_legacy_relocation_source_wins_over_the_configured_destination() {
         let temp = tempfile::tempdir().unwrap();
         let environment = test_environment(temp.path());
-        let active_source = temp.path().join("custom/current-library");
-        let future_destination = temp.path().join("custom/future-library");
+        let active_source = temp.path().join("custom").join("current-library");
+        let future_destination = temp.path().join("custom").join("future-library");
         create_upstream_database(&active_source);
         create_upstream_database(&future_destination);
         fs::create_dir_all(environment.upstream_config_file.parent().unwrap()).unwrap();
@@ -1993,9 +2044,17 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
-        fs::create_dir_all(upstream.join("skills/demo")).unwrap();
-        fs::write(upstream.join("skills/demo/SKILL.md"), b"upstream skill").unwrap();
-        let source_skill_path = upstream.join("skills/demo").to_string_lossy().to_string();
+        fs::create_dir_all(upstream.join("skills").join("demo")).unwrap();
+        fs::write(
+            upstream.join("skills").join("demo").join("SKILL.md"),
+            b"upstream skill",
+        )
+        .unwrap();
+        let source_skill_path = upstream
+            .join("skills")
+            .join("demo")
+            .to_string_lossy()
+            .to_string();
         let source_store = SkillStore::new(&upstream.join("skills-manager.db")).unwrap();
         source_store
             .insert_skill(&SkillRecord {
@@ -2040,7 +2099,14 @@ mod tests {
         process_pending_import(&environment).unwrap();
 
         assert_eq!(
-            fs::read(environment.target_base.join("skills/demo/SKILL.md")).unwrap(),
+            fs::read(
+                environment
+                    .target_base
+                    .join("skills")
+                    .join("demo")
+                    .join("SKILL.md"),
+            )
+            .unwrap(),
             b"upstream skill"
         );
         assert!(environment.target_base.join("skill-expert.db").is_file());
@@ -2051,7 +2117,11 @@ mod tests {
             "existing target data is retained in a recoverable backup"
         );
         assert!(upstream.join("skills-manager.db").is_file());
-        assert!(upstream.join("skills/demo/SKILL.md").is_file());
+        assert!(upstream
+            .join("skills")
+            .join("demo")
+            .join("SKILL.md")
+            .is_file());
 
         let imported_store =
             SkillStore::new(&environment.target_base.join("skill-expert.db")).unwrap();
@@ -2064,7 +2134,8 @@ mod tests {
             imported_path,
             environment
                 .target_base
-                .join("skills/demo")
+                .join("skills")
+                .join("demo")
                 .to_string_lossy()
         );
         drop(imported_store);
@@ -2074,7 +2145,14 @@ mod tests {
         process_pending_import(&environment).unwrap();
         assert_eq!(inspect_status(&environment).unwrap().state, "imported");
         assert_eq!(
-            fs::read(environment.target_base.join("skills/demo/SKILL.md")).unwrap(),
+            fs::read(
+                environment
+                    .target_base
+                    .join("skills")
+                    .join("demo")
+                    .join("SKILL.md"),
+            )
+            .unwrap(),
             b"upstream skill",
             "a repeated startup is a no-op"
         );
@@ -2086,8 +2164,12 @@ mod tests {
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
         create_upstream_database(&upstream);
-        fs::create_dir_all(upstream.join("skills/demo")).unwrap();
-        fs::write(upstream.join("skills/demo/SKILL.md"), b"upstream skill").unwrap();
+        fs::create_dir_all(upstream.join("skills").join("demo")).unwrap();
+        fs::write(
+            upstream.join("skills").join("demo").join("SKILL.md"),
+            b"upstream skill",
+        )
+        .unwrap();
         fs::create_dir_all(&environment.target_base).unwrap();
         fs::write(environment.target_base.join("keep-me.txt"), b"old target").unwrap();
 
@@ -2115,7 +2197,14 @@ mod tests {
 
         assert_eq!(inspect_status(&environment).unwrap().state, "imported");
         assert_eq!(
-            fs::read(environment.target_base.join("skills/demo/SKILL.md")).unwrap(),
+            fs::read(
+                environment
+                    .target_base
+                    .join("skills")
+                    .join("demo")
+                    .join("SKILL.md"),
+            )
+            .unwrap(),
             b"upstream skill"
         );
         assert_eq!(fs::read(backup.join("keep-me.txt")).unwrap(), b"old target");
@@ -2436,7 +2525,7 @@ mod tests {
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
         create_upstream_database(&upstream);
-        let external = temp.path().join("shared-outside-upstream/skill");
+        let external = temp.path().join("shared-outside-upstream").join("skill");
         fs::create_dir_all(&external).unwrap();
         let connection = Connection::open(upstream.join("skills-manager.db")).unwrap();
         connection
@@ -2477,7 +2566,12 @@ mod tests {
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
         create_upstream_database(&upstream);
-        let traversal = upstream.join("skills/demo/../../outside");
+        let traversal = upstream
+            .join("skills")
+            .join("demo")
+            .join("..")
+            .join("..")
+            .join("outside");
         let connection = Connection::open(upstream.join("skills-manager.db")).unwrap();
         connection
             .execute(
@@ -2767,8 +2861,12 @@ mod tests {
         let environment = test_environment(temp.path());
         let upstream = environment.home_dir.join(".skills-manager");
         create_upstream_database(&upstream);
-        fs::create_dir_all(upstream.join("skills/demo")).unwrap();
-        symlink(upstream.join("skills"), upstream.join("skills/demo/shared")).unwrap();
+        fs::create_dir_all(upstream.join("skills").join("demo")).unwrap();
+        symlink(
+            upstream.join("skills"),
+            upstream.join("skills").join("demo").join("shared"),
+        )
+        .unwrap();
         fs::create_dir_all(&environment.target_base).unwrap();
         fs::write(environment.target_base.join("keep-me.txt"), b"target data").unwrap();
         record_choice(
@@ -2792,6 +2890,6 @@ mod tests {
             b"target data",
             "a failed preflight leaves the existing target recoverable in place"
         );
-        assert!(upstream.join("skills/demo/shared").exists());
+        assert!(upstream.join("skills").join("demo").join("shared").exists());
     }
 }
