@@ -181,7 +181,7 @@ export function ProjectDetail() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectSkillGroup | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
-  const PROJECT_ADD_CALLOUT_KEY = "skills-manager.projectAddCalloutDismissed";
+  const PROJECT_ADD_CALLOUT_KEY = "skill-expert.projectAddCalloutDismissed";
   const [showAddCallout, setShowAddCallout] = useState(() => {
     try {
       return localStorage.getItem(PROJECT_ADD_CALLOUT_KEY) !== "1";

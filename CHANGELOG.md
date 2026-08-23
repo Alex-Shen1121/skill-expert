@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-08-24
+
+### Release Overview
+- Establishes Skill Expert as an independent desktop product with its own 1.0.0 version line and install identity.
+
+### User-facing
+- The application, windows, tray menu, settings, diagnostics, and localized UI now use the Skill Expert name.
+- Skill Expert uses isolated default storage and can be installed alongside the upstream Skills Manager application.
+
+### Developer & Governance
+- The desktop bundle identifier is `com.codingshen.skill-expert`.
+- Update metadata is read only from the independent `Alex-Shen1121/skill-expert` release contract.
+
 ## [1.34.2] - 2026-08-16
 
 ### Release Overview

@@ -49,9 +49,9 @@ type BackupMode =
 
 type LoadingAction = "start" | "sync" | "recovery" | "save" | "disconnect" | "github" | null;
 
-const DEFAULT_GITHUB_REPO = "skills-manager-backup";
+const DEFAULT_GITHUB_REPO = "skill-expert-backup";
 const GITHUB_TOKEN_URL =
-  "https://github.com/settings/tokens/new?scopes=repo&description=Skills%20Manager%20Backup";
+  "https://github.com/settings/tokens/new?scopes=repo&description=Skill%20Expert%20Backup";
 type RecoveryReason = GitUpstreamHealth | "conflict";
 
 function displaySnapshotLabel(tag: string) {

@@ -32,6 +32,9 @@ jobs:
       - name: Check version consistency
         run: npm run version:check
 
+      - name: Check desktop identity
+        run: npm run desktop:identity:check
+
       - name: Lint
         run: npm run lint
 

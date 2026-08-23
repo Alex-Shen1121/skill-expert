@@ -243,7 +243,7 @@ pub fn object_merge_pull_unlocked(store: &SkillStore, skills_dir: &Path) -> Resu
     }
     let sig = repo
         .signature()
-        .or_else(|_| git2::Signature::now("Skills Manager", "skills-manager@local"))?;
+        .or_else(|_| git2::Signature::now("Skill Expert", "skill-expert@local"))?;
     let ours_commit = repo.find_commit(ours)?;
     let theirs_commit = repo.find_commit(theirs)?;
     let merge_commit = repo.commit(
@@ -310,7 +310,7 @@ fn finish_apply(
         new_head,
         true,
         old_head,
-        "skills-manager: object merge",
+        "skill-expert: object merge",
     )
     .context("branch moved while merging; aborting with no changes")?;
 
@@ -453,7 +453,7 @@ fn check_old_client_writes(
         .collect();
     if !doubles.is_empty() {
         bail!(
-            "sync blocked: an old skills-manager version performed a line-level merge on another device — commit(s) {}. Upgrade that device and retry, or use the recovery flow (a safety snapshot is taken first)",
+            "sync blocked: an older compatible client performed a line-level merge on another device — commit(s) {}. Upgrade that client and retry, or use the recovery flow (a safety snapshot is taken first)",
             doubles.join("; ")
         );
     }
@@ -474,7 +474,7 @@ fn check_old_client_writes(
         let tolerated = validate::unclaimed_skill_dirs(repo, &tree)?;
         validate::validate_input_tip(repo, &tree, &tolerated).with_context(|| {
             format!(
-                "sync blocked: an old skills-manager version wrote to the {label} library and left it inconsistent — upgrade that device and repair via the recovery flow"
+                "sync blocked: an older compatible client wrote to the {label} library and left it inconsistent — upgrade that client and repair via the recovery flow"
             )
         })?;
         let snap = snapshot::read_snapshot(repo, &tree)?;
@@ -495,7 +495,7 @@ fn check_old_client_writes(
         .map(describe)
         .collect();
     Ok(Some(format!(
-        "old skills-manager version wrote commit(s) {} — please upgrade that device",
+        "older compatible client wrote commit(s) {} — please upgrade that client",
         listed.join("; ")
     )))
 }
@@ -1040,7 +1040,7 @@ fn settle_worktree_from(repo: &Repository, expected_clean: Oid, target: Oid) -> 
     if !worktree_matches_tree(repo, &expected_tree, &target_tree)? {
         let sig = repo
             .signature()
-            .or_else(|_| git2::Signature::now("Skills Manager", "skills-manager@local"))?;
+            .or_else(|_| git2::Signature::now("Skill Expert", "skill-expert@local"))?;
         let mut index = repo.index()?;
         index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
         let rescue_tree = repo.find_tree(index.write_tree()?)?;

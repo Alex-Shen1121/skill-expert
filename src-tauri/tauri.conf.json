@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "skills-manager",
-  "version": "1.34.2",
-  "identifier": "com.agentskills.desktop",
+  "productName": "Skill Expert",
+  "version": "1.0.0",
+  "identifier": "com.codingshen.skill-expert",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Skills Manager",
+        "title": "Skill Expert",
         "width": 1440,
         "height": 860,
         "minWidth": 1100,
@@ -32,7 +32,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBRUYwMTBDOEQ3MDdEODAKUldTQWZYQ05EQUh2Mm0wNDZtNm5VYWJpbjRaZVJQRUhrQ2tkOXc3MHBWZ2VaREo0OVd3WEU3d0oK",
       "endpoints": [
-        "https://github.com/xingkongliang/skills-manager/releases/latest/download/latest.json"
+        "https://github.com/Alex-Shen1121/skill-expert/releases/latest/download/latest.json"
       ]
     }
   },

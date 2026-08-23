@@ -16,7 +16,7 @@ const CLONE_TIMEOUT_SECS: u64 = 300;
 
 /// Filename prefix shared by isolated install checkouts under `std::env::temp_dir()`.
 /// Used by both `materialize_cached_repo` (writer) and `validate_clone_temp_path` (reader).
-pub const CLONE_TEMP_PREFIX: &str = "skills-manager-clone-";
+pub const CLONE_TEMP_PREFIX: &str = "skill-expert-clone-";
 
 /// Callback type for reporting clone progress messages to the UI.
 pub type ProgressCallback = Box<dyn Fn(&str) + Send>;
@@ -610,7 +610,7 @@ pub fn resolve_remote_revision(
     }
 
     let repo = Repository::init_bare(
-        std::env::temp_dir().join(format!("skills-manager-remote-{}", uuid::Uuid::new_v4())),
+        std::env::temp_dir().join(format!("skill-expert-remote-{}", uuid::Uuid::new_v4())),
     )?;
     let mut remote = repo.remote_anonymous(url)?;
     let mut proxy_opts = git2::ProxyOptions::new();

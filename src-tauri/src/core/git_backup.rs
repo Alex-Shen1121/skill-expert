@@ -116,7 +116,7 @@ fn device_email(device_name: &str) -> String {
     }
     let slug = slug.trim_matches('-');
     let slug = if slug.is_empty() { "device" } else { slug };
-    format!("{slug}@skills-manager.local")
+    format!("{slug}@skill-expert.local")
 }
 
 /// Write the device name into the repo-local git identity (§4.3: device name
@@ -1759,10 +1759,10 @@ mod tests {
     fn device_email_slugs_name_with_fallback() {
         assert_eq!(
             device_email("MacBook Pro"),
-            "macbook-pro@skills-manager.local"
+            "macbook-pro@skill-expert.local"
         );
-        assert_eq!(device_email("公司 Windows"), "windows@skills-manager.local");
-        assert_eq!(device_email("公司"), "device@skills-manager.local");
+        assert_eq!(device_email("公司 Windows"), "windows@skill-expert.local");
+        assert_eq!(device_email("公司"), "device@skill-expert.local");
     }
 
     #[test]
@@ -1866,7 +1866,7 @@ mod tests {
         );
         assert_eq!(
             run_git(dir, &["config", "--local", "--get", "user.email"]).unwrap(),
-            "macbook-pro@skills-manager.local"
+            "macbook-pro@skill-expert.local"
         );
 
         // Renaming the device only affects commits made afterwards.
