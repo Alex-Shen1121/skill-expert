@@ -53,7 +53,7 @@ function createFixture(t) {
   );
   git(upstreamWork, 'add', '.');
   git(upstreamWork, 'commit', '-m', 'upstream baseline');
-  git(root, 'init', '--bare', upstreamBare);
+  git(root, 'init', '--bare', '--initial-branch=main', upstreamBare);
   git(upstreamWork, 'remote', 'add', 'origin', upstreamBare);
   git(upstreamWork, 'push', '-u', 'origin', 'main');
 
@@ -71,7 +71,7 @@ function createFixture(t) {
   write(forkWork, 'src/fork.txt', 'Skill Expert decision\n');
   git(forkWork, 'add', '.');
   git(forkWork, 'commit', '-m', 'establish Skill Expert');
-  git(root, 'init', '--bare', originBare);
+  git(root, 'init', '--bare', '--initial-branch=main', originBare);
   git(forkWork, 'remote', 'set-url', 'origin', originBare);
   git(forkWork, 'push', '-u', 'origin', 'main');
 
