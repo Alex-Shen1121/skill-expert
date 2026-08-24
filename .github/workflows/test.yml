@@ -32,6 +32,9 @@ jobs:
       - name: Test release preparation contract
         run: npm run test:release
 
+      - name: Test candidate packaging contract
+        run: npm run test:candidate
+
       - name: Check version consistency
         run: npm run version:check
 
