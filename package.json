@@ -29,6 +29,8 @@
     "test:candidate": "node --test scripts/candidate-assets.test.mjs scripts/candidate-workflow.test.mjs scripts/candidate-docs.test.mjs scripts/verify-macos-adhoc.test.mjs",
     "test:promotion": "node --test scripts/release-candidate.test.mjs scripts/release-promotion-workflow.test.mjs",
     "test:upstream-tracking": "node --test scripts/upstream-tracking.test.mjs scripts/upstream-tracking-workflow.test.mjs",
+    "test:updater": "node --test scripts/check-updater-trust.test.mjs scripts/verify-updater-metadata.test.mjs scripts/updater-key-recovery.test.mjs scripts/updater-workflow.test.mjs scripts/updater-docs.test.mjs",
+    "updater:check": "node scripts/check-updater-trust.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",

@@ -36,6 +36,7 @@ docs
 !docs/
 docs/*
 !docs/candidate-builds.md
+!docs/updater-trust-root.md
 !docs/upstream-history/
 !docs/upstream-history/*.md
 !docs/agents/

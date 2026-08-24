@@ -47,6 +47,12 @@ jobs:
           REVIEW_REPORT_REQUIRED: ${{ github.event_name == 'pull_request' && github.head_ref == 'upstream-tracking/main' }}
         run: node scripts/upstream-tracking.mjs verify-review --required "$REVIEW_REPORT_REQUIRED"
 
+      - name: Test updater trust contract
+        run: npm run test:updater
+
+      - name: Check updater trust root
+        run: npm run updater:check
+
       - name: Check version consistency
         run: npm run version:check
 
