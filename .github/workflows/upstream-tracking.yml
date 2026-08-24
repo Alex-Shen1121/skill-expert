@@ -1,0 +1,112 @@
+name: Upstream tracking
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-review:
+    runs-on: ubuntu-22.04
+    name: Prepare trusted upstream review
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Skill Expert main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set scratch paths
+        run: |
+          echo "RESULT_PATH=$RUNNER_TEMP/upstream-tracking.json" >> "$GITHUB_ENV"
+          echo "BODY_PATH=$RUNNER_TEMP/upstream-tracking-pr.md" >> "$GITHUB_ENV"
+
+      - name: Configure review commit identity
+        run: |
+          git config user.name 'skill-expert-upstream-tracker[bot]'
+          git config user.email 'skill-expert-upstream-tracker[bot]@users.noreply.github.com'
+
+      - name: Detect an exact open release promotion
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_PRS="$(gh pr list --state open --base release --head main \
+            --json number,headRefName,baseRefName,headRefOid,isCrossRepository)"
+          VALID_RELEASES="$(jq '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not))]' <<<"$RELEASE_PRS")"
+          RELEASE_COUNT="$(jq 'length' <<<"$VALID_RELEASES")"
+          if [ "$RELEASE_COUNT" -gt 1 ]; then
+            echo "Expected at most one open main to release promotion, found $RELEASE_COUNT" >&2
+            exit 1
+          fi
+          echo "candidate_sha=$(jq -r '.[0].headRefOid // empty' <<<"$VALID_RELEASES")" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare fixed upstream review branch
+        id: prepare
+        env:
+          RELEASE_CANDIDATE_SHA: ${{ steps.release.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          echo 'Trusted upstream: xingkongliang/skills-manager (main) → upstream-tracking/main' >> "$GITHUB_STEP_SUMMARY"
+          RELEASE_ARGS=()
+          if [ -n "$RELEASE_CANDIDATE_SHA" ]; then
+            RELEASE_ARGS=(--release-candidate-sha "$RELEASE_CANDIDATE_SHA")
+          fi
+          node scripts/upstream-tracking.mjs prepare \
+            --result "$RESULT_PATH" \
+            --body "$BODY_PATH" \
+            "${RELEASE_ARGS[@]}"
+          echo "status=$(jq -r '.status' "$RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "review_required=$(jq -r 'has("syncSha")' "$RESULT_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Report no upstream changes
+        if: steps.prepare.outputs.status == 'no-change'
+        run: echo 'The review branch is unchanged; pull request metadata is reconciled only when missing or stale.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push fixed review branch
+        if: steps.prepare.outputs.status != 'no-change'
+        run: |
+          set -euo pipefail
+          PREVIOUS_SYNC_SHA="$(jq -r '.previousSyncSha // empty' "$RESULT_PATH")"
+          git push --force-with-lease="refs/heads/upstream-tracking/main:${PREVIOUS_SYNC_SHA}" origin HEAD:refs/heads/upstream-tracking/main
+
+      - name: Create or update review pull request
+        if: steps.prepare.outputs.review_required == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TITLE="$(jq -r '.prTitle' "$RESULT_PATH")"
+          OPEN_PRS="$(gh pr list --state open --base main --head upstream-tracking/main \
+            --json number,headRefName,baseRefName,isCrossRepository,isDraft,title,body)"
+          VALID_PRS="$(jq '[.[] | select(.headRefName == "upstream-tracking/main" and .baseRefName == "main" and (.isCrossRepository | not))]' <<<"$OPEN_PRS")"
+          PR_COUNT="$(jq 'length' <<<"$VALID_PRS")"
+          if [ "$PR_COUNT" -gt 1 ]; then
+            echo "Expected at most one open upstream tracking pull request, found $PR_COUNT" >&2
+            exit 1
+          fi
+          if [ "$PR_COUNT" -eq 1 ]; then
+            PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PRS")"
+            if jq -e --arg title "$TITLE" --rawfile body "$BODY_PATH" \
+              '.[0] | (.title != $title or .body != $body)' <<<"$VALID_PRS" >/dev/null; then
+              gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$BODY_PATH"
+            fi
+            if jq -e '.releasePromotion.waiting or (.conflicts | length > 0)' "$RESULT_PATH" >/dev/null && \
+               [ "$(jq -r '.[0].isDraft' <<<"$VALID_PRS")" = 'false' ]; then
+              gh pr ready "$PR_NUMBER" --undo
+            fi
+          else
+            gh pr create \
+              --base main \
+              --head upstream-tracking/main \
+              --title "$TITLE" \
+              --body-file "$BODY_PATH" \
+              --draft
+          fi

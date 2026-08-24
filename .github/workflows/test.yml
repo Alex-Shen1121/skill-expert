@@ -39,6 +39,14 @@ jobs:
       - name: Test release promotion contract
         run: npm run test:promotion
 
+      - name: Test upstream tracking contract
+        run: npm run test:upstream-tracking
+
+      - name: Reject unresolved upstream review conflicts
+        env:
+          REVIEW_REPORT_REQUIRED: ${{ github.event_name == 'pull_request' && github.head_ref == 'upstream-tracking/main' }}
+        run: node scripts/upstream-tracking.mjs verify-review --required "$REVIEW_REPORT_REQUIRED"
+
       - name: Check version consistency
         run: npm run version:check
 
