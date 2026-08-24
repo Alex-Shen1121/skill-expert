@@ -30,10 +30,18 @@ Provisioning is a maintainer operation and must happen on a trusted machine:
    Environment exposes exactly those Secret names; GitHub never returns their values.
 6. Run `npm run updater:check`. It validates `src-tauri/tauri.conf.json` and must reject the
    archived upstream public key, any upstream feed URL, or a malformed key.
-7. Validate a generated feed separately with
-   `node scripts/verify-updater-metadata.mjs --file latest.json --version x.y.z`. It must reject
-   missing platforms, malformed or missing Tauri signatures, version drift, and any
-   non-Skill-Expert artifact URL.
+7. Validate a generated feed separately:
+
+   ```bash
+   node scripts/verify-updater-metadata.mjs \
+     --file latest.json \
+     --version x.y.z \
+     --asset-directory /path/to/release-assets
+   ```
+
+   The verifier reads the configured public key and cryptographically verifies each listed
+   asset, in addition to rejecting missing platforms, malformed or missing Tauri signatures,
+   version drift, and non-Skill-Expert artifact URLs.
 
 The keypair is not considered provisioned until the encrypted offline recovery test below
 has completed successfully.
@@ -67,9 +75,11 @@ chmod 600 "/Volumes/OFFLINE/Skill Expert/skill-expert-updater-recovery.json"
 The bundle contains the private key, public key, and signing password only inside an
 authenticated encrypted payload. The tool refuses a recovery passphrase shorter than 32
 characters and refuses to overwrite an existing backup. On Unix, it also refuses source
-credentials readable by group/others and writes owner-only modes. Windows permission bits do
-not represent the effective ACL, so the tool cannot validate that boundary automatically there;
-use a trusted private directory and inspect its Windows ACL before provisioning or recovery.
+credentials readable by group/others and writes owner-only modes. It writes and synchronizes a
+temporary file beside the destination before atomically publishing the completed bundle, so a
+failed write never leaves a truncated file at the final path. Windows permission bits do not
+represent the effective ACL, so the tool cannot validate that boundary automatically there; use
+a trusted private directory and inspect its Windows ACL before provisioning or recovery.
 
 ## Recovery verification
 
@@ -91,8 +101,25 @@ Verify all of the following without printing a credential:
 2. The restored public key exactly matches `plugins.updater.pubkey` in
    `src-tauri/tauri.conf.json`.
 3. Use `TAURI_SIGNING_PRIVATE_KEY_PATH` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from the
-   restored files to sign a disposable canary with `npx tauri signer sign`. The command must
-   succeed and produce a non-empty `.sig` file.
+   restored files to sign a disposable canary with `npx tauri signer sign`, then verify that
+   signature cryptographically with the restored public key. A non-empty `.sig` file alone is
+   not proof that the private and public keys match:
+
+   ```bash
+   canary="$verify_parent/skill-expert-updater-canary.txt"
+   printf 'Skill Expert updater recovery canary\n' > "$canary"
+   export TAURI_SIGNING_PRIVATE_KEY_PATH="$verify_parent/restored/skill-expert-updater.key"
+   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(< "$verify_parent/restored/skill-expert-updater.password")"
+   npx tauri signer sign "$canary"
+   unset TAURI_SIGNING_PRIVATE_KEY_PATH TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+   node scripts/verify-updater-signature.mjs \
+     --file "$canary" \
+     --signature "$canary.sig" \
+     --public-key "$verify_parent/restored/skill-expert-updater.key.pub"
+   ```
+
+   The verification must fail if the signature, canary, or public key came from a different
+   keypair.
 4. Delete the canary and restored plaintext material immediately after the test, eject the
    offline volume, and retain only the encrypted bundle.
 

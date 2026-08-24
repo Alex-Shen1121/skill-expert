@@ -16,6 +16,10 @@ test('updater trust guide documents secret boundaries, recovery, and two-stage r
   assert.match(guide, /updater-key-recovery\.mjs create/);
   assert.match(guide, /updater-key-recovery\.mjs restore/);
   assert.match(guide, /verify-updater-metadata\.mjs/);
+  assert.match(guide, /verify-updater-signature\.mjs/);
+  assert.match(guide, /cryptographically verifies each listed\s+asset/i);
+  assert.match(guide, /non-empty `?\.sig`? file alone is\s+not proof/i);
+  assert.match(guide, /atomically publishing/i);
   assert.match(guide, /chmod 600/);
   assert.match(guide, /separate physical location|separate medium/i);
   assert.match(guide, /Phase 1[\s\S]*old private key[\s\S]*new public key/i);

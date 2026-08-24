@@ -24,7 +24,7 @@ test('package and pull-request CI expose the updater trust contracts', () => {
 
   assert.equal(
     packageJson.scripts['test:updater'],
-    'node --test scripts/check-updater-trust.test.mjs scripts/verify-updater-metadata.test.mjs scripts/updater-key-recovery.test.mjs scripts/updater-workflow.test.mjs scripts/updater-docs.test.mjs',
+    'node --test scripts/check-updater-trust.test.mjs scripts/verify-updater-signature.test.mjs scripts/verify-updater-metadata.test.mjs scripts/updater-key-recovery.test.mjs scripts/updater-workflow.test.mjs scripts/updater-docs.test.mjs',
   );
   assert.equal(
     packageJson.scripts['updater:check'],

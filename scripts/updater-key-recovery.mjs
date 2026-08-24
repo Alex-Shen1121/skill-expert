@@ -59,6 +59,77 @@ function decodeCanonicalBase64(value) {
   return decoded.toString('base64') === value ? decoded : null;
 }
 
+function publishBackupNoReplace(temporaryPath, outputPath) {
+  try {
+    fs.linkSync(temporaryPath, outputPath);
+    fs.unlinkSync(temporaryPath);
+    return;
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      throw new Error(`recovery backup already exists: ${outputPath}`);
+    }
+    const lockFallbackCodes = new Set([
+      'EINVAL',
+      'ENOTSUP',
+      'EOPNOTSUPP',
+      'EPERM',
+      'EXDEV',
+    ]);
+    if (!lockFallbackCodes.has(error.code)) throw error;
+  }
+
+  const publicationLock = `${outputPath}.publish-lock`;
+  try {
+    fs.mkdirSync(publicationLock, { mode: 0o700 });
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      throw new Error(`recovery backup publication is already in progress: ${outputPath}`);
+    }
+    throw error;
+  }
+  try {
+    if (fs.existsSync(outputPath)) {
+      throw new Error(`recovery backup already exists: ${outputPath}`);
+    }
+    fs.renameSync(temporaryPath, outputPath);
+  } finally {
+    fs.rmdirSync(publicationLock);
+  }
+}
+
+function writeBackupAtomically(outputPath, contents) {
+  if (fs.existsSync(outputPath)) {
+    throw new Error(`recovery backup already exists: ${outputPath}`);
+  }
+  const parentDirectory = path.dirname(outputPath);
+  const temporaryPath = path.join(
+    parentDirectory,
+    `.${path.basename(outputPath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`,
+  );
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, contents);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.chmodSync(temporaryPath, 0o600);
+    publishBackupNoReplace(temporaryPath, outputPath);
+    if (process.platform !== 'win32') {
+      const directoryDescriptor = fs.openSync(parentDirectory, 'r');
+      try {
+        fs.fsyncSync(directoryDescriptor);
+      } finally {
+        fs.closeSync(directoryDescriptor);
+      }
+    }
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    throw error;
+  }
+}
+
 function createBackup(options) {
   requireOptions(
     options,
@@ -124,11 +195,7 @@ function createBackup(options) {
     ciphertext: ciphertext.toString('base64'),
   };
 
-  fs.writeFileSync(options.output, `${JSON.stringify(envelope, null, 2)}\n`, {
-    flag: 'wx',
-    mode: 0o600,
-  });
-  fs.chmodSync(options.output, 0o600);
+  writeBackupAtomically(options.output, `${JSON.stringify(envelope, null, 2)}\n`);
   console.log(`Encrypted updater recovery bundle created: ${options.output}`);
 }
 
