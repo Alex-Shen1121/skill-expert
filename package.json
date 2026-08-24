@@ -25,6 +25,7 @@
     "repository:identity:check": "node scripts/check-repository-identity.mjs",
     "test:repository-identity": "node --test scripts/check-repository-identity.test.mjs",
     "test:version": "node --test scripts/check-version-consistency.test.mjs",
+    "test:release": "node --test scripts/prepare-release.test.mjs scripts/changelog-history.test.mjs scripts/prepare-release-workflow.test.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",

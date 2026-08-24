@@ -29,6 +29,9 @@ jobs:
       - name: Test version contract
         run: npm run test:version
 
+      - name: Test release preparation contract
+        run: npm run test:release
+
       - name: Check version consistency
         run: npm run version:check
 
