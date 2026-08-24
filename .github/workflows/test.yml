@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -34,6 +35,9 @@ jobs:
 
       - name: Test candidate packaging contract
         run: npm run test:candidate
+
+      - name: Test release promotion contract
+        run: npm run test:promotion
 
       - name: Check version consistency
         run: npm run version:check
@@ -152,3 +156,121 @@ jobs:
         if: runner.os == 'Windows'
         continue-on-error: true
         run: taskkill /f /im vctip.exe
+
+  release-promotion-shape:
+    if: github.event_name == 'pull_request' && github.base_ref == 'release'
+    runs-on: ubuntu-22.04
+    name: Release promotion source
+
+    steps:
+      - name: Reject a non-main or cross-repository promotion
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REF" != "main" ] || \
+             [ "$BASE_REF" != "release" ] || \
+             [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
+            echo "Release promotion must use this repository's main branch as head and release as base" >&2
+            exit 1
+          fi
+
+  candidate-guard:
+    needs: [frontend, workflow-lint, rust-quality, rust-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    name: Release candidate guard
+
+    steps:
+      - name: Checkout exact main candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Fetch promotion refs
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: Verify exact release candidate
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --candidate-sha "$CANDIDATE_SHA"
+          --head main
+          --base release
+
+  candidate-package:
+    needs: candidate-guard
+    name: Four-target release candidate
+    uses: ./.github/workflows/candidate-build.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+
+  candidate-pr:
+    needs: candidate-package
+    runs-on: ubuntu-22.04
+    name: Create or refresh release promotion
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # GitHub jobs have isolated filesystems. Repeat the exact checkout and
+      # fetch here so a main push during packaging invalidates the old candidate.
+      - name: Checkout packaged candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Refresh promotion refs
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: Create or update the exact release promotion
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PROMOTION_BODY="$RUNNER_TEMP/release-promotion.md"
+          node scripts/release-candidate.mjs render-pr-body \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --head main \
+            --base release \
+            --output "$PROMOTION_BODY"
+
+          PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
+            --json number,headRefName,baseRefName,isCrossRepository,headRefOid)"
+          VALID_PROMOTIONS="$(jq --arg candidate_sha "$CANDIDATE_SHA" \
+            '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not) and .headRefOid == $candidate_sha)]' \
+            <<<"$PROMOTION_PRS")"
+
+          PR_COUNT="$(jq 'length' <<<"$VALID_PROMOTIONS")"
+          if [ "$PR_COUNT" -gt 1 ]; then
+            echo "Expected at most one open release promotion pull request, found $PR_COUNT" >&2
+            exit 1
+          fi
+
+          VERSION="$(node -p "require('./package.json').version")"
+          TITLE="Release promotion: Skill Expert v${VERSION}"
+          if [ "$PR_COUNT" -eq 1 ]; then
+            PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PROMOTIONS")"
+            gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$PROMOTION_BODY"
+          else
+            gh pr create \
+              --base release \
+              --head main \
+              --title "$TITLE" \
+              --body-file "$PROMOTION_BODY"
+          fi
