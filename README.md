@@ -239,6 +239,16 @@ npm run cli:build
 ## Downloads and support
 
 Download current packages from [Skill Expert Releases](https://github.com/Alex-Shen1121/skill-expert/releases).
+
+### Opening the macOS app safely
+
+Skill Expert's macOS downloads are ad-hoc signed but not notarized, so macOS may block the
+first launch even though the package's structural signature has been verified. Try opening
+the app once, then open **System Settings → Privacy & Security → Open Anyway** and confirm
+that you want to open Skill Expert. Keep Gatekeeper enabled; these steps approve only this
+app. Candidate-build details and exact asset names are in the
+[candidate build guide](docs/candidate-builds.md).
+
 Report reproducible problems with the in-app **Settings → Report Issue** action or in the
 [Skill Expert issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues).
 

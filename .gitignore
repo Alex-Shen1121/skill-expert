@@ -35,6 +35,7 @@ dist-ssr
 docs
 !docs/
 docs/*
+!docs/candidate-builds.md
 !docs/upstream-history/
 !docs/upstream-history/*.md
 !docs/agents/

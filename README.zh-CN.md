@@ -193,6 +193,14 @@ npm run cli:build
 ## 下载与支持
 
 请从 [Skill Expert Releases](https://github.com/Alex-Shen1121/skill-expert/releases) 下载当前安装包。
+
+### 在 macOS 上安全打开
+
+Skill Expert 的 macOS 下载包采用 ad-hoc 签名但未经公证，因此即使结构签名已经验证，macOS
+仍可能阻止首次启动。先尝试打开应用一次，然后进入 **系统设置 → 隐私与安全性 → 仍要打开**，
+确认打开 Skill Expert。请保持 Gatekeeper 启用；这套操作只批准当前应用。候选构建方式与完整
+资产名称参见[候选构建指南](docs/candidate-builds.md)。
+
 可通过应用内的 **设置 → 报告问题** 提交可复现问题，或直接访问
 [Skill Expert Issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues)。
 
