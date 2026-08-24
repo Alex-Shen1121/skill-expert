@@ -35,6 +35,8 @@ dist-ssr
 docs
 !docs/
 docs/*
+!docs/upstream-history/
+!docs/upstream-history/*.md
 !docs/agents/
 !docs/agents/*.md
 !docs/adr/

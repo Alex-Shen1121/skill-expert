@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-
-import { checkVersionConsistency } from './check-version-consistency.mjs';
+import { fileURLToPath } from 'node:url';
 
 const VERSION = '1.2.3';
+const CHECK_SCRIPT = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'check-version-consistency.mjs',
+);
 
 function write(root, relativePath, content) {
   const filePath = path.join(root, relativePath);
@@ -39,10 +43,14 @@ function fixture(t) {
   return root;
 }
 
+function runVersionCheck(root) {
+  return spawnSync(process.execPath, [CHECK_SCRIPT], { cwd: root, encoding: 'utf8' });
+}
+
 test('accepts a complete, consistent version contract', (t) => {
-  const result = checkVersionConsistency(fixture(t));
-  assert.equal(result.version, VERSION);
-  assert.deepEqual(result.mismatches, []);
+  const result = runVersionCheck(fixture(t));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Version consistency check passed for 1\.2\.3\./);
 });
 
 test('reports both npm lockfile version fields when they drift', (t) => {
@@ -53,11 +61,13 @@ test('reports both npm lockfile version fields when they drift', (t) => {
     packages: { '': { name: 'fixture-app', version: '1.2.1' } },
   });
 
-  const { mismatches } = checkVersionConsistency(root);
-  assert.deepEqual(mismatches, [
-    'package-lock.json root version: expected 1.2.3, found 1.2.2',
-    'package-lock.json workspace version: expected 1.2.3, found 1.2.1',
-  ]);
+  const result = runVersionCheck(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /package-lock\.json root version: expected 1\.2\.3, found 1\.2\.2/);
+  assert.match(
+    result.stderr,
+    /package-lock\.json workspace version: expected 1\.2\.3, found 1\.2\.1/,
+  );
 });
 
 const driftCases = [
@@ -109,6 +119,8 @@ for (const driftCase of driftCases) {
   test(`reports ${driftCase.name} drift`, (t) => {
     const root = fixture(t);
     driftCase.mutate(root);
-    assert.ok(checkVersionConsistency(root).mismatches.includes(driftCase.expected));
+    const result = runVersionCheck(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, new RegExp(driftCase.expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 }
