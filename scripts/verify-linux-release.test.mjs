@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
+  linuxAssetPaths,
   rpmExtractionInvocation,
   verifyLinuxBundleBinaries,
 } from './verify-linux-release.mjs';
@@ -73,4 +75,13 @@ test('RPM 由单进程 libarchive 直接解包且不恢复归档属主', () => {
     '--no-same-owner',
     '--no-same-permissions',
   ]);
+});
+
+test('相对资产目录在切换 AppImage 工作目录前解析为绝对路径', () => {
+  const assets = linuxAssetPaths('candidate-assets/linux-x64', '1.0.0');
+
+  for (const assetPath of Object.values(assets)) {
+    assert.equal(path.isAbsolute(assetPath), true, assetPath);
+  }
+  assert.match(assets.appImage, /skill-expert-v1\.0\.0-linux-x64\.AppImage$/);
 });

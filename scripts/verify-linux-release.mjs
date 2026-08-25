@@ -21,9 +21,10 @@ function run(command, args, options = {}) {
   });
   if (result.status !== 0) {
     const details =
+      result.error?.message ||
       String(result.stderr ?? '').trim() ||
       String(result.stdout ?? '').trim() ||
-      `退出码 ${result.status}`;
+      `退出码 ${result.status ?? '未知'}`;
     throw new Error(
       `${command} 执行失败：${details}`,
     );
@@ -55,6 +56,17 @@ export function rpmExtractionInvocation(rpmPath, directory) {
       '--no-same-owner',
       '--no-same-permissions',
     ],
+  };
+}
+
+export function linuxAssetPaths(directory, version) {
+  const assetDirectory = path.resolve(directory);
+  const prefix = `skill-expert-v${version}-linux-x64`;
+  return {
+    cli: path.join(assetDirectory, `skill-expert-cli-v${version}-linux-x64`),
+    appImage: path.join(assetDirectory, `${prefix}.AppImage`),
+    deb: path.join(assetDirectory, `${prefix}.deb`),
+    rpm: path.join(assetDirectory, `${prefix}.rpm`),
   };
 }
 
@@ -93,11 +105,11 @@ export function verifyLinuxBundleBinaries({ deb, rpm, appImage, buildIds }) {
 export function verifyLinuxRelease(directory, version) {
   if (process.platform !== 'linux') throw new Error('Linux 正式资产回验需要 Linux runner');
   requireStableVersion(version);
-  const prefix = `skill-expert-v${version}-linux-x64`;
-  const cli = requireFile(path.join(directory, `skill-expert-cli-v${version}-linux-x64`), 'CLI');
-  const appImage = requireFile(path.join(directory, `${prefix}.AppImage`), 'AppImage');
-  const deb = requireFile(path.join(directory, `${prefix}.deb`), 'DEB');
-  const rpm = requireFile(path.join(directory, `${prefix}.rpm`), 'RPM');
+  const assetPaths = linuxAssetPaths(directory, version);
+  const cli = requireFile(assetPaths.cli, 'CLI');
+  const appImage = requireFile(assetPaths.appImage, 'AppImage');
+  const deb = requireFile(assetPaths.deb, 'DEB');
+  const rpm = requireFile(assetPaths.rpm, 'RPM');
 
   fs.chmodSync(cli, fs.statSync(cli).mode | 0o111);
   verifyCliVersion(cli, version);
