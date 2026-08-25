@@ -155,7 +155,7 @@ jobs:
 
           ## macOS 分发说明
 
-          macOS 版本使用 ad-hoc 签名且不经过 Apple 公证。首次打开时可能需要前往“系统设置 → 隐私与安全性 → 仍要打开”；无需关闭 Gatekeeper。
+          macOS 版本使用 ad-hoc 签名且不经过 Apple 公证。首次打开时可能需要前往「系统设置 → 隐私与安全性 → 仍要打开」；无需关闭 Gatekeeper。
 
           <details><summary>English release notes</summary>
 

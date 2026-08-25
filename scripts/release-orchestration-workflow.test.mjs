@@ -179,4 +179,5 @@ test('正式发布第三方 Action 全部固定 SHA 并由普通 CI 执行契约
     testWorkflow,
     /if:\s*runner\.os == 'Windows'[^]*?verify-windows-release\.ps1/,
   );
+  assert.doesNotMatch(content, /[“”]/, 'workflow shell 脚本不得包含 ShellCheck 误判为引号的弯引号');
 });
