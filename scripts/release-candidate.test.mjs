@@ -15,6 +15,15 @@ function git(repository, ...args) {
   return result.stdout.trim();
 }
 
+function isAncestor(repository, ancestor, descendant) {
+  const result = spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+    cwd: repository,
+    encoding: 'utf8',
+  });
+  assert.ok([0, 1].includes(result.status), result.stderr);
+  return result.status === 0;
+}
+
 function writeJson(repository, relativePath, value) {
   const filePath = path.join(repository, relativePath);
   mkdirSync(path.dirname(filePath), { recursive: true });
@@ -76,12 +85,26 @@ function createCandidateRepository(
   git(repository, 'config', 'user.name', 'Release Candidate Test');
   git(repository, 'config', 'user.email', 'release-candidate@example.com');
   mkdirSync(path.join(repository, 'src-tauri'), { recursive: true });
-  writeVersionContract(repository, baseVersion, { packageName: basePackageName });
-  git(repository, 'add', '.');
-  git(repository, 'commit', '-m', `release v${baseVersion}`);
-  const baseSha = git(repository, 'rev-parse', 'HEAD');
-
-  git(repository, 'switch', '-c', 'main');
+  let baseSha;
+  if (basePackageName === 'skill-expert') {
+    writeVersionContract(repository, '1.34.2', { packageName: 'skills-manager' });
+    git(repository, 'add', '.');
+    git(repository, 'commit', '-m', '建立旧版 release 基线');
+    git(repository, 'switch', '-c', 'main');
+    writeVersionContract(repository, baseVersion);
+    git(repository, 'add', '.');
+    git(repository, 'commit', '-m', `准备 Skill Expert v${baseVersion}`);
+    git(repository, 'switch', 'release');
+    git(repository, 'merge', '--no-ff', 'main', '-m', `晋级 Skill Expert v${baseVersion}`);
+    baseSha = git(repository, 'rev-parse', 'HEAD');
+    git(repository, 'switch', 'main');
+  } else {
+    writeVersionContract(repository, baseVersion, { packageName: basePackageName });
+    git(repository, 'add', '.');
+    git(repository, 'commit', '-m', `建立旧版 release v${baseVersion}`);
+    baseSha = git(repository, 'rev-parse', 'HEAD');
+    git(repository, 'switch', '-c', 'main');
+  }
   writeVersionContract(repository, candidateVersion);
   git(repository, 'add', '.');
   git(repository, 'commit', '--allow-empty', '-m', `prepare v${candidateVersion}`);
@@ -90,10 +113,48 @@ function createCandidateRepository(
   return { repository, baseSha, candidateSha };
 }
 
+function createRepeatedPromotionRepository(t) {
+  const repository = mkdtempSync(path.join(tmpdir(), 'skill-expert-repeated-promotion-'));
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+
+  git(repository, 'init', '-b', 'release');
+  git(repository, 'config', 'user.name', 'Release Candidate Test');
+  git(repository, 'config', 'user.email', 'release-candidate@example.com');
+  mkdirSync(path.join(repository, 'src-tauri'), { recursive: true });
+  writeVersionContract(repository, '1.34.2', { packageName: 'skills-manager' });
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '建立旧版 release 基线');
+
+  git(repository, 'switch', '-c', 'main');
+  writeVersionContract(repository, '1.0.0');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备 Skill Expert v1.0.0');
+  const previousCandidateSha = git(repository, 'rev-parse', 'HEAD');
+
+  git(repository, 'switch', 'release');
+  git(repository, 'merge', '--no-ff', 'main', '-m', '晋级 Skill Expert v1.0.0');
+  const baseSha = git(repository, 'rev-parse', 'HEAD');
+
+  git(repository, 'switch', 'main');
+  writeVersionContract(repository, '1.0.1');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备 Skill Expert v1.0.1');
+  const candidateSha = git(repository, 'rev-parse', 'HEAD');
+
+  return { repository, previousCandidateSha, baseSha, candidateSha };
+}
+
 function runCandidate(repository, args) {
+  const releaseBaselineSha = git(repository, 'rev-list', '--max-parents=0', 'release')
+    .split('\n')
+    .at(0);
   return spawnSync(process.execPath, [candidateCli, ...args], {
     cwd: repository,
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      SKILL_EXPERT_RELEASE_BASELINE_SHA: releaseBaselineSha,
+    },
   });
 }
 
@@ -141,6 +202,140 @@ test('verifies an exact current main candidate through the public guard CLI', (t
     commitRange: `${baseSha}..${candidateSha}`,
     tagAbsence: 'refs/tags/v1.1.0 is absent locally (no origin configured)',
   });
+});
+
+test('接受 release 保留上次晋级 merge commit 后的下一次 main 候选', (t) => {
+  const { repository, baseSha, candidateSha } = createRepeatedPromotionRepository(t);
+
+  const result = runCandidateGuard(repository, candidateSha, { json: true });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    version: '1.0.1',
+    tag: 'v1.0.1',
+    candidateSha,
+    baseSha,
+    commitRange: `${baseSha}..${candidateSha}`,
+    tagAbsence: 'refs/tags/v1.0.1 is absent locally (no origin configured)',
+  });
+});
+
+test('拒绝把 release 独有的单父提交当作上一次合法晋级', (t) => {
+  const { repository, candidateSha } = createRepeatedPromotionRepository(t);
+  git(repository, 'switch', 'release');
+  writeFileSync(path.join(repository, 'release-only.txt'), '禁止 release 独有修改\n');
+  git(repository, 'add', 'release-only.txt');
+  git(repository, 'commit', '-m', '错误：直接修改 release');
+  git(repository, 'switch', 'main');
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /release 第一父历史只能包含合法的双父晋级 merge commit/);
+});
+
+test('拒绝藏在后续 merge commit 第一父链中的 release 独有提交', (t) => {
+  const { repository } = createRepeatedPromotionRepository(t);
+  git(repository, 'switch', 'release');
+  writeFileSync(path.join(repository, 'release-only.txt'), '禁止隐藏 release 独有修改\n');
+  git(repository, 'add', 'release-only.txt');
+  git(repository, 'commit', '-m', '错误：直接修改 release');
+  git(repository, 'merge', '--no-ff', 'main', '-m', '伪装：晋级 Skill Expert v1.0.1');
+  git(repository, 'rm', 'release-only.txt');
+  git(repository, 'commit', '--amend', '--no-edit');
+
+  git(repository, 'switch', 'main');
+  writeVersionContract(repository, '1.0.2');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备 Skill Expert v1.0.2');
+  const candidateSha = git(repository, 'rev-parse', 'HEAD');
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /release 第一父历史只能包含合法的双父晋级 merge commit/);
+});
+
+test('拒绝把 release 直接移动到旧 main 候选后继续晋级', (t) => {
+  const { repository, previousCandidateSha, candidateSha } =
+    createRepeatedPromotionRepository(t);
+  git(repository, 'branch', '--force', 'release', previousCandidateSha);
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /release 第一父历史只能包含合法的双父晋级 merge commit/);
+});
+
+test('拒绝由互不连续的并行 main 候选伪造 release 晋级链', (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'skill-expert-parallel-promotion-'));
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+  git(repository, 'init', '-b', 'release');
+  git(repository, 'config', 'user.name', 'Release Candidate Test');
+  git(repository, 'config', 'user.email', 'release-candidate@example.com');
+  mkdirSync(path.join(repository, 'src-tauri'), { recursive: true });
+  writeVersionContract(repository, '1.34.2', { packageName: 'skills-manager' });
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '建立旧版 release 基线');
+  const baselineSha = git(repository, 'rev-parse', 'HEAD');
+
+  git(repository, 'switch', '-c', 'side');
+  writeVersionContract(repository, '1.0.0');
+  writeFileSync(path.join(repository, 'side.txt'), '并行侧支候选\n');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备侧支 Skill Expert v1.0.0');
+  const sideCandidateSha = git(repository, 'rev-parse', 'HEAD');
+  git(repository, 'switch', 'release');
+  git(repository, 'merge', '--no-ff', 'side', '-m', '晋级侧支 Skill Expert v1.0.0');
+  const firstReleaseSha = git(repository, 'rev-parse', 'HEAD');
+
+  git(repository, 'switch', '-c', 'main', baselineSha);
+  writeVersionContract(repository, '1.0.1');
+  writeFileSync(path.join(repository, 'main.txt'), '主线候选\n');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备主线 Skill Expert v1.0.1');
+  const mainCandidateSha = git(repository, 'rev-parse', 'HEAD');
+  const forgedReleaseSha = git(
+    repository,
+    'commit-tree',
+    `${mainCandidateSha}^{tree}`,
+    '-p',
+    firstReleaseSha,
+    '-p',
+    mainCandidateSha,
+    '-m',
+    '伪造：晋级不连续的 Skill Expert v1.0.1',
+  );
+  git(repository, 'update-ref', 'refs/heads/release', forgedReleaseSha);
+
+  git(repository, 'merge', '--no-ff', '-s', 'ours', 'side', '-m', '让最终 main 同时包含两个侧支');
+  writeVersionContract(repository, '1.0.2');
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-m', '准备 Skill Expert v1.0.2');
+  const candidateSha = git(repository, 'rev-parse', 'HEAD');
+
+  assert.equal(isAncestor(repository, sideCandidateSha, candidateSha), true);
+  assert.equal(isAncestor(repository, mainCandidateSha, candidateSha), true);
+  assert.equal(isAncestor(repository, sideCandidateSha, mainCandidateSha), false);
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /较旧的晋级候选 [0-9a-f]{40} 必须是下一次晋级候选/);
+});
+
+test('拒绝树内容不等于上次 main 候选的 release merge commit', (t) => {
+  const { repository, candidateSha } = createRepeatedPromotionRepository(t);
+  git(repository, 'switch', 'release');
+  writeFileSync(path.join(repository, 'release-only.txt'), '篡改 merge tree\n');
+  git(repository, 'add', 'release-only.txt');
+  git(repository, 'commit', '--amend', '--no-edit');
+  git(repository, 'switch', 'main');
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /release 的树必须与上一次晋级的 main 候选完全一致/);
 });
 
 test('rejects every release branch pair except main to release', (t) => {

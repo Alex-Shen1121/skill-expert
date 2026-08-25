@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { checkVersionConsistency } from './check-version-consistency.mjs';
 
 const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const DEFAULT_RELEASE_BASELINE_SHA = 'e7ed2157726b50b585ee0c53df61870a12cd9893';
 
 function fail(message) {
   throw new Error(message);
@@ -78,6 +79,70 @@ function packageAt(ref) {
   }
 }
 
+function isAncestor(ancestor, descendant) {
+  const result = git(['merge-base', '--is-ancestor', ancestor, descendant], {
+    allowFailure: true,
+  });
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  fail(`无法核对提交祖先关系：${ancestor} → ${descendant}`);
+}
+
+function releaseBaselineSha() {
+  const baselineSha =
+    process.env.SKILL_EXPERT_RELEASE_BASELINE_SHA ?? DEFAULT_RELEASE_BASELINE_SHA;
+  if (!/^[0-9a-f]{40}$/.test(baselineSha)) {
+    fail('release 固定基线必须是完整的小写 40 位提交 SHA');
+  }
+  const resolved = git(['rev-parse', '--verify', `${baselineSha}^{commit}`], {
+    allowFailure: true,
+  });
+  if (resolved.status !== 0 || resolved.stdout.trim() !== baselineSha) {
+    fail(`无法解析 release 固定基线 ${baselineSha}`);
+  }
+  return baselineSha;
+}
+
+function verifyPromotionBase(baseSha, candidateSha, base) {
+  const baselineSha = releaseBaselineSha();
+  let releaseCursor = baseSha;
+  let newerCandidateSha = candidateSha;
+  const visited = new Set();
+
+  while (releaseCursor !== baselineSha) {
+    if (visited.has(releaseCursor)) fail(`${base} 第一父历史出现循环`);
+    visited.add(releaseCursor);
+
+    const revision = git(['rev-list', '--parents', '-n', '1', releaseCursor])
+      .stdout.trim()
+      .split(/\s+/);
+    if (revision.length !== 3) {
+      fail(`${base} 第一父历史只能包含合法的双父晋级 merge commit`);
+    }
+
+    const firstParentSha = revision[1];
+    const previousCandidateSha = revision[2];
+    const releaseTree = git(['rev-parse', `${releaseCursor}^{tree}`]).stdout.trim();
+    const previousCandidateTree = git(['rev-parse', `${previousCandidateSha}^{tree}`])
+      .stdout.trim();
+    if (releaseTree !== previousCandidateTree) {
+      fail(`${base} 的树必须与上一次晋级的 main 候选完全一致`);
+    }
+    if (!isAncestor(previousCandidateSha, newerCandidateSha)) {
+      fail(
+        `较旧的晋级候选 ${previousCandidateSha} 必须是下一次晋级候选 ${newerCandidateSha} 的祖先`,
+      );
+    }
+
+    newerCandidateSha = previousCandidateSha;
+    releaseCursor = firstParentSha;
+  }
+
+  if (!isAncestor(baselineSha, newerCandidateSha)) {
+    fail(`最早的晋级候选必须从 release 固定基线 ${baselineSha} 继续开发`);
+  }
+}
+
 function releaseNotes(content, version) {
   const escapedVersion = version.replaceAll('.', '\\.');
   const heading = new RegExp(
@@ -112,10 +177,7 @@ function verifyCandidate(options) {
   if (checkoutSha !== candidateSha) {
     fail(`checked-out HEAD ${checkoutSha} does not match candidate SHA ${candidateSha}`);
   }
-  const ancestry = git(['merge-base', '--is-ancestor', baseSha, candidateSha], {
-    allowFailure: true,
-  });
-  if (ancestry.status !== 0) fail(`${base} must be an ancestor of candidate SHA ${candidateSha}`);
+  verifyPromotionBase(baseSha, candidateSha, base);
 
   const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const candidateVersion = parseStableVersion(manifest.version, 'candidate version');
