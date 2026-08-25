@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { verifyLinuxBundleBinaries } from './verify-linux-release.mjs';
+import {
+  RPM_EXTRACTION_SCRIPT,
+  verifyLinuxBundleBinaries,
+} from './verify-linux-release.mjs';
 
 function binary(marker, suffix = '') {
   return Buffer.from(`header__TAURI_BUNDLE_TYPE_VAR_${marker}payload${suffix}`);
@@ -55,4 +58,9 @@ test('AppImage 即使保留 APP 标记，旧版本 build-id 仍被拒绝', () =>
       }),
     /ELF build-id.*同一次构建/,
   );
+});
+
+test('RPM 在非 root runner 解包时不尝试恢复归档属主', () => {
+  assert.match(RPM_EXTRACTION_SCRIPT, /--no-preserve-owner/);
+  assert.match(RPM_EXTRACTION_SCRIPT, /--no-absolute-filenames/);
 });

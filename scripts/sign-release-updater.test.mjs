@@ -11,19 +11,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { tauriSignerInvocation } from './sign-release-updater.mjs';
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const signer = path.join(repositoryRoot, 'scripts/sign-release-updater.mjs');
 const verifier = path.join(repositoryRoot, 'scripts/verify-updater-signature.mjs');
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const tauriCli = path.join(repositoryRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 const version = '1.2.3';
 
 function generateKeyPair(root, name) {
   const keyPath = path.join(root, `${name}.key`);
   const password = `${name}-fixture-password`;
   const result = spawnSync(
-    npx,
+    process.execPath,
     [
-      'tauri',
+      tauriCli,
       'signer',
       'generate',
       '--ci',
@@ -38,6 +40,18 @@ function generateKeyPair(root, name) {
   assert.equal(result.status, 0, result.stderr);
   return { keyPath, publicKeyPath: `${keyPath}.pub`, password };
 }
+
+test('Updater 重签跨平台直接调用 Node CLI 而不依赖 cmd shim', () => {
+  const invocation = tauriSignerInvocation('C:\\候选包\\Skill Expert.exe');
+
+  assert.equal(invocation.command, process.execPath);
+  assert.match(invocation.args[0], /@tauri-apps[\\/]cli[\\/]tauri\.js$/);
+  assert.deepEqual(invocation.args.slice(1), [
+    'signer',
+    'sign',
+    'C:\\候选包\\Skill Expert.exe',
+  ]);
+});
 
 function runSigner(directory, target, keyPair, publicKeyPath = keyPair.publicKeyPath) {
   return spawnSync(
