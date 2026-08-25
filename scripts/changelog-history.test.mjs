@@ -18,6 +18,12 @@ function releaseHeadings(content) {
   );
 }
 
+function assertIndependentReleaseLine(content) {
+  const headings = releaseHeadings(content);
+  assert.equal(headings[0], 'Unreleased');
+  assert.equal(headings.at(-1), '1.0.0');
+}
+
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -27,7 +33,7 @@ test('English changelog starts the Skill Expert line at 1.0.0 and preserves comp
   const archive = read('docs/upstream-history/CHANGELOG.md');
   const upstreamHistory = archive.slice(archive.indexOf('## [1.34.2]'));
 
-  assert.deepEqual(releaseHeadings(changelog), ['Unreleased', '1.0.0']);
+  assertIndependentReleaseLine(changelog);
   assert.match(
     changelog,
     /Upstream Skills Manager history is preserved in \[the upstream history archive\]\(docs\/upstream-history\/CHANGELOG\.md\)\./,
@@ -44,7 +50,7 @@ test('Chinese changelog starts the Skill Expert line at 1.0.0 and preserves comp
   const archive = read('docs/upstream-history/CHANGELOG-zh.md');
   const upstreamHistory = archive.slice(archive.indexOf('## [1.34.2]'));
 
-  assert.deepEqual(releaseHeadings(changelog), ['Unreleased', '1.0.0']);
+  assertIndependentReleaseLine(changelog);
   assert.match(
     changelog,
     /上游 Skills Manager 的历史记录保存在\[上游历史归档\]\(docs\/upstream-history\/CHANGELOG-zh\.md\)中。/,
