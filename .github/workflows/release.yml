@@ -397,20 +397,7 @@ jobs:
           TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir release-assets
-          gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          jq -r --arg tag "$TAG" \
-            '.[] | select(.tag_name == $tag and .draft == true) | .assets[] | [.id, .name] | @tsv' \
-            "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/assets.tsv"
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            [ -n "$ASSET_ID" ] || continue
-            if [[ "$ASSET_NAME" == */* || "$ASSET_NAME" == "." || "$ASSET_NAME" == ".." ]]; then
-              echo "Draft 包含不安全资产名：$ASSET_NAME" >&2
-              exit 1
-            fi
-            gh api -H "Accept: application/octet-stream" \
-              "repos/${REPO}/releases/assets/$ASSET_ID" > "release-assets/$ASSET_NAME"
-          done < "$RUNNER_TEMP/assets.tsv"
+          bash scripts/download-draft-release-assets.sh release-assets
 
       - name: 生成四平台 latest.json 与 SHA256SUMS
         shell: bash
@@ -454,6 +441,12 @@ jobs:
       tag: ${{ needs.release-metadata.outputs.tag }}
       release_sha: ${{ needs.release-metadata.outputs.release_sha }}
     steps:
+      - name: 检出发布工具
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-metadata.outputs.release_sha }}
+
       - name: 下载 Draft 中待证明的真实资产
         shell: bash
         env:
@@ -462,20 +455,7 @@ jobs:
           TAG: ${{ needs.release-metadata.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir release-assets
-          gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          jq -r --arg tag "$TAG" \
-            '.[] | select(.tag_name == $tag and .draft == true) | .assets[] | [.id, .name] | @tsv' \
-            "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/assets.tsv"
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            [ -n "$ASSET_ID" ] || continue
-            if [[ "$ASSET_NAME" == */* || "$ASSET_NAME" == "." || "$ASSET_NAME" == ".." ]]; then
-              echo "Draft 包含不安全资产名：$ASSET_NAME" >&2
-              exit 1
-            fi
-            gh api -H "Accept: application/octet-stream" \
-              "repos/${REPO}/releases/assets/$ASSET_ID" > "release-assets/$ASSET_NAME"
-          done < "$RUNNER_TEMP/assets.tsv"
+          bash scripts/download-draft-release-assets.sh release-assets
 
       - name: 为 Draft 实际字节生成来源证明
         id: attest
@@ -520,24 +500,7 @@ jobs:
           TAG: ${{ needs.release-provenance.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir release-assets
-          gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          if [ "$(jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag and .draft == true)] | length' "$RUNNER_TEMP/releases.json")" != "1" ]; then
-            echo "必须存在唯一且仍不可见的 Draft Release：$TAG" >&2
-            exit 1
-          fi
-          jq -r --arg tag "$TAG" \
-            '.[] | select(.tag_name == $tag and .draft == true) | .assets[] | [.id, .name] | @tsv' \
-            "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/assets.tsv"
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            [ -n "$ASSET_ID" ] || continue
-            if [[ "$ASSET_NAME" == */* || "$ASSET_NAME" == "." || "$ASSET_NAME" == ".." ]]; then
-              echo "Draft 包含不安全资产名：$ASSET_NAME" >&2
-              exit 1
-            fi
-            gh api -H "Accept: application/octet-stream" \
-              "repos/${REPO}/releases/assets/$ASSET_ID" > "release-assets/$ASSET_NAME"
-          done < "$RUNNER_TEMP/assets.tsv"
+          bash scripts/download-draft-release-assets.sh release-assets
 
       - name: 验证精确清单、哈希与 Updater 密码学签名
         shell: bash
@@ -604,20 +567,7 @@ jobs:
           TAG: ${{ needs.release-provenance.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir release-assets
-          gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          jq -r --arg tag "$TAG" \
-            '.[] | select(.tag_name == $tag and .draft == true) | .assets[] | [.id, .name] | @tsv' \
-            "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/assets.tsv"
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            [ -n "$ASSET_ID" ] || continue
-            if [[ "$ASSET_NAME" == */* || "$ASSET_NAME" == "." || "$ASSET_NAME" == ".." ]]; then
-              echo "Draft 包含不安全资产名：$ASSET_NAME" >&2
-              exit 1
-            fi
-            gh api -H "Accept: application/octet-stream" \
-              "repos/${REPO}/releases/assets/$ASSET_ID" > "release-assets/$ASSET_NAME"
-          done < "$RUNNER_TEMP/assets.tsv"
+          bash scripts/download-draft-release-assets.sh release-assets
 
       - name: 验证 DMG、Updater archive 与 CLI 的 ad-hoc 签名
         env:
@@ -658,20 +608,7 @@ jobs:
           TAG: ${{ needs.release-provenance.outputs.tag }}
         run: |
           set -euo pipefail
-          mkdir release-assets
-          gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          jq -r --arg tag "$TAG" \
-            '.[] | select(.tag_name == $tag and .draft == true) | .assets[] | [.id, .name] | @tsv' \
-            "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/assets.tsv"
-          while IFS=$'\t' read -r ASSET_ID ASSET_NAME; do
-            [ -n "$ASSET_ID" ] || continue
-            if [[ "$ASSET_NAME" == */* || "$ASSET_NAME" == "." || "$ASSET_NAME" == ".." ]]; then
-              echo "Draft 包含不安全资产名：$ASSET_NAME" >&2
-              exit 1
-            fi
-            gh api -H "Accept: application/octet-stream" \
-              "repos/${REPO}/releases/assets/$ASSET_ID" > "release-assets/$ASSET_NAME"
-          done < "$RUNNER_TEMP/assets.tsv"
+          bash scripts/download-draft-release-assets.sh release-assets
 
       - name: 安装 Linux 包检查工具
         if: runner.os == 'Linux'
