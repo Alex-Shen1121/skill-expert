@@ -39,6 +39,9 @@ jobs:
       - name: Test release promotion contract
         run: npm run test:promotion
 
+      - name: 测试正式发布编排契约
+        run: npm run test:formal-release
+
       - name: Test upstream tracking contract
         run: npm run test:upstream-tracking
 
@@ -93,7 +96,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install actionlint
-        run: GOBIN="$RUNNER_TEMP/actionlint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+        run: GOBIN="$RUNNER_TEMP/actionlint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: Validate workflows
         run: '"$RUNNER_TEMP/actionlint-bin/actionlint"'
@@ -160,6 +163,24 @@ jobs:
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
+
+      - name: 配置 macOS 发布验证所需的 Node.js
+        if: runner.os == 'macOS'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: 测试 macOS 正式下载回验器
+        if: runner.os == 'macOS'
+        run: node --test scripts/verify-macos-release.test.mjs
+
+      - name: 检查 Windows 正式回验脚本语法
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          [scriptblock]::Create(
+            (Get-Content -Raw -LiteralPath scripts/verify-windows-release.ps1)
+          ) | Out-Null
 
       # cargo test needs no frontend build: tauri's generate_context only
       # reads the config, and beforeBuildCommand applies to `tauri build`.

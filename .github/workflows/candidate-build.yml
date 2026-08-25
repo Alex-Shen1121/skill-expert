@@ -97,6 +97,8 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
+            binutils \
+            cpio \
             rpm
 
       - name: Install frontend dependencies
@@ -160,6 +162,8 @@ jobs:
         shell: bash
         env:
           BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
+          CANDIDATE_PUBLIC_KEY_PATH: ${{ runner.temp }}/candidate-updater.key.pub
+          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ runner.temp }}/candidate-updater.key
           TARGET_ID: ${{ matrix.target_id }}
         run: |
           set -euo pipefail
@@ -169,10 +173,34 @@ jobs:
             --target "$TARGET_ID" \
             --build-root "$BUILD_ROOT" \
             --directory "candidate-assets/$TARGET_ID"
+          node scripts/sign-release-updater.mjs \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --directory "candidate-assets/$TARGET_ID" \
+            --public-key "$CANDIDATE_PUBLIC_KEY_PATH"
           node scripts/candidate-assets.mjs verify \
             --version "$VERSION" \
             --target "$TARGET_ID" \
             --directory "candidate-assets/$TARGET_ID"
+
+      - name: 原生回验 Linux 候选安装包
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/verify-linux-release.mjs \
+            --version "$VERSION" \
+            --directory "candidate-assets/$TARGET_ID"
+
+      - name: 原生回验 Windows 候选安装包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Version = node -p "require('./package.json').version"
+          ./scripts/verify-windows-release.ps1 -Version $Version -Directory "candidate-assets/${{ matrix.target_id }}"
 
       - name: Upload candidate directory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

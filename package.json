@@ -28,6 +28,7 @@
     "test:release": "node --test scripts/prepare-release.test.mjs scripts/changelog-history.test.mjs scripts/prepare-release-workflow.test.mjs",
     "test:candidate": "node --test scripts/candidate-assets.test.mjs scripts/candidate-workflow.test.mjs scripts/candidate-docs.test.mjs scripts/verify-macos-adhoc.test.mjs",
     "test:promotion": "node --test scripts/release-candidate.test.mjs scripts/release-promotion-workflow.test.mjs",
+    "test:formal-release": "node --test scripts/release-merge.test.mjs scripts/release-assets.test.mjs scripts/release-binary-version.test.mjs scripts/sign-release-updater.test.mjs scripts/release-orchestration-workflow.test.mjs scripts/verify-linux-release.test.mjs scripts/verify-macos-release.test.mjs scripts/formal-release-docs.test.mjs",
     "test:upstream-tracking": "node --test scripts/upstream-tracking.test.mjs scripts/upstream-tracking-workflow.test.mjs",
     "test:updater": "node --test scripts/check-updater-trust.test.mjs scripts/verify-updater-signature.test.mjs scripts/verify-updater-metadata.test.mjs scripts/updater-key-recovery.test.mjs scripts/provision-updater.test.mjs scripts/updater-workflow.test.mjs scripts/updater-docs.test.mjs",
     "updater:check": "node scripts/check-updater-trust.mjs",

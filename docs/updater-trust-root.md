@@ -8,9 +8,10 @@ Skill Expert 独立持有自己的 Tauri Updater 信任根。仓库只在
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 不得创建仓库级 Secret 副本，也不得把 Secret 值粘贴到 Issue、拉取请求、工作流输入、
-Shell 历史或日志中。受控的正式发布编排接管旧的标签和手动工作流之前，任何工作流都不得
-读取生产 Secret。后续正式发布任务是唯一绑定 `release` Environment 的任务。候选构建
-在每个运行器内生成临时 Updater 密钥，不能访问生产 Environment。
+Shell 历史或日志中。受控的正式发布编排已经取代旧的标签和手动工作流；其中只有
+`build-release` 正式构建绑定 `release` Environment 并读取生产 Secret。候选构建在每个
+运行器内生成临时 Updater 密钥，不能访问生产 Environment。完整发布顺序与故障处理参见
+[正式发布指南](formal-release.md)。
 
 这是 Skill Expert 维护者执行的一次性产品配置，不是终端用户设置，也不是每次发布都要
 重复的步骤。配置前，仓库使用一个有明确记录的“尚未配置”开发公钥，其私钥部分已经丢
