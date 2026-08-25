@@ -25,6 +25,7 @@ const fixtureFiles = [
   'README.zh-CN.md',
   'docs/agents/issue-tracker.md',
   'package.json',
+  'scripts/candidate-assets.mjs',
   'src-tauri/Cargo.toml',
   'src-tauri/src/commands/settings.rs',
   'src-tauri/tauri.conf.json',
@@ -63,6 +64,20 @@ test('accepts the canonical repository identity fixture', (t) => {
   const result = runChecker(fixtureRoot);
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('正式发布资产契约改变 CLI 名称时拒绝通过', (t) => {
+  const fixtureRoot = createFixture(t);
+  replaceInFixture(
+    fixtureRoot,
+    'scripts/candidate-assets.mjs',
+    '`skill-expert-cli-v${version}-${target}${contract.cliSuffix}`',
+    '`other-cli-v${version}-${target}${contract.cliSuffix}`',
+  );
+
+  const result = runChecker(fixtureRoot);
+  assert.notEqual(result.status, 0, '正式发布 CLI 资产名称漂移时必须失败');
+  assert.match(result.stderr, /正式发布 CLI 资产身份/);
 });
 
 test('rejects a diagnostic issue destination outside the canonical repository', (t) => {

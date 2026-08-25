@@ -44,6 +44,12 @@ test('candidate workflow declares exactly the four supported build targets', () 
 
 test('candidate workflow uses only ephemeral signing and has no release side effects', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const buildStep = workflow.match(
+    /- name: Build complete desktop packages and updater assets[\s\S]*?(?=\n\s+- name:)/,
+  )?.[0] ?? '';
+  const stageStep = workflow.match(
+    /- name: Stage stable candidate asset names[\s\S]*?(?=\n\s+- name:)/,
+  )?.[0] ?? '';
 
   assert.match(workflow, /^\s+contents:\s*read\s*$/m);
   assert.match(workflow, /CANDIDATE_KEY_PASSWORD="\$\(openssl rand -hex 32\)"/);
@@ -57,13 +63,20 @@ test('candidate workflow uses only ephemeral signing and has no release side eff
     /TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$CANDIDATE_KEY_PASSWORD[^\n]+GITHUB_ENV/,
   );
   assert.match(
-    workflow,
+    buildStep,
     /TAURI_SIGNING_PRIVATE_KEY:\s*\$\{\{ runner\.temp \}\}\/candidate-updater\.key/,
   );
+  assert.match(
+    stageStep,
+    /TAURI_SIGNING_PRIVATE_KEY_PATH:\s*\$\{\{ runner\.temp \}\}\/candidate-updater\.key/,
+  );
+  assert.doesNotMatch(stageStep, /^\s*TAURI_SIGNING_PRIVATE_KEY:\s*/m);
   assert.match(workflow, /APPLE_SIGNING_IDENTITY:\s*"-"/);
   assert.match(workflow, /codesign --force --sign - "\$CLI_PATH"/);
   assert.match(workflow, /verify-macos-adhoc\.mjs/);
   assert.match(workflow, /candidate-assets\.mjs stage/);
+  assert.match(workflow, /sign-release-updater\.mjs/);
+  assert.match(workflow, /--public-key "\$CANDIDATE_PUBLIC_KEY_PATH"/);
   assert.match(workflow, /candidate-assets\.mjs verify/);
 
   assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./);
@@ -71,10 +84,23 @@ test('candidate workflow uses only ephemeral signing and has no release side eff
     workflow,
     /APPLE_CERTIFICATE|APPLE_API_|APPLE_ID|APPLE_PASSWORD|APPLE_TEAM_ID|Developer ID/,
   );
-  assert.doesNotMatch(workflow, /TAURI_SIGNING_PRIVATE_KEY_PATH/);
   assert.doesNotMatch(workflow, /\bgh release\b|\bgit tag\b|\bnotary|\bnotariz|\bspctl\b/i);
   assert.doesNotMatch(workflow, /^\s+environment:\s*/m);
   assert.doesNotMatch(workflow, /^\s+contents:\s*write\s*$/m);
+});
+
+test('候选工作流实际运行 Linux 与 Windows 原生安装包回验', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+
+  assert.match(workflow, /apt-get install -y[\s\S]*?\bcpio\b/);
+  assert.match(
+    workflow,
+    /if:\s*runner\.os == 'Linux'[\s\S]*?verify-linux-release\.mjs[\s\S]*?--directory "candidate-assets\/\$TARGET_ID"/,
+  );
+  assert.match(
+    workflow,
+    /if:\s*runner\.os == 'Windows'[\s\S]*?verify-windows-release\.ps1[\s\S]*?-Directory "candidate-assets\/\$\{\{ matrix\.target_id \}\}"/,
+  );
 });
 
 test('candidate workflow pins actions and uploads only staged candidate directories', () => {

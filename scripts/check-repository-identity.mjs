@@ -229,10 +229,13 @@ expect(
 );
 
 const releaseWorkflow = read('.github/workflows/release.yml');
+const candidateAssets = read('scripts/candidate-assets.mjs');
+const cliAssetContract = '`skill-expert-cli-v${version}-${target}${contract.cliSuffix}`';
 expect(
-  'CLI release asset identity',
-  releaseWorkflow.includes('skill-expert-cli-${{ matrix.label }}'),
-  'missing skill-expert CLI assets',
+  '正式发布 CLI 资产身份',
+  releaseWorkflow.includes('candidate-assets.mjs stage') &&
+    candidateAssets.split(cliAssetContract).length - 1 === 2,
+  '正式工作流必须通过资产契约生成 skill-expert-cli-v<version>-<target> 资产',
 );
 expect(
   'desktop release asset identity',

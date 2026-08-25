@@ -8,12 +8,15 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const releaseWorkflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
 
-test('旧发布入口不能读取生产 Updater Secret', () => {
+test('只有正式构建通过 release Environment 读取生产 Updater Secret', () => {
   const workflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
 
-  assert.doesNotMatch(workflow, /^\s+environment:\s*release\s*$/m);
-  assert.doesNotMatch(workflow, /secrets\.TAURI_SIGNING_PRIVATE_KEY/);
-  assert.doesNotMatch(workflow, /secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD/);
+  assert.equal((workflow.match(/^\s+environment:\s*release\s*$/gm) ?? []).length, 1);
+  assert.equal((workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY\s*\}\}/g) ?? []).length, 2);
+  assert.equal(
+    (workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD\s*\}\}/g) ?? []).length,
+    2,
+  );
   assert.match(workflow, /run: npm run updater:check:production/);
 });
 

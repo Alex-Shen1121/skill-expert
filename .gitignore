@@ -36,6 +36,7 @@ docs
 !docs/
 docs/*
 !docs/candidate-builds.md
+!docs/formal-release.md
 !docs/updater-trust-root.md
 !docs/upstream-history/
 !docs/upstream-history/*.md
