@@ -18,9 +18,37 @@ import test from 'node:test';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const provisioner = path.join(repositoryRoot, 'scripts/provision-updater.mjs');
-const configPath = path.join(repositoryRoot, 'src-tauri/tauri.conf.json');
 const unprovisionedPublicKey =
   'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzQzAwMTQ3Nzc3ODNEODUKUldTRlBYaDNSd0hBbzFGYzFkaXZqOFgvTTZIdTNkQjU1S3l2NmpNdXQ3TVNWdmNnckhwUEJiRUcK';
+
+function createUnprovisionedRepository(t) {
+  const root = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-repository-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const fixtureRoot = path.join(root, 'repository');
+  const fixtureProvisioner = path.join(fixtureRoot, 'scripts/provision-updater.mjs');
+  const fixtureConfig = path.join(fixtureRoot, 'src-tauri/tauri.conf.json');
+  mkdirSync(path.dirname(fixtureProvisioner), { recursive: true });
+  mkdirSync(path.dirname(fixtureConfig), { recursive: true });
+  copyFileSync(provisioner, fixtureProvisioner);
+  writeFileSync(
+    fixtureConfig,
+    `${JSON.stringify(
+      {
+        plugins: {
+          updater: {
+            pubkey: unprovisionedPublicKey,
+            endpoints: [
+              'https://github.com/Alex-Shen1121/skill-expert/releases/latest/download/latest.json',
+            ],
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return { fixtureRoot, fixtureProvisioner, fixtureConfig };
+}
 
 function createPrivateInputs(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-provision-'));
@@ -36,19 +64,21 @@ function createPrivateInputs(t) {
 
 test('计划模式说明一次性产品配置且不修改仓库', (t) => {
   const { backupDirectory, passphraseFile } = createPrivateInputs(t);
-  const configBefore = readFileSync(configPath, 'utf8');
+  const { fixtureRoot, fixtureProvisioner, fixtureConfig } =
+    createUnprovisionedRepository(t);
+  const configBefore = readFileSync(fixtureConfig, 'utf8');
 
   const result = spawnSync(
     process.execPath,
     [
-      provisioner,
+      fixtureProvisioner,
       '--plan',
       '--backup-directory',
       backupDirectory,
       '--recovery-passphrase-file',
       passphraseFile,
     ],
-    { cwd: repositoryRoot, encoding: 'utf8' },
+    { cwd: fixtureRoot, encoding: 'utf8' },
   );
 
   assert.equal(result.status, 0, result.stderr);
@@ -57,15 +87,17 @@ test('计划模式说明一次性产品配置且不修改仓库', (t) => {
   assert.match(result.stdout, /TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(result.stdout, /加密离线备份/);
   assert.match(result.stdout, /未进行任何更改/);
-  assert.equal(readFileSync(configPath, 'utf8'), configBefore);
+  assert.equal(readFileSync(fixtureConfig, 'utf8'), configBefore);
 });
 
 test('维护者未输入确认短语时交互模式停止且不修改仓库', (t) => {
   const { backupDirectory, passphraseFile } = createPrivateInputs(t);
-  const configBefore = readFileSync(configPath, 'utf8');
+  const { fixtureRoot, fixtureProvisioner, fixtureConfig } =
+    createUnprovisionedRepository(t);
+  const configBefore = readFileSync(fixtureConfig, 'utf8');
 
-  const result = spawnSync(process.execPath, [provisioner, '--interactive'], {
-    cwd: repositoryRoot,
+  const result = spawnSync(process.execPath, [fixtureProvisioner, '--interactive'], {
+    cwd: fixtureRoot,
     encoding: 'utf8',
     input: `${backupDirectory}\n${passphraseFile}\ncancel\n`,
   });
@@ -73,7 +105,7 @@ test('维护者未输入确认短语时交互模式停止且不修改仓库', (t
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /确认配置 SKILL EXPERT/);
   assert.match(result.stdout, /已取消，未进行任何更改/);
-  assert.equal(readFileSync(configPath, 'utf8'), configBefore);
+  assert.equal(readFileSync(fixtureConfig, 'utf8'), configBefore);
 });
 
 test(
