@@ -15,7 +15,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
--
+- Normalize Windows CRLF output and enforce a portable filename allowlist before downloading Draft Release assets, so native Windows verification reads exact names without path traversal risk.
 
 ## [1.0.1] - 2026-08-25
 
