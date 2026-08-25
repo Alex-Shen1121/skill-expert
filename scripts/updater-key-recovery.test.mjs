@@ -27,7 +27,7 @@ function writeRestricted(filePath, contents) {
   chmodSync(filePath, 0o600);
 }
 
-test('publishes the final backup with an atomic no-replace primitive', () => {
+test('使用原子且不覆盖的原语发布最终备份', () => {
   const source = readFileSync(recoveryTool, 'utf8');
 
   assert.match(source, /fs\.linkSync\(temporaryPath, outputPath\)/);
@@ -57,7 +57,7 @@ function generateKeyPair(root, name, password) {
   return { keyPath, publicKeyPath: `${keyPath}.pub` };
 }
 
-test('creates an encrypted restricted backup and restores every updater credential', (t) => {
+test('创建权限受限的加密备份并恢复全部 Updater 凭据', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-recovery-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const privateKeyPath = path.join(fixtureRoot, 'updater.key');
@@ -117,8 +117,8 @@ test('creates an encrypted restricted backup and restores every updater credenti
     ],
     { encoding: 'utf8' },
   );
-  assert.notEqual(duplicateCreate.status, 0, 'an existing backup must not be replaced');
-  assert.match(duplicateCreate.stderr, /backup already exists/);
+  assert.notEqual(duplicateCreate.status, 0, '不得替换已有备份');
+  assert.match(duplicateCreate.stderr, /恢复备份已存在/);
   assert.equal(readFileSync(backupPath, 'utf8'), encryptedBackup);
 
   const restore = spawnSync(
@@ -149,7 +149,7 @@ test('creates an encrypted restricted backup and restores every updater credenti
   }
 });
 
-test('recovery verification rejects a restored private/public key mismatch', (t) => {
+test('恢复验证拒绝不匹配的私钥和公钥', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-recovery-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const signingPassword = 'fixture-signing-password';
@@ -237,11 +237,11 @@ test('recovery verification rejects a restored private/public key mismatch', (t)
     { cwd: repositoryRoot, encoding: 'utf8' },
   );
 
-  assert.notEqual(verify.status, 0, 'mismatched restored keys must fail the canary');
-  assert.match(verify.stderr, /key ID does not match/);
+  assert.notEqual(verify.status, 0, '不匹配的恢复密钥必须使 canary 失败');
+  assert.match(verify.stderr, /密钥标识.*不匹配/);
 });
 
-test('rejects a wrong recovery passphrase without creating restored files', (t) => {
+test('拒绝错误恢复口令且不创建恢复文件', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-recovery-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const privateKeyPath = path.join(fixtureRoot, 'updater.key');
@@ -293,12 +293,12 @@ test('rejects a wrong recovery passphrase without creating restored files', (t) 
     { encoding: 'utf8' },
   );
 
-  assert.notEqual(restore.status, 0, 'a wrong passphrase must fail authentication');
-  assert.match(restore.stderr, /unable to decrypt or authenticate/);
+  assert.notEqual(restore.status, 0, '错误口令必须认证失败');
+  assert.match(restore.stderr, /无法解密或认证/);
   assert.throws(() => statSync(restoreDirectory), /ENOENT/);
 });
 
-test('rejects a truncated AES-GCM authentication tag', (t) => {
+test('拒绝被截断的 AES-GCM 认证标签', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-updater-recovery-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const privateKeyPath = path.join(fixtureRoot, 'updater.key');
@@ -355,13 +355,13 @@ test('rejects a truncated AES-GCM authentication tag', (t) => {
     { encoding: 'utf8' },
   );
 
-  assert.notEqual(restore.status, 0, 'a truncated GCM tag must fail');
-  assert.match(restore.stderr, /unsupported or malformed|unable to decrypt or authenticate/);
+  assert.notEqual(restore.status, 0, '被截断的 GCM 标签必须失败');
+  assert.match(restore.stderr, /不受支持或格式错误|无法解密或认证/);
   assert.throws(() => statSync(restoreDirectory), /ENOENT/);
 });
 
 test(
-  'does not publish a truncated final backup when the filesystem stops a write',
+  '文件系统中止写入时不发布截断的最终备份',
   { skip: process.platform === 'win32' },
   (t) => {
     const fixtureRoot = mkdtempSync(
@@ -405,11 +405,11 @@ test(
       { encoding: 'utf8' },
     );
 
-    assert.notEqual(create.status, 0, 'the forced short write must fail');
+    assert.notEqual(create.status, 0, '强制短写入必须失败');
     assert.equal(
       existsSync(backupPath),
       false,
-      'a failed backup write must not expose the final path',
+      '备份写入失败后不得暴露最终路径',
     );
   },
 );

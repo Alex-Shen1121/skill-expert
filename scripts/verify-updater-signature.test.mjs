@@ -67,7 +67,7 @@ function runVerifier(filePath, signaturePath, publicKeyPath) {
   );
 }
 
-test('cryptographically verifies a Tauri updater signature with its public key', (t) => {
+test('使用公钥对 Tauri Updater 签名执行密码学验证', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-signature-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const keyPair = generateKeyPair(fixtureRoot, 'signing');
@@ -78,10 +78,10 @@ test('cryptographically verifies a Tauri updater signature with its public key',
   const result = runVerifier(artifactPath, signaturePath, keyPair.publicKeyPath);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Updater signature verified/);
+  assert.match(result.stdout, /Updater 签名验证通过/);
 });
 
-test('rejects a valid signature when the configured public key is different', (t) => {
+test('已配置公钥不同时拒绝有效签名', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-signature-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const signingKeyPair = generateKeyPair(fixtureRoot, 'signing');
@@ -96,12 +96,12 @@ test('rejects a valid signature when the configured public key is different', (t
     differentKeyPair.publicKeyPath,
   );
 
-  assert.notEqual(result.status, 0, 'a mismatched public key must fail');
-  assert.match(result.stderr, /key ID|signature verification failed/);
+  assert.notEqual(result.status, 0, '不匹配的公钥必须失败');
+  assert.match(result.stderr, /密钥标识|签名验证失败/);
   assert.notEqual(readFileSync(signaturePath, 'utf8').trim(), '');
 });
 
-test('rejects an artifact changed after it was signed', (t) => {
+test('拒绝签名后被修改的产物', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-signature-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const keyPair = generateKeyPair(fixtureRoot, 'signing');
@@ -112,6 +112,6 @@ test('rejects an artifact changed after it was signed', (t) => {
 
   const result = runVerifier(artifactPath, signaturePath, keyPair.publicKeyPath);
 
-  assert.notEqual(result.status, 0, 'tampered content must fail');
-  assert.match(result.stderr, /signature verification failed/);
+  assert.notEqual(result.status, 0, '被篡改的内容必须失败');
+  assert.match(result.stderr, /签名验证失败/);
 });

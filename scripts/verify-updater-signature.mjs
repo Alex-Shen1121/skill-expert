@@ -9,7 +9,7 @@ function parseArguments(argv) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`expected --name value arguments, found ${flag ?? 'nothing'}`);
+      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
     }
     options[flag.slice(2)] = value;
   }
@@ -20,7 +20,7 @@ function main() {
   const options = parseArguments(process.argv.slice(2));
   if (!options.file || !options.signature || !options['public-key']) {
     throw new Error(
-      'usage: verify-updater-signature.mjs --file artifact --signature artifact.sig --public-key updater.pub',
+      '用法：verify-updater-signature.mjs --file artifact --signature artifact.sig --public-key updater.pub',
     );
   }
   verifyUpdaterSignature({
@@ -29,7 +29,7 @@ function main() {
     publicKeyValue: fs.readFileSync(options['public-key'], 'utf8'),
     expectedFileName: path.basename(options.file),
   });
-  console.log(`Updater signature verified: ${path.basename(options.file)}`);
+  console.log(`Updater 签名验证通过：${path.basename(options.file)}`);
 }
 
 try {

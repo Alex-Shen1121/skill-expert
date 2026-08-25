@@ -13,7 +13,7 @@ function parseArguments(argv) {
     const flag = rest[index];
     const value = rest[index + 1];
     if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`expected --name value arguments, found ${flag ?? 'nothing'}`);
+      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
     }
     options[flag.slice(2)] = value;
   }
@@ -23,7 +23,7 @@ function parseArguments(argv) {
 function requireOptions(options, names, command) {
   const missing = names.filter((name) => !options[name]);
   if (missing.length > 0) {
-    throw new Error(`${command} requires ${missing.map((name) => `--${name}`).join(', ')}`);
+    throw new Error(`${command} 需要 ${missing.map((name) => `--${name}`).join('、')}`);
   }
 }
 
@@ -31,14 +31,14 @@ function assertRestricted(filePath, label) {
   if (process.platform === 'win32') return;
   const permissions = fs.statSync(filePath).mode & 0o777;
   if ((permissions & 0o077) !== 0) {
-    throw new Error(`${label} must not be readable or writable by group/others: ${filePath}`);
+    throw new Error(`${label}不能允许组用户或其他用户读写：${filePath}`);
   }
 }
 
 function readSecret(filePath, label) {
   assertRestricted(filePath, label);
   const value = fs.readFileSync(filePath, 'utf8').replace(/\r?\n$/, '');
-  if (value.length === 0) throw new Error(`${label} is empty`);
+  if (value.length === 0) throw new Error(`${label}为空`);
   return value;
 }
 
@@ -66,7 +66,7 @@ function publishBackupNoReplace(temporaryPath, outputPath) {
     return;
   } catch (error) {
     if (error.code === 'EEXIST') {
-      throw new Error(`recovery backup already exists: ${outputPath}`);
+      throw new Error(`恢复备份已存在：${outputPath}`);
     }
     const lockFallbackCodes = new Set([
       'EINVAL',
@@ -83,13 +83,13 @@ function publishBackupNoReplace(temporaryPath, outputPath) {
     fs.mkdirSync(publicationLock, { mode: 0o700 });
   } catch (error) {
     if (error.code === 'EEXIST') {
-      throw new Error(`recovery backup publication is already in progress: ${outputPath}`);
+      throw new Error(`恢复备份正在发布：${outputPath}`);
     }
     throw error;
   }
   try {
     if (fs.existsSync(outputPath)) {
-      throw new Error(`recovery backup already exists: ${outputPath}`);
+      throw new Error(`恢复备份已存在：${outputPath}`);
     }
     fs.renameSync(temporaryPath, outputPath);
   } finally {
@@ -99,7 +99,7 @@ function publishBackupNoReplace(temporaryPath, outputPath) {
 
 function writeBackupAtomically(outputPath, contents) {
   if (fs.existsSync(outputPath)) {
-    throw new Error(`recovery backup already exists: ${outputPath}`);
+    throw new Error(`恢复备份已存在：${outputPath}`);
   }
   const parentDirectory = path.dirname(outputPath);
   const temporaryPath = path.join(
@@ -142,22 +142,22 @@ function createBackup(options) {
     ],
     'create',
   );
-  assertRestricted(options['private-key'], 'updater private key');
+  assertRestricted(options['private-key'], 'Updater 私钥');
   const privateKey = fs.readFileSync(options['private-key'], 'utf8');
   const publicKey = fs.readFileSync(options['public-key'], 'utf8').replace(/\r?\n$/, '');
   const signingPassword = readSecret(
     options['signing-password-file'],
-    'updater signing password',
+    'Updater 签名密码',
   );
   const recoveryPassphrase = readSecret(
     options['recovery-passphrase-file'],
-    'recovery passphrase',
+    '恢复口令',
   );
   if (privateKey.length === 0 || publicKey.length === 0) {
-    throw new Error('updater key material is empty');
+    throw new Error('Updater 密钥材料为空');
   }
   if (recoveryPassphrase.length < 32) {
-    throw new Error('recovery passphrase must contain at least 32 characters');
+    throw new Error('恢复口令必须至少包含 32 个字符');
   }
 
   const payload = Buffer.from(
@@ -196,13 +196,13 @@ function createBackup(options) {
   };
 
   writeBackupAtomically(options.output, `${JSON.stringify(envelope, null, 2)}\n`);
-  console.log(`Encrypted updater recovery bundle created: ${options.output}`);
+  console.log(`已创建加密 Updater 恢复包：${options.output}`);
 }
 
 function decryptBackup(options) {
   const recoveryPassphrase = readSecret(
     options['recovery-passphrase-file'],
-    'recovery passphrase',
+    '恢复口令',
   );
   const envelope = JSON.parse(fs.readFileSync(options.backup, 'utf8'));
   if (
@@ -213,7 +213,7 @@ function decryptBackup(options) {
     envelope.kdf.r !== SCRYPT_OPTIONS.r ||
     envelope.kdf.p !== SCRYPT_OPTIONS.p
   ) {
-    throw new Error('unsupported or malformed updater recovery bundle');
+    throw new Error('Updater 恢复包不受支持或格式错误');
   }
 
   const salt = decodeCanonicalBase64(envelope.kdf.salt);
@@ -227,7 +227,7 @@ function decryptBackup(options) {
     !ciphertext ||
     ciphertext.length === 0
   ) {
-    throw new Error('unsupported or malformed updater recovery bundle');
+    throw new Error('Updater 恢复包不受支持或格式错误');
   }
 
   try {
@@ -247,11 +247,11 @@ function decryptBackup(options) {
       typeof payload.publicKey !== 'string' ||
       typeof payload.signingPassword !== 'string'
     ) {
-      throw new Error('invalid payload');
+      throw new Error('载荷无效');
     }
     return payload;
   } catch {
-    throw new Error('unable to decrypt or authenticate updater recovery bundle');
+    throw new Error('无法解密或认证 Updater 恢复包');
   }
 }
 
@@ -269,7 +269,7 @@ function restoreBackup(options) {
   const payload = decryptBackup(options);
   const outputDirectory = options['output-directory'];
   if (fs.existsSync(outputDirectory)) {
-    throw new Error(`restore output directory already exists: ${outputDirectory}`);
+    throw new Error(`恢复输出目录已存在：${outputDirectory}`);
   }
   const parentDirectory = path.dirname(outputDirectory);
   const stagingDirectory = fs.mkdtempSync(
@@ -290,14 +290,14 @@ function restoreBackup(options) {
       payload.signingPassword,
     );
     if (fs.existsSync(outputDirectory)) {
-      throw new Error(`restore output directory already exists: ${outputDirectory}`);
+      throw new Error(`恢复输出目录已存在：${outputDirectory}`);
     }
     fs.renameSync(stagingDirectory, outputDirectory);
   } catch (error) {
     fs.rmSync(stagingDirectory, { recursive: true, force: true });
     throw error;
   }
-  console.log(`Updater recovery material restored: ${options['output-directory']}`);
+  console.log(`已恢复 Updater 材料：${options['output-directory']}`);
 }
 
 function main() {
@@ -305,7 +305,7 @@ function main() {
   if (command === 'create') return createBackup(options);
   if (command === 'restore') return restoreBackup(options);
   throw new Error(
-    'usage: updater-key-recovery.mjs <create|restore> --name value ...',
+    '用法：updater-key-recovery.mjs <create|restore> --name value ...',
   );
 }
 

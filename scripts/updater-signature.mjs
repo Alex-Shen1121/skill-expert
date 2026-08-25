@@ -9,11 +9,11 @@ function decodeCanonicalBase64(value, label) {
     value.length % 4 !== 0 ||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(value)
   ) {
-    throw new Error(`${label} is not canonical base64`);
+    throw new Error(`${label}不是规范 Base64`);
   }
   const decoded = Buffer.from(value, 'base64');
   if (decoded.toString('base64') !== value) {
-    throw new Error(`${label} is not canonical base64`);
+    throw new Error(`${label}不是规范 Base64`);
   }
   return decoded;
 }
@@ -23,44 +23,44 @@ function decodeEnvelope(value, label, expectedLines) {
   const envelope = decodeCanonicalBase64(normalized, label);
   const text = envelope.toString('utf8');
   if (!Buffer.from(text, 'utf8').equals(envelope) || !text.endsWith('\n')) {
-    throw new Error(`${label} has a malformed Minisign envelope`);
+    throw new Error(`${label}的 Minisign 信封格式错误`);
   }
   const lines = text.slice(0, -1).split('\n');
   if (lines.length !== expectedLines) {
-    throw new Error(`${label} has a malformed Minisign envelope`);
+    throw new Error(`${label}的 Minisign 信封格式错误`);
   }
   return lines;
 }
 
 function decodePublicKey(value) {
-  const lines = decodeEnvelope(value, 'updater public key', 2);
+  const lines = decodeEnvelope(value, 'Updater 公钥', 2);
   const comment = /^untrusted comment: minisign public key: ([0-9A-F]{16})$/.exec(
     lines[0],
   );
-  const bytes = decodeCanonicalBase64(lines[1], 'updater public key payload');
+  const bytes = decodeCanonicalBase64(lines[1], 'Updater 公钥载荷');
   if (bytes.length !== 42 || bytes[0] !== 0x45 || ![0x44, 0x64].includes(bytes[1])) {
-    throw new Error('updater public key has an unsupported algorithm or length');
+    throw new Error('Updater 公钥使用了不受支持的算法或长度');
   }
   const keyId = bytes.subarray(2, 10);
   const displayedKeyId = Buffer.from(keyId).reverse().toString('hex').toUpperCase();
   if (comment?.[1] !== displayedKeyId) {
-    throw new Error('updater public key ID does not match its payload');
+    throw new Error('Updater 公钥标识与其载荷不匹配');
   }
   return { keyId, key: bytes.subarray(10) };
 }
 
 function decodeSignature(value, expectedFileName) {
-  const lines = decodeEnvelope(value, 'updater signature', 4);
+  const lines = decodeEnvelope(value, 'Updater 签名', 4);
   if (lines[0] !== 'untrusted comment: signature from tauri secret key') {
-    throw new Error('updater signature has an unexpected untrusted comment');
+    throw new Error('Updater 签名包含意外的非可信注释');
   }
   const signaturePayload = decodeCanonicalBase64(
     lines[1],
-    'updater signature payload',
+    'Updater 签名载荷',
   );
   const globalSignature = decodeCanonicalBase64(
     lines[3],
-    'updater global signature',
+    'Updater 全局签名',
   );
   if (
     signaturePayload.length !== 74 ||
@@ -68,13 +68,13 @@ function decodeSignature(value, expectedFileName) {
     signaturePayload[1] !== 0x44 ||
     globalSignature.length !== 64
   ) {
-    throw new Error('updater signature has an unsupported algorithm or length');
+    throw new Error('Updater 签名使用了不受支持的算法或长度');
   }
   const trustedComment = new RegExp(
     `^trusted comment: timestamp:\\d+\\tfile:${escapeRegExp(expectedFileName)}$`,
   );
   if (!trustedComment.test(lines[2])) {
-    throw new Error(`updater signature does not identify ${expectedFileName}`);
+    throw new Error(`Updater 签名未标识 ${expectedFileName}`);
   }
   return {
     keyId: signaturePayload.subarray(2, 10),
@@ -106,18 +106,18 @@ export function verifyUpdaterSignature({
   const publicKey = decodePublicKey(publicKeyValue);
   const signature = decodeSignature(signatureValue, expectedFileName);
   if (!publicKey.keyId.equals(signature.keyId)) {
-    throw new Error('updater signature key ID does not match the configured public key');
+    throw new Error('Updater 签名密钥标识与已配置公钥不匹配');
   }
 
   const digest = crypto.createHash('blake2b512').update(artifact).digest();
   if (!verifyEd25519(digest, publicKey.key, signature.signature)) {
-    throw new Error('updater artifact signature verification failed');
+    throw new Error('Updater 产物签名验证失败');
   }
   const globalPayload = Buffer.concat([
     signature.signature,
     Buffer.from(signature.trustedComment, 'utf8'),
   ]);
   if (!verifyEd25519(globalPayload, publicKey.key, signature.globalSignature)) {
-    throw new Error('updater trusted-comment signature verification failed');
+    throw new Error('Updater 可信注释签名验证失败');
   }
 }

@@ -102,17 +102,17 @@ function runVerifier(t, metadata, overridePublicKeyPath = publicKeyPath) {
   );
 }
 
-test('accepts complete metadata whose four artifacts verify cryptographically', (t) => {
+test('接受四个产物均通过密码学验证的完整元数据', (t) => {
   const result = runVerifier(t, completeMetadata());
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     result.stdout,
-    /Updater metadata and artifact signatures verified for 1\.0\.0 \(4 platforms\)/,
+    /Updater 元数据和产物签名验证通过：1\.0\.0（4 个平台）/,
   );
 });
 
-test('rejects structurally valid random signature bytes without cryptographic proof', (t) => {
+test('拒绝结构有效但没有密码学证明的随机签名字节', (t) => {
   const metadata = completeMetadata();
   const signatureBytes = Buffer.alloc(74, 1);
   signatureBytes[0] = 0x45;
@@ -129,31 +129,31 @@ test('rejects structurally valid random signature bytes without cryptographic pr
 
   const result = runVerifier(t, metadata);
 
-  assert.notEqual(result.status, 0, 'random signature bytes must not be trusted');
-  assert.match(result.stderr, /signature verification failed|key ID/);
+  assert.notEqual(result.status, 0, '不得信任随机签名字节');
+  assert.match(result.stderr, /签名验证失败|密钥标识/);
 });
 
-test('rejects updater metadata when any platform signature is missing', (t) => {
+test('任一平台签名缺失时拒绝 Updater 元数据', (t) => {
   const metadata = completeMetadata();
   delete metadata.platforms['linux-x86_64'].signature;
 
   const result = runVerifier(t, metadata);
 
-  assert.notEqual(result.status, 0, 'unsigned updater metadata must fail');
-  assert.match(result.stderr, /missing a signature for linux-x86_64/);
+  assert.notEqual(result.status, 0, '没有签名的 Updater 元数据必须失败');
+  assert.match(result.stderr, /缺少 linux-x86_64 的签名/);
 });
 
-test('rejects updater metadata with a malformed Tauri signature', (t) => {
+test('拒绝包含格式错误 Tauri 签名的 Updater 元数据', (t) => {
   const metadata = completeMetadata();
   metadata.platforms['linux-x86_64'].signature = 'signed-linux-x64';
 
   const result = runVerifier(t, metadata);
 
-  assert.notEqual(result.status, 0, 'garbage signature text must fail');
-  assert.match(result.stderr, /signature verification failed for linux-x86_64/);
+  assert.notEqual(result.status, 0, '无效签名文本必须失败');
+  assert.match(result.stderr, /linux-x86_64 签名验证失败/);
 });
 
-test('rejects a Tauri signature payload with the wrong algorithm identifier', (t) => {
+test('拒绝算法标识错误的 Tauri 签名载荷', (t) => {
   const metadata = completeMetadata();
   const outer = Buffer.from(metadata.platforms['linux-x86_64'].signature, 'base64')
     .toString('utf8')
@@ -168,22 +168,22 @@ test('rejects a Tauri signature payload with the wrong algorithm identifier', (t
 
   const result = runVerifier(t, metadata);
 
-  assert.notEqual(result.status, 0, 'non-Ed25519 signature payload must fail');
-  assert.match(result.stderr, /unsupported algorithm or length/);
+  assert.notEqual(result.status, 0, '非 Ed25519 签名载荷必须失败');
+  assert.match(result.stderr, /不受支持的算法或长度/);
 });
 
-test('rejects updater metadata that downloads from the upstream repository', (t) => {
+test('拒绝从上游仓库下载的 Updater 元数据', (t) => {
   const metadata = completeMetadata();
   metadata.platforms['windows-x86_64'].url =
     'https://github.com/xingkongliang/skills-manager/releases/download/v1.0.0/Skills.Manager_1.0.0_x64-setup.exe';
 
   const result = runVerifier(t, metadata);
 
-  assert.notEqual(result.status, 0, 'upstream updater URLs must fail');
-  assert.match(result.stderr, /URL mismatch for windows-x86_64/);
+  assert.notEqual(result.status, 0, '上游 Updater URL 必须失败');
+  assert.match(result.stderr, /windows-x86_64 URL 不匹配/);
 });
 
-test('rejects all metadata signatures when the configured public key is different', (t) => {
+test('已配置公钥不同时拒绝全部元数据签名', (t) => {
   const differentKeyPath = path.join(sharedRoot, 'different.key');
   runTauri([
     'generate',
@@ -197,6 +197,6 @@ test('rejects all metadata signatures when the configured public key is differen
 
   const result = runVerifier(t, completeMetadata(), `${differentKeyPath}.pub`);
 
-  assert.notEqual(result.status, 0, 'a different trust root must fail');
-  assert.match(result.stderr, /key ID does not match/);
+  assert.notEqual(result.status, 0, '不同信任根必须失败');
+  assert.match(result.stderr, /密钥标识.*不匹配/);
 });

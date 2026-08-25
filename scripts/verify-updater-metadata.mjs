@@ -19,7 +19,7 @@ function parseArguments(argv) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`expected --name value arguments, found ${flag ?? 'nothing'}`);
+      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
     }
     options[flag.slice(2)] = value;
   }
@@ -30,11 +30,11 @@ function main() {
   const options = parseArguments(process.argv.slice(2));
   if (!options.file || !options.version || !options['asset-directory']) {
     throw new Error(
-      'usage: verify-updater-metadata.mjs --file latest.json --version x.y.z --asset-directory artifacts [--public-key updater.pub]',
+      '用法：verify-updater-metadata.mjs --file latest.json --version x.y.z --asset-directory artifacts [--public-key updater.pub]',
     );
   }
   if (!/^\d+\.\d+\.\d+$/.test(options.version)) {
-    throw new Error(`version must be a stable x.y.z value, found ${options.version}`);
+    throw new Error(`版本必须是稳定的 x.y.z 值，实际为 ${options.version}`);
   }
 
   const metadata = JSON.parse(fs.readFileSync(options.file, 'utf8'));
@@ -45,7 +45,7 @@ function main() {
       ).plugins?.updater?.pubkey;
   if (metadata.version !== options.version) {
     throw new Error(
-      `latest.json version mismatch: expected ${options.version}, found ${metadata.version ?? 'missing'}`,
+      `latest.json 版本不匹配：预期 ${options.version}，实际为 ${metadata.version ?? '缺失'}`,
     );
   }
 
@@ -53,7 +53,7 @@ function main() {
   const actualPlatforms = Object.keys(metadata.platforms ?? {}).sort();
   if (JSON.stringify(actualPlatforms) !== JSON.stringify(expectedPlatforms)) {
     throw new Error(
-      `latest.json platform mismatch: expected ${expectedPlatforms.join(', ')}, found ${actualPlatforms.join(', ') || 'none'}`,
+      `latest.json 平台不匹配：预期 ${expectedPlatforms.join('、')}，实际为 ${actualPlatforms.join('、') || '无'}`,
     );
   }
 
@@ -63,11 +63,11 @@ function main() {
     const entry = metadata.platforms[platform];
     const assetName = assetPattern.replace('VERSION', options.version);
     if (typeof entry.signature !== 'string' || entry.signature.trim() === '') {
-      throw new Error(`latest.json is missing a signature for ${platform}`);
+      throw new Error(`latest.json 缺少 ${platform} 的签名`);
     }
     const expectedUrl = `${downloadRoot}/${assetName}`;
     if (entry.url !== expectedUrl) {
-      throw new Error(`latest.json URL mismatch for ${platform}: expected ${expectedUrl}`);
+      throw new Error(`latest.json 的 ${platform} URL 不匹配：预期 ${expectedUrl}`);
     }
     try {
       verifyUpdaterSignature({
@@ -78,13 +78,13 @@ function main() {
       });
     } catch (error) {
       throw new Error(
-        `latest.json signature verification failed for ${platform}: ${error.message}`,
+        `latest.json 的 ${platform} 签名验证失败：${error.message}`,
       );
     }
   }
 
   console.log(
-    `Updater metadata and artifact signatures verified for ${options.version} (${expectedPlatforms.length} platforms).`,
+    `Updater 元数据和产物签名验证通过：${options.version}（${expectedPlatforms.length} 个平台）。`,
   );
 }
 

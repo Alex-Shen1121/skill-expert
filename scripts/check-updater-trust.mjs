@@ -8,6 +8,15 @@ const canonicalEndpoint =
   'https://github.com/Alex-Shen1121/skill-expert/releases/latest/download/latest.json';
 const upstreamPublicKey =
   'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBRUYwMTBDOEQ3MDdEODAKUldTQWZYQ05EQUh2Mm0wNDZtNm5VYWJpbjRaZVJQRUhrQ2tkOXc3MHBWZ2VaREo0OVd3WEU3d0oK';
+const unprovisionedPublicKey =
+  'dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzQzAwMTQ3Nzc3ODNEODUKUldTRlBYaDNSd0hBbzFGYzFkaXZqOFgvTTZIdTNkQjU1S3l2NmpNdXQ3TVNWdmNnckhwUEJiRUcK';
+const supportedArguments = new Set(['--require-production']);
+const unknownArgument = process.argv.slice(2).find((argument) => !supportedArguments.has(argument));
+if (unknownArgument) {
+  console.error(`未知的 Updater 信任检查参数：${unknownArgument}`);
+  process.exit(2);
+}
+const requireProduction = process.argv.includes('--require-production');
 const failures = [];
 
 function expect(label, condition, detail) {
@@ -62,27 +71,41 @@ function inspectMinisignPublicKey(value) {
 const inspectedPublicKey = inspectMinisignPublicKey(publicKey);
 const upstreamPublicKeyMaterial =
   inspectMinisignPublicKey(upstreamPublicKey).publicKeyMaterial;
+const unprovisionedPublicKeyMaterial =
+  inspectMinisignPublicKey(unprovisionedPublicKey).publicKeyMaterial;
+const isUnprovisioned = inspectedPublicKey.publicKeyMaterial?.equals(
+  unprovisionedPublicKeyMaterial,
+);
 
 expect(
-  'updater public key',
+  'Updater 公钥',
   inspectedPublicKey.valid,
-  'expected a canonical base64-encoded Ed25519 minisign public key with a matching key ID',
+  '应为规范 Base64 编码的 Ed25519 minisign 公钥，且密钥标识必须匹配',
 );
 expect(
-  'upstream updater public key',
+  '上游 Updater 公钥',
   !inspectedPublicKey.publicKeyMaterial?.equals(upstreamPublicKeyMaterial),
-  'the upstream trust root must not be reused by Skill Expert',
+  'Skill Expert 不得复用上游信任根',
 );
 expect(
-  'updater endpoint',
+  'Updater 地址',
   JSON.stringify(updater?.endpoints) === JSON.stringify([canonicalEndpoint]),
-  `expected only ${canonicalEndpoint}`,
+  `只允许 ${canonicalEndpoint}`,
+);
+expect(
+  '生产 Updater 公钥',
+  !requireProduction || !isUnprovisioned,
+  '尚未配置的开发信任根不能用于发布',
 );
 
 if (failures.length > 0) {
-  console.error('Updater trust check failed:');
+  console.error('Updater 信任检查失败：');
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
 
-console.log('Updater trust check passed for Skill Expert.');
+if (isUnprovisioned) {
+  console.log('Skill Expert Updater 信任检查通过（尚未配置的开发状态）。');
+} else {
+  console.log('Skill Expert Updater 信任检查通过（生产信任根）。');
+}
