@@ -16,6 +16,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Developer & Governance
 - Keep every version copy and both changelogs synchronized behind public validation commands and CI.
+- Allow verification jobs to read the still-private Draft Release before publication while keeping Release mutations out of those jobs.
 
 ## [1.0.0] - 2026-08-24
 
