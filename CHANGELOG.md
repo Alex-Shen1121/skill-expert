@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.1] - 2026-08-25
+
+### Release Overview
 - Add a reviewable release-preparation flow for the independent Skill Expert release line.
 
 ### User-facing
@@ -16,6 +27,8 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Developer & Governance
 - Keep every version copy and both changelogs synchronized behind public validation commands and CI.
+- Allow verification jobs to read the still-private Draft Release before publication while keeping Release mutations out of those jobs.
+- Accept subsequent `main → release` promotions when `release` retains the previous audited merge commit, while rejecting release-only commits and altered promotion trees.
 
 ## [1.0.0] - 2026-08-24
 

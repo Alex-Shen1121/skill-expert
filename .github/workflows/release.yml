@@ -502,7 +502,7 @@ jobs:
     needs: release-provenance
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     outputs:
       tag: ${{ needs.release-provenance.outputs.tag }}
     steps:
@@ -580,7 +580,7 @@ jobs:
     needs: release-provenance
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: read
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -634,7 +634,7 @@ jobs:
     needs: release-provenance
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: read
+      contents: write
     strategy:
       fail-fast: false
       matrix:

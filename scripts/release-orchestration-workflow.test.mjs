@@ -133,6 +133,24 @@ test('汇总门禁从 Draft 下载精确资产并验证哈希、Updater、proven
   assert.match(verifyNative, /releases\/assets\/\$ASSET_ID/);
 });
 
+test('读取不可见 Draft 的回验 job 拥有所需权限且不修改 Release', () => {
+  const content = workflow();
+
+  for (const name of ['verify-release', 'verify-macos', 'verify-native']) {
+    const verificationJob = job(content, name);
+    assert.match(
+      verificationJob,
+      /^    permissions:\n      contents: write$/m,
+      `${name} 必须具备可见 Draft Release 的权限`,
+    );
+    assert.doesNotMatch(
+      verificationJob,
+      /gh release (?:create|edit|upload|delete)/,
+      `${name} 只允许读取 Draft 资产`,
+    );
+  }
+});
+
 test('只有全部汇总门禁通过才公开并标记 Latest', () => {
   const publish = job(workflow(), 'publish-release');
 
