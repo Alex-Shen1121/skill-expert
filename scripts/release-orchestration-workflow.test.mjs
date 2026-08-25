@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
+const draftDownloadScriptPath = path.join(
+  repositoryRoot,
+  'scripts/download-draft-release-assets.sh',
+);
 
 function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
@@ -107,9 +111,11 @@ test('汇总门禁从 Draft 下载精确资产并验证哈希、Updater、proven
   const verify = job(content, 'verify-release');
   const verifyMacos = job(content, 'verify-macos');
   const verifyNative = job(content, 'verify-native');
+  const draftDownloadScript = fs.readFileSync(draftDownloadScriptPath, 'utf8');
 
   assert.match(verify, /needs:\s*release-provenance/);
-  assert.match(verify, /releases\/assets\/\$ASSET_ID/);
+  assert.match(verify, /download-draft-release-assets\.sh/);
+  assert.match(draftDownloadScript, /releases\/assets\/\$ASSET_ID/);
   assert.match(verify, /release-assets\.mjs verify/);
   assert.match(verify, /sha256sum --check SHA256SUMS/);
   assert.match(verify, /verify-updater-metadata\.mjs/);
@@ -130,7 +136,17 @@ test('汇总门禁从 Draft 下载精确资产并验证哈希、Updater、proven
   assert.match(verifyNative, /verify-windows-release\.ps1/);
   assert.match(verifyNative, /verify-linux-release\.mjs/);
   assert.match(verifyNative, /apt-get install -y[^\n]*libarchive-tools/);
-  assert.match(verifyNative, /releases\/assets\/\$ASSET_ID/);
+  assert.match(verifyNative, /download-draft-release-assets\.sh/);
+});
+
+test('所有 Draft 资产下载 job 都复用同一下载脚本', () => {
+  const content = workflow();
+  const downloadCalls = [...content.matchAll(
+    /bash scripts\/download-draft-release-assets\.sh release-assets/g,
+  )];
+
+  assert.equal(downloadCalls.length, 5, '必须让全部五个 Draft 下载 job 复用共享脚本');
+  assert.doesNotMatch(content, /while IFS=\$'\\t' read -r ASSET_ID ASSET_NAME/);
 });
 
 test('读取不可见 Draft 的回验 job 拥有所需权限且不修改 Release', () => {
@@ -187,7 +203,7 @@ test('正式发布第三方 Action 全部固定 SHA 并由普通 CI 执行契约
   const testWorkflow = fs.readFileSync(testWorkflowPath, 'utf8');
   assert.equal(
     packageJson.scripts['test:formal-release'],
-    'node --test scripts/release-merge.test.mjs scripts/release-assets.test.mjs scripts/release-binary-version.test.mjs scripts/sign-release-updater.test.mjs scripts/release-orchestration-workflow.test.mjs scripts/verify-linux-release.test.mjs scripts/verify-macos-release.test.mjs scripts/formal-release-docs.test.mjs',
+    'node --test scripts/release-merge.test.mjs scripts/release-assets.test.mjs scripts/release-binary-version.test.mjs scripts/sign-release-updater.test.mjs scripts/download-draft-release-assets.test.mjs scripts/release-orchestration-workflow.test.mjs scripts/verify-linux-release.test.mjs scripts/verify-macos-release.test.mjs scripts/formal-release-docs.test.mjs',
   );
   assert.match(testWorkflow, /run:\s*npm run test:formal-release/);
   assert.match(
