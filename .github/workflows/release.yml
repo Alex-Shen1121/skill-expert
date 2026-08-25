@@ -77,6 +77,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: 发布入口必须使用生产 Updater 信任根
+        run: npm run updater:check:production
+
       - name: Windows smoke check
         if: matrix.platform == 'windows-latest'
         run: cargo check --manifest-path src-tauri/Cargo.toml
@@ -191,8 +194,6 @@ jobs:
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Sign macOS bundles with the Developer ID Application certificate and
           # notarize them with Apple, so a downloaded build opens without any
           # Gatekeeper prompt. Signing alone is not enough: macOS 10.15+ blocks
