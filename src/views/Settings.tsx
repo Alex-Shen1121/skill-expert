@@ -8,7 +8,6 @@ import {
   Copy,
   Settings2,
   Github,
-  Globe,
   Loader2,
   ExternalLink,
   Sun,
@@ -204,8 +203,9 @@ export function Settings() {
   const [addingCustom, setAddingCustom] = useState(false);
   const [showMoreAgents, setShowMoreAgents] = useState(false);
 
-  const GITHUB_URL = "https://github.com/xingkongliang/skills-manager";
-  const WEBSITE_URL = "https://skillsmanager.dev";
+  const GITHUB_URL = "https://github.com/Alex-Shen1121/skill-expert";
+  const RELEASES_URL = "https://github.com/Alex-Shen1121/skill-expert/releases";
+  const REPORT_ISSUE_URL = "https://github.com/Alex-Shen1121/skill-expert/issues/new?template=bug_report.md";
 
   const startEditPath = useCallback((key: string, currentPath: string) => {
     setEditingPathKey(key);
@@ -572,7 +572,7 @@ export function Settings() {
             enabledCustomCount > 0 ? `${enabledCustomCount} custom` : "",
           ].filter(Boolean).join(", ");
       const parts = [
-        "**Diagnostics** (auto-collected by Skills Manager)",
+        "**Diagnostics** (auto-collected by Skill Expert)",
         "",
         `- App version: \`${info.app_version}\``,
         `- OS: \`${info.os} ${info.os_version} (${info.arch})\``,
@@ -617,7 +617,7 @@ export function Settings() {
         }
       }
       try {
-        await openUrl(`${GITHUB_URL}/issues/new?template=bug_report.md`);
+        await openUrl(REPORT_ISSUE_URL);
       } catch (err) {
         console.error("Failed to open issue page", err);
       }
@@ -1851,10 +1851,10 @@ export function Settings() {
               </button>
               <button
                 type="button"
-                onClick={() => { openUrl(WEBSITE_URL).catch(() => {}); }}
+                onClick={() => { openUrl(RELEASES_URL).catch(() => {}); }}
                 className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
               >
-                <Globe className="w-3 h-3" /> {t("settings.website")}
+                <Download className="w-3 h-3" /> {t("settings.releases")}
               </button>
               <button
                 type="button"

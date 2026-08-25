@@ -35,8 +35,18 @@ dist-ssr
 docs
 !docs/
 docs/*
+!docs/candidate-builds.md
+!docs/formal-release.md
+!docs/updater-trust-root.md
+!docs/upstream-history/
+!docs/upstream-history/*.md
 !docs/agents/
 !docs/agents/*.md
+!docs/adr/
+!docs/adr/*.md
 reference
 CLAUDE.md
 .loop-log
+
+# Local Git worktrees
+.worktrees/

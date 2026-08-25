@@ -482,6 +482,26 @@ export const updateInstallBlocker = () =>
 
 export const restartApp = () => invoke<void>("restart_app");
 
+export interface ExistingInstallationImportStatus {
+  state: "not_available" | "prompt" | "fresh" | "pending" | "imported" | "failed";
+  should_prompt: boolean;
+  source_path: string | null;
+  backup_path: string | null;
+  error: string | null;
+}
+
+export const getExistingInstallationImportStatus = () =>
+  invoke<ExistingInstallationImportStatus>("get_existing_installation_import_status");
+
+export const chooseExistingInstallationImport = (
+  choice: "import" | "fresh",
+  confirmedSource?: string | null,
+) =>
+  invoke<void>("choose_existing_installation_import", {
+    choice,
+    confirmedSource: confirmedSource ?? null,
+  });
+
 export interface DiagnosticInfo {
   app_version: string;
   os: string;

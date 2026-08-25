@@ -1,14 +1,39 @@
 {
-  "name": "skills-manager",
+  "name": "skill-expert",
   "private": true,
-  "version": "1.34.2",
+  "version": "1.0.0",
   "license": "MIT",
+  "homepage": "https://github.com/Alex-Shen1121/skill-expert#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alex-Shen1121/skill-expert.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Alex-Shen1121/skill-expert/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
+    "test:frontend": "vitest run src",
     "preview": "vite preview",
+    "version:check": "node scripts/check-version-consistency.mjs",
+    "desktop:identity:check": "node scripts/check-desktop-identity.mjs",
+    "cli:identity:check": "node scripts/check-cli-identity.mjs",
+    "repository:identity:check": "node scripts/check-repository-identity.mjs",
+    "test:repository-identity": "node --test scripts/check-repository-identity.test.mjs",
+    "test:version": "node --test scripts/check-version-consistency.test.mjs",
+    "test:release": "node --test scripts/prepare-release.test.mjs scripts/changelog-history.test.mjs scripts/prepare-release-workflow.test.mjs",
+    "test:candidate": "node --test scripts/candidate-assets.test.mjs scripts/candidate-workflow.test.mjs scripts/candidate-docs.test.mjs scripts/verify-macos-adhoc.test.mjs",
+    "test:promotion": "node --test scripts/release-candidate.test.mjs scripts/release-promotion-workflow.test.mjs",
+    "test:formal-release": "node --test scripts/release-merge.test.mjs scripts/release-assets.test.mjs scripts/release-binary-version.test.mjs scripts/sign-release-updater.test.mjs scripts/release-orchestration-workflow.test.mjs scripts/verify-linux-release.test.mjs scripts/verify-macos-release.test.mjs scripts/formal-release-docs.test.mjs",
+    "test:upstream-tracking": "node --test scripts/upstream-tracking.test.mjs scripts/upstream-tracking-workflow.test.mjs",
+    "test:updater": "node --test scripts/check-updater-trust.test.mjs scripts/verify-updater-signature.test.mjs scripts/verify-updater-metadata.test.mjs scripts/updater-key-recovery.test.mjs scripts/provision-updater.test.mjs scripts/updater-workflow.test.mjs scripts/updater-docs.test.mjs",
+    "updater:check": "node scripts/check-updater-trust.mjs",
+    "updater:check:production": "node scripts/check-updater-trust.mjs --require-production",
+    "updater:provision": "node scripts/provision-updater.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
@@ -43,6 +68,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -52,10 +79,12 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.11"
   }
 }

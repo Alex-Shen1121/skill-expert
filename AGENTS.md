@@ -11,3 +11,26 @@ Issue 使用五种中文状态标签，并映射到 Agent Skills 的标准角色
 ### Domain docs
 
 本项目使用 single-context 领域文档结构。参见 `docs/agents/domain.md`。
+
+### Matt Skills 开发流程
+
+用户明确要求使用 Matt Skills 开发时，Agent 必须按以下主流程执行：
+
+1. **澄清需求**：在仓库中先运行 `/grill-with-docs`，通过访谈明确需求，并把稳定术语和决策写入 `CONTEXT.md` 或 ADR。
+2. **验证未知项（按需）**：如果状态、业务逻辑或界面效果必须通过运行代码才能判断，使用 `/handoff` → `/prototype` → `/handoff` 完成一次原型往返，再回到原需求。
+3. **确定交付规模**：单会话工作直接进入 `/implement`；多会话工作依次运行 `/to-spec` → `/to-tickets`，再为每个无阻塞 ticket 开启独立上下文运行 `/implement`。
+4. **实现与验收**：`/implement` 必须逐个行为运行 `/tdd` 的红—绿循环，并在提交前运行 `/code-review`，同时通过 Standards 和 Spec 两个维度的检查。
+
+特殊入口按以下路径汇入主流程：
+
+- 外部提交的原始 Issue：`/triage` → `/implement`。`/to-tickets` 生成的 ticket 已经可由 Agent 处理，直接进入 `/implement`。
+- 难以复现或反复出现的缺陷：`/diagnosing-bugs`，先建立能稳定复现问题的红色反馈循环，再修复并补回归测试。
+- 跨多个会话且路径尚不清晰的大型工作：`/wayfinder` → `/to-spec` → `/to-tickets` → `/implement`。
+
+从 `/grill-with-docs` 到 `/to-tickets` 保持同一上下文；完成拆票后，每个 `/implement` 使用独立上下文。只在阶段边界选择继续、`/clear`、`/handoff`、Subagent 或 `/compact`。
+
+#### 人工确认关卡
+
+凡 Skill 或流程要求用户选择、确认草稿、批准方案或执行人工步骤，Agent 必须在该关卡停止，并等待用户明确回复后再继续。
+
+禁止跳过、合并或替用户回答人工确认关卡；不得把沉默、此前的概括性授权或 Agent 的推断视为确认。未收到明确确认时，该关卡未完成。

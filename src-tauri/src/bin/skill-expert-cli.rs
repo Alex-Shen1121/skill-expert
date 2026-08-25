@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use app_lib::commands::{presets as preset_cmd, skills as cmd, tools as tool_cmd};
 use app_lib::core::{
     app_state, audit_log::AuditDraft, central_repo, error::AppError, git_backup, git_fetcher,
@@ -13,8 +13,8 @@ use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
 #[derive(Parser, Debug)]
-#[command(name = "skills-manager-cli")]
-#[command(about = "Shared-core CLI for skills-manager", version)]
+#[command(name = "skill-expert-cli")]
+#[command(about = "Skill Expert command-line interface", version)]
 struct Cli {
     #[arg(long, global = true)]
     json: bool,
@@ -1691,7 +1691,13 @@ fn run_update(
     for skill in targets {
         let report = match skill.source_type.as_str() {
             "git" | "skillssh" => {
-                match cmd::update_git_skill_internal(store, &skill.id, proxy_url.as_deref(), None, None) {
+                match cmd::update_git_skill_internal(
+                    store,
+                    &skill.id,
+                    proxy_url.as_deref(),
+                    None,
+                    None,
+                ) {
                     Ok(r) => UpdateReport {
                         skill_id: skill.id.clone(),
                         name: skill.name.clone(),
@@ -1714,28 +1720,30 @@ fn run_update(
                     },
                 }
             }
-            "local" | "import" => match cmd::reimport_local_skill_internal(store, &skill.id, None) {
-                Ok(r) => UpdateReport {
-                    skill_id: skill.id.clone(),
-                    name: skill.name.clone(),
-                    source_type: skill.source_type.clone(),
-                    refreshed: r.pending_removals.is_empty(),
-                    error: None,
-                    held_back_removals: r
-                        .pending_removals
-                        .iter()
-                        .map(|p| format!("{}: {}", p.location, p.path))
-                        .collect(),
-                },
-                Err(e) => UpdateReport {
-                    skill_id: skill.id.clone(),
-                    name: skill.name.clone(),
-                    source_type: skill.source_type.clone(),
-                    refreshed: false,
-                    error: Some(e.message.clone()),
-                    held_back_removals: Vec::new(),
-                },
-            },
+            "local" | "import" => {
+                match cmd::reimport_local_skill_internal(store, &skill.id, None) {
+                    Ok(r) => UpdateReport {
+                        skill_id: skill.id.clone(),
+                        name: skill.name.clone(),
+                        source_type: skill.source_type.clone(),
+                        refreshed: r.pending_removals.is_empty(),
+                        error: None,
+                        held_back_removals: r
+                            .pending_removals
+                            .iter()
+                            .map(|p| format!("{}: {}", p.location, p.path))
+                            .collect(),
+                    },
+                    Err(e) => UpdateReport {
+                        skill_id: skill.id.clone(),
+                        name: skill.name.clone(),
+                        source_type: skill.source_type.clone(),
+                        refreshed: false,
+                        error: Some(e.message.clone()),
+                        held_back_removals: Vec::new(),
+                    },
+                }
+            }
             other => UpdateReport {
                 skill_id: skill.id.clone(),
                 name: skill.name.clone(),
@@ -2013,6 +2021,8 @@ fn run_search(
 
 // ── adopt ─────────────────────────────────────────────────────────────────
 
+type ResolvedGitSource = (String, Option<String>, Option<String>, Option<String>);
+
 fn run_adopt(
     store: &SkillStore,
     paths: &[PathBuf],
@@ -2034,37 +2044,36 @@ fn run_adopt(
     // before any filesystem work. parse_git_source pulls a subpath out of GitHub
     // /tree/branch/path URLs; --git-subpath is the explicit override (pass ""
     // to mean "skill lives at the repo root").
-    let resolved_git: Option<(String, Option<String>, Option<String>, Option<String>)> =
-        if let Some(url) = git_url {
-            git_fetcher::validate_git_url(url)?;
-            let parsed = git_fetcher::parse_git_source(url);
-            let subpath = match git_subpath {
-                Some(s) => {
-                    if s.is_empty() {
-                        None
-                    } else {
-                        Some(s.to_string())
-                    }
+    let resolved_git: Option<ResolvedGitSource> = if let Some(url) = git_url {
+        git_fetcher::validate_git_url(url)?;
+        let parsed = git_fetcher::parse_git_source(url);
+        let subpath = match git_subpath {
+            Some(s) => {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
                 }
-                None => parsed.subpath.clone(),
-            };
-            if subpath.is_none() && git_subpath.is_none() {
-                bail!(
-                    "--git-url has no subpath and --git-subpath was not provided. \
+            }
+            None => parsed.subpath.clone(),
+        };
+        if subpath.is_none() && git_subpath.is_none() {
+            bail!(
+                "--git-url has no subpath and --git-subpath was not provided. \
                      Pass --git-subpath \"\" if the skill lives at the repo root, \
                      --git-subpath <path> for a subdirectory, or use a URL like \
                      https://github.com/owner/repo/tree/branch/path/to/skill"
-                );
-            }
-            Some((
-                parsed.clone_url,
-                subpath,
-                parsed.branch,
-                Some(url.to_string()),
-            ))
-        } else {
-            None
-        };
+            );
+        }
+        Some((
+            parsed.clone_url,
+            subpath,
+            parsed.branch,
+            Some(url.to_string()),
+        ))
+    } else {
+        None
+    };
 
     // Build exclusion set: existing central paths, sync target paths, canonicals
     let mut excluded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -3020,13 +3029,34 @@ mod tests {
     use super::*;
     use app_lib::core::skill_store::{ScenarioRecord, SkillRecord};
     use app_lib::core::tool_adapters::{CustomToolDef, ToolCategory};
+    use clap::CommandFactory;
     use std::fs;
     use tempfile::tempdir;
 
     #[test]
+    fn renders_the_skill_expert_cli_identity() {
+        let mut command = Cli::command();
+        assert_eq!(command.get_name(), "skill-expert-cli");
+        assert_eq!(command.get_version(), Some(env!("CARGO_PKG_VERSION")));
+
+        let mut help = Vec::new();
+        command.write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+        assert!(help.contains("Skill Expert command-line interface"));
+        assert!(help.contains("Usage: skill-expert-cli"));
+        assert!(!help.contains("skills-manager-cli"));
+
+        let error = Cli::try_parse_from(["skill-expert-cli", "not-a-command"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Usage: skill-expert-cli"));
+        assert!(!error.contains("skills-manager-cli"));
+    }
+
+    #[test]
     fn parses_agent_friendly_commands_and_aliases() {
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "--json",
             "skills",
             "deploy",
@@ -3051,7 +3081,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "skills",
             "list",
             "--query",
@@ -3081,7 +3111,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "agents",
             "enable",
             "codex",
@@ -3096,7 +3126,7 @@ mod tests {
         ));
 
         let cli = Cli::try_parse_from([
-            "skills-manager-cli",
+            "skill-expert-cli",
             "presets",
             "open",
             "Web Dev",
@@ -3138,7 +3168,7 @@ mod tests {
             project_relative_skills_dir: None,
             category: ToolCategory::Coding,
         };
-        tool_service::set_custom_tools(&store, &[test_agent.clone()]).unwrap();
+        tool_service::set_custom_tools(&store, std::slice::from_ref(&test_agent)).unwrap();
         store.set_setting("sync_mode", "copy").unwrap();
         store
             .insert_skill(&SkillRecord {

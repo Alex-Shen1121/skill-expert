@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Skills Manager"
+    "name": "Skill Expert"
   },
   "sidebar": {
     "dashboard": "Dashboard",
@@ -17,7 +17,7 @@
   },
   "help": {
     "eyebrow": "Guide",
-    "title": "Quick Start for Skills Manager",
+    "title": "Quick Start for Skill Expert",
     "description": "Fastest path: install skills → open Global Workspace → click a Preset pill to activate. Press ⌘K anytime for the command palette. Use Project Workspaces, Git backup, and Settings as needed.",
     "items": {
       "workflows": {
@@ -38,7 +38,7 @@
       },
       "global": {
         "title": "Global Workspace",
-        "description": "Each agent gets its own page listing every skill in its global folder — including ones installed outside Skills Manager — so the view matches what the agent actually sees. Use + Add Skills to pull from your central library with inline target-agent chips, or use the All Agents overview to manage every installed agent at once. Skills that only exist in an agent folder can be deleted directly from the card."
+        "description": "Each agent gets its own page listing every skill in its global folder — including ones installed outside Skill Expert — so the view matches what the agent actually sees. Use + Add Skills to pull from your central library with inline target-agent chips, or use the All Agents overview to manage every installed agent at once. Skills that only exist in an agent folder can be deleted directly from the card."
       },
       "projects": {
         "title": "Project Workspaces",
@@ -193,7 +193,7 @@
       "revokeHintOauth": "Revoking on GitHub invalidates the authorization for ALL devices signed in with this account; each will need to reconnect.",
       "revokeHintPat": "Deleting the token on GitHub only affects devices using that token.",
       "revokeConfirmTitle": "Revoke GitHub authorization?",
-      "revokeConfirmOauth": "GitHub's application settings page will open — remove \"skills-manager\" there. This invalidates the authorization on ALL your devices, and this machine will be disconnected now. Remote backup data is kept.",
+      "revokeConfirmOauth": "GitHub's application settings page will open — revoke this application's authorization there. This invalidates the authorization on ALL your devices, and this machine will be disconnected now. Remote backup data is kept.",
       "revokeConfirmPat": "GitHub's token settings page will open — delete the backup token there. Devices using that token lose access, and this machine will be disconnected now. Remote backup data is kept.",
       "revokeHintUnknown": "How this machine was connected wasn't recorded — both the app-authorization and token pages will open so you can revoke whichever applies.",
       "revokeConfirmUnknown": "GitHub's app-authorization and token settings pages will both open — revoke whichever this machine was using. This machine will be disconnected now. Remote backup data is kept.",
@@ -220,6 +220,16 @@
     "restoring": "Restoring…",
     "restoreSuccess": "Backup restored — your skills are ready.",
     "hint": "You can connect or restore a backup at any time from the Backup page in the sidebar."
+  },
+  "existingInstallImport": {
+    "title": "Import data from the upstream product?",
+    "subtitle": "Skill Expert found an existing upstream library. Importing copies it into Skill Expert's independent library and leaves the original unchanged.",
+    "safety": "Import runs after a safe restart. Any existing Skill Expert library is preserved as a recoverable backup before the imported copy is activated.",
+    "backupPath": "Recoverable backup:",
+    "loadErrorTitle": "Skill library startup needs attention",
+    "loadErrorSubtitle": "Skill Expert could not verify whether an existing installation needs to be imported. Fix the reported problem or retry before choosing another first-run path.",
+    "startFresh": "Start Fresh",
+    "import": "Import Existing Data"
   },
   "mySkills": {
     "title": "Library",
@@ -620,9 +630,9 @@
     "textSizeXLarge": "Extra Large",
     "language": "Language",
     "help": "Help",
-    "website": "Website",
+    "releases": "Releases",
     "about": "About",
-    "version": "Skills Manager 1.34.2",
+    "version": "Skill Expert 1.0.0",
     "tagline": "Cross-platform. Minimal, efficient, seamless multi-preset switching.",
     "checkUpdate": "Check for Updates",
     "checking": "Checking…",
@@ -634,7 +644,7 @@
     "restartToApply": "Update installed. Restart the app to apply.",
     "restartNow": "Restart Now",
     "viewUpdate": "View",
-    "updateRelocate": "Move Skills Manager to your Applications folder and open it from there to update in place.",
+    "updateRelocate": "Move Skill Expert to your Applications folder and open it from there to update in place.",
     "updateError": "Auto-update failed. Opening download page…",
     "reportIssue": "Report Issue",
     "reportIssueHint": "Copy app/OS info and recent log excerpt to clipboard and open a new GitHub issue",
@@ -645,9 +655,9 @@
     "exportLogsHint": "Bundle recent logs and activity history as a zip in your Downloads folder",
     "exportLogsDone": "Logs exported ({{count}} file(s)). Drag the zip into your GitHub issue.",
     "exportLogsFailed": "Failed to export logs.",
-    "panicBanner": "Skills Manager crashed during the last session ({{time}}).",
-    "repoWarning_config_unreadable": "The central library config file is unreadable or corrupt, so this session fell back to the default location (~/.skills-manager). If your library looks empty, your data is still at the previously configured path — set “Central Repo Path” back to it.",
-    "repoWarning_repo_path_invalid": "The configured central repository path is invalid, so this session fell back to the default location (~/.skills-manager). If your library looks empty, re-set “Central Repo Path” to where your data lives.",
+    "panicBanner": "Skill Expert crashed during the last session ({{time}}).",
+    "repoWarning_config_unreadable": "The central library config file is unreadable or corrupt, so this session fell back to the default location (~/.skill-expert). If your library looks empty, your data is still at the previously configured path — set “Central Repo Path” back to it.",
+    "repoWarning_repo_path_invalid": "The configured central repository path is invalid, so this session fell back to the default location (~/.skill-expert). If your library looks empty, re-set “Central Repo Path” to where your data lives.",
     "repoWarning_migration_incomplete": "Moving your central library to the new location couldn’t finish, so this session is using your existing library at its current location — nothing was lost. To complete the move, open Settings and point “Central Repo Path” at an empty, writable folder (tap Edit to see the destination you chose), then restart. Your current library stays where it is until the move succeeds — don’t delete it.",
     "panicDismiss": "Dismiss",
     "gitBackup": "Git Sync",

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -7,6 +7,9 @@ use std::sync::{Mutex, OnceLock};
 use walkdir::WalkDir;
 
 const CONFIG_FILE_NAME: &str = "repo-config.json";
+const DEFAULT_BASE_DIR_NAME: &str = ".skill-expert";
+const CONFIG_DIR_NAME: &str = "skill-expert";
+const DATABASE_FILE_NAME: &str = "skill-expert.db";
 
 static BASE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static SKILLS_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -81,13 +84,13 @@ struct RepoPathConfig {
 fn default_base_dir() -> PathBuf {
     dirs::home_dir()
         .expect("Cannot determine home directory")
-        .join(".skills-manager")
+        .join(DEFAULT_BASE_DIR_NAME)
 }
 
 fn config_file_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(default_base_dir)
-        .join("skills-manager")
+        .join(CONFIG_DIR_NAME)
         .join(CONFIG_FILE_NAME)
 }
 
@@ -191,7 +194,7 @@ pub fn base_dir() -> PathBuf {
 /// Whether an explicit runtime base-dir override is active (CLI `--skills-root`
 /// / `--path`). Startup migration is skipped when it is — the caller chose a
 /// specific library and the app's shared pending-migration marker doesn't apply.
-fn base_dir_override_active() -> bool {
+pub(crate) fn base_dir_override_active() -> bool {
     BASE_DIR_OVERRIDE
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -267,7 +270,11 @@ pub fn external_base_dir(skills_root: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
-    let short_hash: String = digest.iter().take(5).map(|b| format!("{:02x}", b)).collect();
+    let short_hash: String = digest
+        .iter()
+        .take(5)
+        .map(|b| format!("{:02x}", b))
+        .collect();
     default_base_dir()
         .join("external")
         .join(format!("{}-{}", sanitize_dir_name(name), short_hash))
@@ -328,7 +335,7 @@ pub fn logs_dir() -> PathBuf {
 }
 
 pub fn db_path() -> PathBuf {
-    base_dir().join("skills-manager.db")
+    base_dir().join(DATABASE_FILE_NAME)
 }
 
 pub fn set_base_dir_override(path: Option<String>) -> Result<PathBuf> {
@@ -579,29 +586,6 @@ pub fn ensure_central_repo() -> Result<()> {
             set_runtime_base_dir_override(Some(source));
         }
     }
-    // Re-resolve: a fallback override above may have changed the base.
-    let current_base = base_dir();
-
-    // Legacy `.agent-skills` migration must run before create_dir_all below:
-    // it renames entries into `current_base` and skips ones that already
-    // exist, so pre-created empty dirs would silently swallow it (the old
-    // ordering made this branch dead code).
-    let legacy_path = dirs::home_dir().map(|home| home.join(".agent-skills"));
-    if let Some(old_path) = legacy_path {
-        if old_path.exists() && !current_base.join("skills").exists() {
-            log::info!("Migrating from old path {:?}", old_path);
-            fs::create_dir_all(&current_base)?;
-            if let Ok(entries) = fs::read_dir(&old_path) {
-                for entry in entries.flatten() {
-                    let dest = current_base.join(entry.file_name());
-                    if !dest.exists() {
-                        let _ = fs::rename(entry.path(), &dest);
-                    }
-                }
-            }
-        }
-    }
-
     let dirs = [skills_dir(), scenarios_dir(), cache_dir(), logs_dir()];
     for d in &dirs {
         fs::create_dir_all(d)?;
@@ -613,6 +597,30 @@ pub fn ensure_central_repo() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_state_defaults_use_skill_expert_namespace() {
+        assert_eq!(
+            default_base_dir()
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some(".skill-expert")
+        );
+        assert_eq!(
+            config_file_path()
+                .parent()
+                .and_then(|dir| dir.file_name())
+                .and_then(|name| name.to_str()),
+            Some("skill-expert")
+        );
+
+        let _guard = test_base_dir_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let isolated_base = temp.path().join("skill-expert-state-test");
+        set_test_base_dir_override(Some(isolated_base.clone()));
+        assert_eq!(db_path(), isolated_base.join("skill-expert.db"));
+        set_test_base_dir_override(None);
+    }
 
     // ── migrate_repo_if_needed (#252) ──
 
@@ -657,8 +665,14 @@ mod tests {
             }
             _ => panic!("expected UseSource for a non-empty target"),
         }
-        assert!(config.pending_migration_from.is_some(), "marker kept for retry");
-        assert_eq!(fs::read(dst.path().join("existing.txt")).unwrap(), b"dst-data");
+        assert!(
+            config.pending_migration_from.is_some(),
+            "marker kept for retry"
+        );
+        assert_eq!(
+            fs::read(dst.path().join("existing.txt")).unwrap(),
+            b"dst-data"
+        );
         assert_eq!(fs::read(src.path().join("a.txt")).unwrap(), b"src");
     }
 
@@ -679,7 +693,10 @@ mod tests {
         let outcome = migrate_repo_if_needed(&mut config, &link);
 
         assert!(matches!(outcome, MigrationOutcome::Proceed));
-        assert_eq!(config.pending_migration_from, None, "same-dir move clears marker");
+        assert_eq!(
+            config.pending_migration_from, None,
+            "same-dir move clears marker"
+        );
         // The real library is untouched.
         assert!(real.path().join("skills").exists());
     }
@@ -739,8 +756,11 @@ mod tests {
     fn config_state_valid_json_is_valid() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("repo-config.json");
-        fs::write(&path, r#"{ "repo_path": "/tmp/lib", "pending_migration_from": null }"#)
-            .unwrap();
+        fs::write(
+            &path,
+            r#"{ "repo_path": "/tmp/lib", "pending_migration_from": null }"#,
+        )
+        .unwrap();
         match load_config_state_from(&path) {
             ConfigState::Valid(config) => {
                 assert_eq!(config.repo_path.as_deref(), Some("/tmp/lib"));

@@ -3,18 +3,140 @@ name: Test
 on:
   push:
     branches: [main]
-    paths:
-      - 'src-tauri/**'
-      - '.github/workflows/test.yml'
   pull_request:
-    paths:
-      - 'src-tauri/**'
-      - '.github/workflows/test.yml'
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    name: Frontend and version contract
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test version contract
+        run: npm run test:version
+
+      - name: Test release preparation contract
+        run: npm run test:release
+
+      - name: Test candidate packaging contract
+        run: npm run test:candidate
+
+      - name: Test release promotion contract
+        run: npm run test:promotion
+
+      - name: 测试正式发布编排契约
+        run: npm run test:formal-release
+
+      - name: Test upstream tracking contract
+        run: npm run test:upstream-tracking
+
+      - name: Reject unresolved upstream review conflicts
+        env:
+          REVIEW_REPORT_REQUIRED: ${{ github.event_name == 'pull_request' && github.head_ref == 'upstream-tracking/main' }}
+        run: node scripts/upstream-tracking.mjs verify-review --required "$REVIEW_REPORT_REQUIRED"
+
+      - name: 测试 Updater 信任契约
+        run: npm run test:updater
+
+      - name: 检查 Updater 信任根
+        run: npm run updater:check
+
+      - name: 发布提升必须使用生产 Updater 信任根
+        if: github.event_name == 'pull_request' && github.head_ref == 'main' && github.base_ref == 'release'
+        run: npm run updater:check:production
+
+      - name: Check version consistency
+        run: npm run version:check
+
+      - name: Check desktop identity
+        run: npm run desktop:identity:check
+
+      - name: Check CLI identity
+        run: npm run cli:identity:check
+
+      - name: Test repository identity contract
+        run: npm run test:repository-identity
+
+      - name: Test frontend behavior
+        run: npm run test:frontend
+
+      - name: Check repository identity
+        run: npm run repository:identity:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build production frontend
+        run: npm run build
+
+  workflow-lint:
+    runs-on: ubuntu-22.04
+    name: GitHub Actions syntax
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install actionlint
+        run: GOBIN="$RUNNER_TEMP/actionlint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Validate workflows
+        run: '"$RUNNER_TEMP/actionlint-bin/actionlint"'
+
+  rust-quality:
+    runs-on: ubuntu-22.04
+    name: Rust quality and Linux check
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Check Linux build
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
   rust-tests:
     strategy:
       fail-fast: false
@@ -42,6 +164,32 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: 配置原生发布验证所需的 Node.js
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: 测试 macOS 正式下载回验器
+        if: runner.os == 'macOS'
+        run: node --test scripts/verify-macos-release.test.mjs
+
+      - name: 安装 Windows Updater 重签测试依赖
+        if: runner.os == 'Windows'
+        run: npm ci
+
+      - name: 测试 Windows Updater 稳定名重签
+        if: runner.os == 'Windows'
+        run: node --test scripts/sign-release-updater.test.mjs
+
+      - name: 检查 Windows 正式回验脚本语法
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          [scriptblock]::Create(
+            (Get-Content -Raw -LiteralPath scripts/verify-windows-release.ps1)
+          ) | Out-Null
+
       # cargo test needs no frontend build: tauri's generate_context only
       # reads the config, and beforeBuildCommand applies to `tauri build`.
       - name: Run tests
@@ -56,35 +204,120 @@ jobs:
         continue-on-error: true
         run: taskkill /f /im vctip.exe
 
-  # Linux is otherwise only compiled by the release workflow (tag push), so a
-  # Linux-only compile break — e.g. the keyring secret-service backend with
-  # its vendored libdbus build — would surface at release time. A cargo check
-  # here catches it on every push instead. Tests still run on macOS/Windows
-  # above; this job only needs to prove the Linux target compiles.
-  linux-check:
+  release-promotion-shape:
+    if: github.event_name == 'pull_request' && github.base_ref == 'release'
     runs-on: ubuntu-22.04
-    name: Rust check (Linux)
+    name: Release promotion source
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - name: Cache Rust dependencies
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux system dependencies
+      - name: Reject a non-main or cross-repository promotion
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
+          if [ "$HEAD_REF" != "main" ] || \
+             [ "$BASE_REF" != "release" ] || \
+             [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
+            echo "Release promotion must use this repository's main branch as head and release as base" >&2
+            exit 1
+          fi
 
-      - name: Check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+  candidate-guard:
+    needs: [frontend, workflow-lint, rust-quality, rust-tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    name: Release candidate guard
+
+    steps:
+      - name: Checkout exact main candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Fetch promotion refs
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: Verify exact release candidate
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --candidate-sha "$CANDIDATE_SHA"
+          --head main
+          --base release
+
+  candidate-package:
+    needs: candidate-guard
+    name: Four-target release candidate
+    uses: ./.github/workflows/candidate-build.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+
+  candidate-pr:
+    needs: candidate-package
+    runs-on: ubuntu-22.04
+    name: Create or refresh release promotion
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # GitHub jobs have isolated filesystems. Repeat the exact checkout and
+      # fetch here so a main push during packaging invalidates the old candidate.
+      - name: Checkout packaged candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Refresh promotion refs
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: Create or update the exact release promotion
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PROMOTION_BODY="$RUNNER_TEMP/release-promotion.md"
+          node scripts/release-candidate.mjs render-pr-body \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --head main \
+            --base release \
+            --output "$PROMOTION_BODY"
+
+          PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
+            --json number,headRefName,baseRefName,isCrossRepository,headRefOid)"
+          VALID_PROMOTIONS="$(jq --arg candidate_sha "$CANDIDATE_SHA" \
+            '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not) and .headRefOid == $candidate_sha)]' \
+            <<<"$PROMOTION_PRS")"
+
+          PR_COUNT="$(jq 'length' <<<"$VALID_PROMOTIONS")"
+          if [ "$PR_COUNT" -gt 1 ]; then
+            echo "Expected at most one open release promotion pull request, found $PR_COUNT" >&2
+            exit 1
+          fi
+
+          VERSION="$(node -p "require('./package.json').version")"
+          TITLE="Release promotion: Skill Expert v${VERSION}"
+          if [ "$PR_COUNT" -eq 1 ]; then
+            PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PROMOTIONS")"
+            gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$PROMOTION_BODY"
+          else
+            gh pr create \
+              --base release \
+              --head main \
+              --title "$TITLE" \
+              --body-file "$PROMOTION_BODY"
+          fi

@@ -1,23 +1,23 @@
 ---
 name: manage-skills
-description: Manage the user's shared agent-skill library via skills-manager-cli — install, update, remove, deploy or undeploy skills per agent, manage presets, organize tags, search, and adopt existing skills. Use this whenever the user wants Claude Code, Codex, Cursor, or another agent to gain or lose a skill, wants to organize the central library, or asks what is installed or deployed. Prefer this over direct agent-folder installs because Skills Manager preserves source metadata, preset membership, updates, and cross-agent deployment state.
+description: Use when a user asks to install, update, remove, inspect, organize, deploy, or undeploy agent skills through the shared Skill Expert library.
 ---
 
 ## Before doing anything
 
-1. Confirm the CLI is available: `command -v skills-manager-cli`. If it's not on PATH, this skill doesn't apply — fall back to find-skills (or tell the user to install skills-manager).
+1. Confirm the CLI is available: `command -v skill-expert-cli`. If it's not on PATH, this skill doesn't apply — fall back to find-skills or tell the user to install the Skill Expert CLI with `npm run cli:install` from the source repository.
 2. **Always pass `--json` when you parse output yourself.** Pretty-printed output is for the user; JSON is for you. Errors include `ok=false`, a stable `code`, and `message` on stderr with a non-zero exit code.
 
 ```bash
-skills-manager-cli --json skills list
+skill-expert-cli --json skills list
 ```
 
 ## Mental model
 
-There's **one central library** at `~/.skills-manager/skills/` that all agents share. Each skill has source metadata, preset membership, tags, and zero or more real deployments in agent directories. A **preset** is a reusable group; several presets may be deployed at the same time.
+There's **one central library** at `~/.skill-expert/skills/` that all agents share. Each skill has source metadata, preset membership, tags, and zero or more real deployments in agent directories. A **preset** is a reusable group; several presets may be deployed at the same time.
 
 Keep these three states separate:
-- **Library**: install/remove controls whether Skills Manager owns the skill.
+- **Library**: install/remove controls whether Skill Expert owns the skill.
 - **Preset membership**: `presets add-skill/remove-skill` organizes the library only.
 - **Deployment**: `skills deploy/undeploy` and `presets deploy/undeploy` control what an agent can actually see.
 
@@ -27,24 +27,24 @@ Internally, presets are still stored as scenarios for backward-compatible Git Ba
 
 ```bash
 # From skills.sh marketplace
-skills-manager-cli skills install vercel-labs/agent-skills@react-best-practices
+skill-expert-cli skills install vercel-labs/agent-skills@react-best-practices
 
 # Any git URL (use /tree/branch/subpath form when the skill lives in a sub-directory)
-skills-manager-cli skills install https://github.com/anthropics/skills.git
-skills-manager-cli skills install https://github.com/foo/bar/tree/main/skills/baz
+skill-expert-cli skills install https://github.com/anthropics/skills.git
+skill-expert-cli skills install https://github.com/foo/bar/tree/main/skills/baz
 
 # Local folder
-skills-manager-cli skills install ./my-skill
+skill-expert-cli skills install ./my-skill
 
 # Force a source type when the ref is ambiguous
-skills-manager-cli skills install foo/bar --skillssh
-skills-manager-cli skills install ./looks-like/owner-repo --local
+skill-expert-cli skills install foo/bar --skillssh
+skill-expert-cli skills install ./looks-like/owner-repo --local
 ```
 
 **Default is library-only** — the skill enters the DB but doesn't appear in any agent yet. Prefer an explicit follow-up deployment so scope is unambiguous:
 
 ```bash
-skills-manager-cli skills deploy <skill> --agent claude_code --agent codex
+skill-expert-cli skills deploy <skill> --agent claude_code --agent codex
 ```
 
 `--sync` and `--sync-preset` remain legacy shortcuts for the exclusive active-preset workflow.
@@ -60,7 +60,7 @@ skills-manager-cli skills deploy <skill> --agent claude_code --agent codex
 ## Search
 
 ```bash
-skills-manager-cli --json skills search "react performance" --limit 5
+skill-expert-cli --json skills search "react performance" --limit 5
 ```
 
 Each result has `install_ref` (paste straight into `skills install`), `installs` (popularity proxy), and `skills_sh_url`. Show the top 1–3 with install counts before installing — anything with 10K+ installs is battle-tested; anything under 100 needs a careful look at the source repo.
@@ -69,13 +69,13 @@ Each result has `install_ref` (paste straight into `skills install`), `installs`
 
 ```bash
 # Re-fetch one skill (git/skillssh re-clones, local/import re-imports source dir)
-skills-manager-cli skills update <skill-name-or-id>
+skill-expert-cli skills update <skill-name-or-id>
 
 # Re-fetch all eligible skills
-skills-manager-cli skills update --all
+skill-expert-cli skills update --all
 
 # Just probe remote revisions, don't touch files
-skills-manager-cli skills check --all
+skill-expert-cli skills check --all
 ```
 
 `check` is the dry-run partner of `update`. Local-only skills (no git source) are reported as `skipped: true`.
@@ -95,10 +95,10 @@ Note what this does *not* cover: a file the user edited that the new version als
 
 ```bash
 # Always preview first when removing more than one
-skills-manager-cli skills remove <skill> --dry-run
+skill-expert-cli skills remove <skill> --dry-run
 
 # --yes is required for the actual delete; --json mode does NOT auto-confirm
-skills-manager-cli skills remove <skill> --yes
+skill-expert-cli skills remove <skill> --yes
 ```
 
 Remove deletes the central-library copy, all synced targets across agents, and the DB row. It's not reversible without re-installing.
@@ -106,11 +106,11 @@ Remove deletes the central-library copy, all synced targets across agents, and t
 ## Deploy / Undeploy
 
 ```bash
-skills-manager-cli skills deploy <skill> --agent claude_code
-skills-manager-cli skills undeploy <skill> --agent codex
-skills-manager-cli skills deploy <skill-a> <skill-b> --agent codex --dry-run
-skills-manager-cli skills deploy <skill> --agent claude_code --agent codex
-skills-manager-cli --json skills status <skill>
+skill-expert-cli skills deploy <skill> --agent claude_code
+skill-expert-cli skills undeploy <skill> --agent codex
+skill-expert-cli skills deploy <skill-a> <skill-b> --agent codex --dry-run
+skill-expert-cli skills deploy <skill> --agent claude_code --agent codex
+skill-expert-cli --json skills status <skill>
 ```
 
 These commands change real managed deployments without deleting the central-library copy or changing preset membership. `skills enable/disable` are deprecated compatibility commands and do not change deployment; never use them.
@@ -121,16 +121,16 @@ These commands change real managed deployments without deleting the central-libr
 
 ```bash
 # Sync current active preset to all enabled agents
-skills-manager-cli skills sync
+skill-expert-cli skills sync
 
 # Preview the target list — safe, no writes
-skills-manager-cli skills sync --dry-run
+skill-expert-cli skills sync --dry-run
 
 # Switch the one legacy active preset, then sync
-skills-manager-cli skills sync --preset "Web Dev"
+skill-expert-cli skills sync --preset "Web Dev"
 
 # Only sync to a single agent (useful when one agent's directory got out of sync)
-skills-manager-cli skills sync --tool claude_code
+skill-expert-cli skills sync --tool claude_code
 ```
 
 ## Adopt skills installed elsewhere
@@ -139,22 +139,22 @@ When skills already live in an agent's directory (e.g. installed via `npx skills
 
 ```bash
 # Dry-run scan first — lists candidates without writing
-skills-manager-cli skills adopt ~/.claude/skills --dry-run
+skill-expert-cli skills adopt ~/.claude/skills --dry-run
 
 # Adopt everything found — each becomes source_type=local (can't auto-update from git)
-skills-manager-cli skills adopt ~/.claude/skills
+skill-expert-cli skills adopt ~/.claude/skills
 
 # Adopt a single skill and pin it to a git source so `update` works later
-skills-manager-cli skills adopt ~/.claude/skills/react-best-practices \
+skill-expert-cli skills adopt ~/.claude/skills/react-best-practices \
   --git-url https://github.com/vercel-labs/agent-skills/tree/main/react-best-practices
 
 # Or pass --git-subpath explicitly when the URL is just the repo root
-skills-manager-cli skills adopt ~/.claude/skills/react-best-practices \
+skill-expert-cli skills adopt ~/.claude/skills/react-best-practices \
   --git-url https://github.com/vercel-labs/agent-skills \
   --git-subpath react-best-practices
 
 # Skill lives at the repo root? Pass an empty subpath
-skills-manager-cli skills adopt ~/.claude/skills/my-skill \
+skill-expert-cli skills adopt ~/.claude/skills/my-skill \
   --git-url https://github.com/me/my-skill --git-subpath ""
 ```
 
@@ -163,45 +163,45 @@ skills-manager-cli skills adopt ~/.claude/skills/my-skill \
 ## Tag
 
 ```bash
-skills-manager-cli skills tag add <skill> web frontend
-skills-manager-cli skills tag remove <skill> frontend
-skills-manager-cli skills tag set <skill> web frontend
-skills-manager-cli skills tag rename frontend web
-skills-manager-cli skills tag delete obsolete --dry-run
-skills-manager-cli skills tag delete obsolete --yes
-skills-manager-cli skills tag list <skill>   # tags on one skill
-skills-manager-cli skills tag list           # all distinct tags
+skill-expert-cli skills tag add <skill> web frontend
+skill-expert-cli skills tag remove <skill> frontend
+skill-expert-cli skills tag set <skill> web frontend
+skill-expert-cli skills tag rename frontend web
+skill-expert-cli skills tag delete obsolete --dry-run
+skill-expert-cli skills tag delete obsolete --yes
+skill-expert-cli skills tag list <skill>   # tags on one skill
+skill-expert-cli skills tag list           # all distinct tags
 ```
 
 Useful organization queries:
 
 ```bash
-skills-manager-cli --json skills list --untagged
-skills-manager-cli --json skills list --no-preset
-skills-manager-cli --json skills list --tag frontend
-skills-manager-cli --json skills list --preset "Web Dev"
-skills-manager-cli --json skills list --deployed-to codex
+skill-expert-cli --json skills list --untagged
+skill-expert-cli --json skills list --no-preset
+skill-expert-cli --json skills list --tag frontend
+skill-expert-cli --json skills list --preset "Web Dev"
+skill-expert-cli --json skills list --deployed-to codex
 ```
 
 ## Presets
 
 ```bash
-skills-manager-cli presets list
-skills-manager-cli presets current
-skills-manager-cli presets show "Web Dev"
-skills-manager-cli presets create "Web Dev" --description "Frontend work"
-skills-manager-cli presets update "Web Dev" --name "Frontend"
-skills-manager-cli presets delete "Old" --dry-run
-skills-manager-cli presets delete "Old" --yes
+skill-expert-cli presets list
+skill-expert-cli presets current
+skill-expert-cli presets show "Web Dev"
+skill-expert-cli presets create "Web Dev" --description "Frontend work"
+skill-expert-cli presets update "Web Dev" --name "Frontend"
+skill-expert-cli presets delete "Old" --dry-run
+skill-expert-cli presets delete "Old" --yes
 
-skills-manager-cli presets add-skill <preset> <skill>...
-skills-manager-cli presets remove-skill <preset> <skill>...
+skill-expert-cli presets add-skill <preset> <skill>...
+skill-expert-cli presets remove-skill <preset> <skill>...
 
-skills-manager-cli presets deploy <preset>                  # all enabled coding agents
-skills-manager-cli presets deploy <preset> --agent codex
-skills-manager-cli presets undeploy <preset> --agent claude_code
-skills-manager-cli presets undeploy <preset>                # every agent with target rows for this preset
-skills-manager-cli --json presets status <preset>
+skill-expert-cli presets deploy <preset>                  # all enabled coding agents
+skill-expert-cli presets deploy <preset> --agent codex
+skill-expert-cli presets undeploy <preset> --agent claude_code
+skill-expert-cli presets undeploy <preset>                # every agent with target rows for this preset
+skill-expert-cli --json presets status <preset>
 ```
 
 `deploy/undeploy` are additive and match the app's Preset pills. Explicit `presets apply/deactivate` commands remain for the legacy exclusive active-preset model; do not use them for normal "turn this preset on/off" requests.
@@ -215,10 +215,10 @@ Preset create/update/delete and add-skill/remove-skill are organization-only CLI
 When sync misbehaves or a command errors in a confusing way:
 
 ```bash
-skills-manager-cli --json repo status   # base dir, skill / preset counts, active preset
-skills-manager-cli --json agents list  # detected agents and their target paths
-skills-manager-cli agents enable codex
-skills-manager-cli agents disable claude_code
+skill-expert-cli --json repo status   # base dir, skill / preset counts, active preset
+skill-expert-cli --json agents list  # detected agents and their target paths
+skill-expert-cli agents enable codex
+skill-expert-cli agents disable claude_code
 ```
 
 `repo status` and `agents list` are read-only and are the first checks for "why isn't this skill showing up in Cursor" questions. `agents disable` is a real mutation: it removes every managed deployment for that agent. `agents enable` makes the agent globally available again and re-syncs the legacy active preset, if one exists; use explicit skill or preset deployment afterward when the requested state is additive.
@@ -238,7 +238,7 @@ Use `agents disable <agent>` when the user wants the whole Agent integration tur
 ### "What skills do I have?"
 
 ```bash
-skills-manager-cli --json skills list
+skill-expert-cli --json skills list
 ```
 
 The `preset_ids`, `presets`, `deployed_to`, `tags`, and `source_type` fields are usually the most informative. The legacy `enabled` field is not deployment state.
@@ -252,8 +252,8 @@ The `preset_ids`, `presets`, `deployed_to`, `tags`, and `source_type` fields are
 ### "Update everything"
 
 ```bash
-skills-manager-cli skills check --all     # see what has upstream changes
-skills-manager-cli skills update --all    # apply
+skill-expert-cli skills check --all     # see what has upstream changes
+skill-expert-cli skills update --all    # apply
 ```
 
 Report which skills actually refreshed (`refreshed: true` in the JSON) vs which were already up-to-date.

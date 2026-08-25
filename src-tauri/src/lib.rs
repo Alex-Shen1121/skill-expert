@@ -206,8 +206,16 @@ fn collect_tray_menu_data(store: &core::skill_store::SkillStore) -> TrayMenuData
 }
 
 fn format_status_line(data: &TrayMenuData) -> String {
-    let skill_label = if data.total_skills == 1 { "skill" } else { "skills" };
-    let agent_label = if data.coding_agent_count == 1 { "agent" } else { "agents" };
+    let skill_label = if data.total_skills == 1 {
+        "skill"
+    } else {
+        "skills"
+    };
+    let agent_label = if data.coding_agent_count == 1 {
+        "agent"
+    } else {
+        "agents"
+    };
     format!(
         "{} {} · {} {} connected",
         data.total_skills, skill_label, data.coding_agent_count, agent_label
@@ -217,12 +225,12 @@ fn format_status_line(data: &TrayMenuData) -> String {
 fn format_tooltip(data: &TrayMenuData) -> String {
     if data.update_count > 0 {
         format!(
-            "Skills Manager · {} skills · {} agents · {} updates",
+            "Skill Expert · {} skills · {} agents · {} updates",
             data.total_skills, data.coding_agent_count, data.update_count
         )
     } else {
         format!(
-            "Skills Manager · {} skills · {} agents",
+            "Skill Expert · {} skills · {} agents",
             data.total_skills, data.coding_agent_count
         )
     }
@@ -241,7 +249,11 @@ fn preset_menu_item_id(preset: &TrayPresetEntry) -> (String, &'static str) {
 }
 
 fn preset_menu_label(preset: &TrayPresetEntry) -> String {
-    let unit = if preset.skill_count == 1 { "skill" } else { "skills" };
+    let unit = if preset.skill_count == 1 {
+        "skill"
+    } else {
+        "skills"
+    };
     match preset.status() {
         TrayPresetStatus::Active => format!("✓ {} ({} {unit})", preset.name, preset.skill_count),
         TrayPresetStatus::Partial => format!(
@@ -282,7 +294,7 @@ fn build_tray_menu_from_data<R: tauri::Runtime>(
 
     let menu = Menu::new(app)?;
 
-    let app_name = MenuItem::with_id(app, "tray-app-name", "Skills Manager", false, None::<&str>)?;
+    let app_name = MenuItem::with_id(app, "tray-app-name", "Skill Expert", false, None::<&str>)?;
     menu.append(&app_name)?;
 
     let status_line = MenuItem::with_id(
@@ -345,7 +357,7 @@ fn build_tray_menu_from_data<R: tauri::Runtime>(
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
-    let show_item = MenuItem::with_id(app, "show", "Open Skills Manager", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, "show", "Open Skill Expert", true, None::<&str>)?;
     menu.append(&show_item)?;
 
     let check_label = if data.check_updates_running {
@@ -569,7 +581,9 @@ fn check_updates_from_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 {
                     Ok(lock) => lock,
                     Err(err) => {
-                        log::warn!("Tray update check: failed to acquire repo lock for {skill_id}: {err}");
+                        log::warn!(
+                            "Tray update check: failed to acquire repo lock for {skill_id}: {err}"
+                        );
                         continue;
                     }
                 };
@@ -632,7 +646,8 @@ fn open_skills_folder_from_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
         let status = cmd.arg(&repo_path).status();
         match status {
-            Ok(_status) => {
+            Ok(_status) =>
+            {
                 #[cfg(not(target_os = "windows"))]
                 if !_status.success() {
                     log::warn!(
@@ -1045,6 +1060,9 @@ pub fn run() {
             commands::settings::app_exit,
             commands::settings::restart_app,
             commands::settings::hide_to_tray,
+            // Existing upstream installation import
+            commands::existing_install_import::get_existing_installation_import_status,
+            commands::existing_install_import::choose_existing_installation_import,
             // Git Backup
             commands::git_backup::git_backup_fetch,
             commands::git_backup::git_backup_status,

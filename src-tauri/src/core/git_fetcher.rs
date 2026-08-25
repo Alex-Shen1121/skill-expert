@@ -16,7 +16,7 @@ const CLONE_TIMEOUT_SECS: u64 = 300;
 
 /// Filename prefix shared by isolated install checkouts under `std::env::temp_dir()`.
 /// Used by both `materialize_cached_repo` (writer) and `validate_clone_temp_path` (reader).
-pub const CLONE_TEMP_PREFIX: &str = "skills-manager-clone-";
+pub const CLONE_TEMP_PREFIX: &str = "skill-expert-clone-";
 
 /// Callback type for reporting clone progress messages to the UI.
 pub type ProgressCallback = Box<dyn Fn(&str) + Send>;
@@ -99,10 +99,7 @@ pub fn validate_git_url(url: &str) -> Result<()> {
 /// paths case-sensitively or distinguish schemes are unaffected.
 fn canonicalize_clone_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
-    trimmed
-        .strip_suffix(".git")
-        .unwrap_or(trimmed)
-        .to_string()
+    trimmed.strip_suffix(".git").unwrap_or(trimmed).to_string()
 }
 
 /// Compute a stable cache directory name for a given clone URL. Hashes the
@@ -132,6 +129,7 @@ fn lock_repo_cache(
     let lock_path = cached_dir.with_extension("lock");
     let file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)
@@ -148,10 +146,7 @@ fn lock_repo_cache(
     Ok(RepoCacheLock { _file: file })
 }
 
-fn materialize_cached_repo(
-    cached: &Path,
-    cancel: Option<&Arc<AtomicBool>>,
-) -> Result<PathBuf> {
+fn materialize_cached_repo(cached: &Path, cancel: Option<&Arc<AtomicBool>>) -> Result<PathBuf> {
     let temp_dir =
         std::env::temp_dir().join(format!("{CLONE_TEMP_PREFIX}{}", uuid::Uuid::new_v4()));
 
@@ -615,7 +610,7 @@ pub fn resolve_remote_revision(
     }
 
     let repo = Repository::init_bare(
-        std::env::temp_dir().join(format!("skills-manager-remote-{}", uuid::Uuid::new_v4())),
+        std::env::temp_dir().join(format!("skill-expert-remote-{}", uuid::Uuid::new_v4())),
     )?;
     let mut remote = repo.remote_anonymous(url)?;
     let mut proxy_opts = git2::ProxyOptions::new();
@@ -817,7 +812,7 @@ fn split_tree_branch_path(path: &str, known_branches: &[String]) -> (String, Opt
                 || path
                     .strip_prefix(branch.as_str())
                     .is_some_and(|rest| rest.starts_with('/'));
-            if matches && best.is_none_or(|b: &str| branch.len() > b.len()) {
+            if matches && best.map_or(true, |b: &str| branch.len() > b.len()) {
                 best = Some(branch);
             }
         }
@@ -833,7 +828,10 @@ fn split_tree_branch_path(path: &str, known_branches: &[String]) -> (String, Opt
 
     let mut parts = path.splitn(2, '/');
     let branch = parts.next().unwrap_or("").to_string();
-    let subpath = parts.next().filter(|s| !s.is_empty()).map(|s| s.to_string());
+    let subpath = parts
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     (branch, subpath)
 }
 
@@ -1120,7 +1118,11 @@ mod tests {
         // Asking for a skill id that doesn't exist MUST error, not silently return
         // the skills/ container (which would install the entire repo as one skill).
         let tmp = tempdir().unwrap();
-        let ask_matt = tmp.path().join("skills").join("engineering").join("ask-matt");
+        let ask_matt = tmp
+            .path()
+            .join("skills")
+            .join("engineering")
+            .join("ask-matt");
         let tdd = tmp.path().join("skills").join("engineering").join("tdd");
         fs::create_dir_all(&ask_matt).unwrap();
         fs::write(ask_matt.join("SKILL.md"), "---\nname: ask-matt\n---").unwrap();

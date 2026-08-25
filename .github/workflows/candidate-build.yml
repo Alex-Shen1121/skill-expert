@@ -1,0 +1,211 @@
+name: Build Release Candidate
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact 40-character commit SHA to package
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact 40-character commit SHA to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    name: Candidate (${{ matrix.target_id }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_id: macos-arm64
+            runner: macos-latest
+            rust_target: aarch64-apple-darwin
+            bundles: app,dmg
+          - target_id: macos-x64
+            runner: macos-latest
+            rust_target: x86_64-apple-darwin
+            bundles: app,dmg
+          - target_id: windows-x64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - target_id: linux-x64
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb,rpm
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Prove exact candidate checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "candidate_sha must be a full lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "Candidate checkout mismatch: expected $EXPECTED_SHA, found $ACTUAL_SHA" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$EXPECTED_SHA" origin/main; then
+            echo "candidate_sha must belong to the development integration branch origin/main" >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+          save-if: false
+
+      - name: Install Linux package tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            binutils \
+            libarchive-tools \
+            rpm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Generate ephemeral candidate updater key
+        shell: bash
+        env:
+          CANDIDATE_KEY_PATH: ${{ runner.temp }}/candidate-updater.key
+        run: |
+          set -euo pipefail
+          CANDIDATE_KEY_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$CANDIDATE_KEY_PASSWORD"
+          npm run --silent tauri -- signer generate --ci --force \
+            --password "$CANDIDATE_KEY_PASSWORD" \
+            --write-keys "$CANDIDATE_KEY_PATH"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$CANDIDATE_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build standalone CLI
+        shell: bash
+        run: >-
+          cargo build --release --locked
+          --manifest-path src-tauri/Cargo.toml
+          --bin skill-expert-cli
+          --target "${{ matrix.rust_target }}"
+
+      - name: Build complete desktop packages and updater assets
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}/candidate-updater.key
+          RUST_TARGET: ${{ matrix.rust_target }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: npm run tauri -- build --ci --target "$RUST_TARGET" --bundles "$BUNDLES"
+
+      - name: Ad-hoc sign and verify all macOS executable surfaces
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
+        run: |
+          set -euo pipefail
+          APP_PATH="$BUILD_ROOT/bundle/macos/Skill Expert.app"
+          CLI_PATH="$BUILD_ROOT/skill-expert-cli"
+          codesign --force --sign - "$CLI_PATH"
+
+          ARCHIVES=()
+          while IFS= read -r -d '' archive; do
+            ARCHIVES+=("$archive")
+          done < <(find "$BUILD_ROOT/bundle/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print0)
+          if [ "${#ARCHIVES[@]}" -ne 1 ]; then
+            echo "Expected exactly one macOS updater archive, found ${#ARCHIVES[@]}" >&2
+            exit 1
+          fi
+          node scripts/verify-macos-adhoc.mjs \
+            --app "$APP_PATH" \
+            --archive "${ARCHIVES[0]}" \
+            --cli "$CLI_PATH"
+
+      - name: Stage stable candidate asset names
+        shell: bash
+        env:
+          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
+          CANDIDATE_PUBLIC_KEY_PATH: ${{ runner.temp }}/candidate-updater.key.pub
+          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ runner.temp }}/candidate-updater.key
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/candidate-assets.mjs stage \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --build-root "$BUILD_ROOT" \
+            --directory "candidate-assets/$TARGET_ID"
+          node scripts/sign-release-updater.mjs \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --directory "candidate-assets/$TARGET_ID" \
+            --public-key "$CANDIDATE_PUBLIC_KEY_PATH"
+          node scripts/candidate-assets.mjs verify \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --directory "candidate-assets/$TARGET_ID"
+
+      - name: 原生回验 Linux 候选安装包
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/verify-linux-release.mjs \
+            --version "$VERSION" \
+            --directory "candidate-assets/$TARGET_ID"
+
+      - name: 原生回验 Windows 候选安装包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Version = node -p "require('./package.json').version"
+          ./scripts/verify-windows-release.ps1 -Version $Version -Directory "candidate-assets/${{ matrix.target_id }}"
+
+      - name: Upload candidate directory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skill-expert-candidate-${{ inputs.candidate_sha }}-${{ matrix.target_id }}
+          path: candidate-assets/${{ matrix.target_id }}/
+          if-no-files-found: error
+          retention-days: 7
