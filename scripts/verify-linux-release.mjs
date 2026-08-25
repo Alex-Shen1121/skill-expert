@@ -42,10 +42,21 @@ function packagedBinary(root, label) {
 }
 
 const APPIMAGE_BUNDLE_MARKER = Buffer.from('__TAURI_BUNDLE_TYPE_VAR_APP');
-export const RPM_EXTRACTION_SCRIPT = [
-  'set -euo pipefail',
-  'rpm2cpio "$1" | (cd "$2" && cpio --extract --make-directories --preserve-modification-time --no-absolute-filenames --no-preserve-owner --quiet)',
-].join('; ');
+
+export function rpmExtractionInvocation(rpmPath, directory) {
+  return {
+    command: 'bsdtar',
+    args: [
+      '--extract',
+      '--file',
+      rpmPath,
+      '--directory',
+      directory,
+      '--no-same-owner',
+      '--no-same-permissions',
+    ],
+  };
+}
 
 function readElfBuildId(filePath, label) {
   const output = run('readelf', ['--notes', filePath]);
@@ -102,13 +113,8 @@ export function verifyLinuxRelease(directory, version) {
     fs.mkdirSync(rpmRoot);
     fs.mkdirSync(appImageRoot);
     run('dpkg-deb', ['--extract', deb, debRoot]);
-    run('bash', [
-      '-c',
-      RPM_EXTRACTION_SCRIPT,
-      'verify-rpm',
-      rpm,
-      rpmRoot,
-    ]);
+    const rpmExtraction = rpmExtractionInvocation(rpm, rpmRoot);
+    run(rpmExtraction.command, rpmExtraction.args);
     fs.chmodSync(appImage, fs.statSync(appImage).mode | 0o111);
     run(appImage, ['--appimage-extract'], { cwd: appImageRoot });
 

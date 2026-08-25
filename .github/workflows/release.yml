@@ -677,7 +677,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm cpio binutils
+          sudo apt-get install -y rpm libarchive-tools binutils
 
       - name: 回验 Linux CLI 与三种桌面包版本
         if: runner.os == 'Linux'
