@@ -28,6 +28,7 @@
 ### 开发者与治理更新
 - 通过公开校验命令与 CI，保持全部版本副本和双语 Changelog 同步。
 - 允许回验任务在公开前读取仍不可见的 Draft Release，同时禁止这些任务修改 Release。
+- 当 `release` 保留上一次经审计的晋级 merge commit 时，允许后续 `main → release` 晋级，同时拒绝 release 独有提交和被篡改的晋级树。
 
 ## [1.0.0] - 2026-08-24
 
