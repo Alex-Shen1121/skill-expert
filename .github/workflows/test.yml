@@ -164,8 +164,8 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: 配置 macOS 发布验证所需的 Node.js
-        if: runner.os == 'macOS'
+      - name: 配置原生发布验证所需的 Node.js
+        if: runner.os == 'macOS' || runner.os == 'Windows'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -173,6 +173,14 @@ jobs:
       - name: 测试 macOS 正式下载回验器
         if: runner.os == 'macOS'
         run: node --test scripts/verify-macos-release.test.mjs
+
+      - name: 安装 Windows Updater 重签测试依赖
+        if: runner.os == 'Windows'
+        run: npm ci
+
+      - name: 测试 Windows Updater 稳定名重签
+        if: runner.os == 'Windows'
+        run: node --test scripts/sign-release-updater.test.mjs
 
       - name: 检查 Windows 正式回验脚本语法
         if: runner.os == 'Windows'

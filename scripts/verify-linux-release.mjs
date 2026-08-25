@@ -20,8 +20,12 @@ function run(command, args, options = {}) {
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
+    const details =
+      String(result.stderr ?? '').trim() ||
+      String(result.stdout ?? '').trim() ||
+      `退出码 ${result.status}`;
     throw new Error(
-      `${command} 执行失败：${String(result.stderr ?? '').trim() || `退出码 ${result.status}`}`,
+      `${command} 执行失败：${details}`,
     );
   }
   return result.stdout;
@@ -38,6 +42,10 @@ function packagedBinary(root, label) {
 }
 
 const APPIMAGE_BUNDLE_MARKER = Buffer.from('__TAURI_BUNDLE_TYPE_VAR_APP');
+export const RPM_EXTRACTION_SCRIPT = [
+  'set -euo pipefail',
+  'rpm2cpio "$1" | (cd "$2" && cpio --extract --make-directories --preserve-modification-time --no-absolute-filenames --no-preserve-owner --quiet)',
+].join('; ');
 
 function readElfBuildId(filePath, label) {
   const output = run('readelf', ['--notes', filePath]);
@@ -96,7 +104,7 @@ export function verifyLinuxRelease(directory, version) {
     run('dpkg-deb', ['--extract', deb, debRoot]);
     run('bash', [
       '-c',
-      'set -euo pipefail; rpm2cpio "$1" | (cd "$2" && cpio -idm --quiet)',
+      RPM_EXTRACTION_SCRIPT,
       'verify-rpm',
       rpm,
       rpmRoot,

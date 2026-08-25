@@ -8,6 +8,14 @@ import { expectedCandidateAssets } from './candidate-assets.mjs';
 import { verifyUpdaterSignature } from './updater-signature.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const tauriCli = path.join(repositoryRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+
+export function tauriSignerInvocation(artifactPath) {
+  return {
+    command: process.execPath,
+    args: [tauriCli, 'signer', 'sign', artifactPath],
+  };
+}
 
 function parseArguments(argv) {
   const options = {};
@@ -51,21 +59,26 @@ export function signReleaseUpdaterAssets(options) {
     throw new Error(`${options.target} 没有需要重新签署的 Updater 资产`);
   }
 
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
   for (const signatureName of signatureNames) {
     const artifactName = signatureName.slice(0, -'.sig'.length);
     const artifactPath = path.join(options.directory, artifactName);
     const signaturePath = path.join(options.directory, signatureName);
     requireRegularFile(artifactPath, 'Updater 资产');
     fs.rmSync(signaturePath, { force: true });
-    const signing = spawnSync(npx, ['tauri', 'signer', 'sign', artifactPath], {
+    const invocation = tauriSignerInvocation(artifactPath);
+    const signing = spawnSync(invocation.command, invocation.args, {
       cwd: repositoryRoot,
       encoding: 'utf8',
       env: process.env,
     });
     if (signing.status !== 0) {
+      const details =
+        signing.error?.message ||
+        String(signing.stderr ?? '').trim() ||
+        String(signing.stdout ?? '').trim() ||
+        `退出码 ${signing.status ?? '未知'}`;
       throw new Error(
-        `${artifactName} 重新签署失败：${signing.stderr.trim() || signing.stdout.trim()}`,
+        `${artifactName} 重新签署失败：${details}`,
       );
     }
     requireRegularFile(signaturePath, 'Updater 签名');
