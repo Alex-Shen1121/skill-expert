@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.1] - 2026-08-25
+
+### Release Overview
 - Add a reviewable release-preparation flow for the independent Skill Expert release line.
 
 ### User-facing
