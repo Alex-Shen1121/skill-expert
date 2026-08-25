@@ -92,7 +92,7 @@ test('candidate workflow uses only ephemeral signing and has no release side eff
 test('候选工作流实际运行 Linux 与 Windows 原生安装包回验', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
 
-  assert.match(workflow, /apt-get install -y[\s\S]*?\bcpio\b/);
+  assert.match(workflow, /apt-get install -y[\s\S]*?\blibarchive-tools\b/);
   assert.match(
     workflow,
     /if:\s*runner\.os == 'Linux'[\s\S]*?verify-linux-release\.mjs[\s\S]*?--directory "candidate-assets\/\$TARGET_ID"/,

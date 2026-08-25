@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  RPM_EXTRACTION_SCRIPT,
+  rpmExtractionInvocation,
   verifyLinuxBundleBinaries,
 } from './verify-linux-release.mjs';
 
@@ -60,7 +60,17 @@ test('AppImage 即使保留 APP 标记，旧版本 build-id 仍被拒绝', () =>
   );
 });
 
-test('RPM 在非 root runner 解包时不尝试恢复归档属主', () => {
-  assert.match(RPM_EXTRACTION_SCRIPT, /--no-preserve-owner/);
-  assert.match(RPM_EXTRACTION_SCRIPT, /--no-absolute-filenames/);
+test('RPM 由单进程 libarchive 直接解包且不恢复归档属主', () => {
+  const invocation = rpmExtractionInvocation('/tmp/候选包.rpm', '/tmp/解包目录');
+
+  assert.equal(invocation.command, 'bsdtar');
+  assert.deepEqual(invocation.args, [
+    '--extract',
+    '--file',
+    '/tmp/候选包.rpm',
+    '--directory',
+    '/tmp/解包目录',
+    '--no-same-owner',
+    '--no-same-permissions',
+  ]);
 });

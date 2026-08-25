@@ -129,6 +129,7 @@ test('汇总门禁从 Draft 下载精确资产并验证哈希、Updater、proven
   assert.match(verifyNative, /ubuntu-22\.04/);
   assert.match(verifyNative, /verify-windows-release\.ps1/);
   assert.match(verifyNative, /verify-linux-release\.mjs/);
+  assert.match(verifyNative, /apt-get install -y[^\n]*libarchive-tools/);
   assert.match(verifyNative, /releases\/assets\/\$ASSET_ID/);
 });
 

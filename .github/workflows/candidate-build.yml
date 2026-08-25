@@ -98,7 +98,7 @@ jobs:
             librsvg2-dev \
             patchelf \
             binutils \
-            cpio \
+            libarchive-tools \
             rpm
 
       - name: Install frontend dependencies
