@@ -15,6 +15,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
+-
+
+## [1.0.2] - 2026-08-25
+
+### Release Overview
+- Restore Windows native verification in the formal Skill Expert release pipeline.
+
+### User-facing
+- No application behavior changes; release packaging and verification are more reliable on Windows.
+
+### Developer & Governance
 - Normalize Windows CRLF output and enforce a portable filename allowlist before downloading Draft Release assets, so native Windows verification reads exact names without path traversal risk.
 
 ## [1.0.1] - 2026-08-25
