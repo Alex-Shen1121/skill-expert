@@ -11,6 +11,7 @@ import path from 'node:path';
 
 import { diagnose } from './diagnose.mjs';
 import { git, runGit, withGitHooksDisabled } from './git.mjs';
+import { calculateRecoveryPlanId } from './recovery-plan.mjs';
 import {
   captureUntrackedState,
   findOngoingOperation,
@@ -95,24 +96,6 @@ function selectRecoveryBranch(cwd) {
     suffix += 1;
   }
   return candidate;
-}
-
-function planIdentity(plan) {
-  return createHash('sha256')
-    .update(JSON.stringify({
-      commonDir: plan.commonDir,
-      primaryWorktree: plan.primaryWorktree,
-      oldMainSha: plan.oldMainSha,
-      targetRemoteSha: plan.targetRemoteSha,
-      remoteRef: plan.remoteRef,
-      recoveryBranch: plan.recoveryBranch,
-      trackedChanges: plan.trackedChanges,
-      trackedContentDigest: plan.trackedContentDigest,
-      untrackedPaths: plan.untrackedPaths,
-      untrackedState: plan.untrackedState,
-      snapshotLimitation: plan.snapshotLimitation,
-    }))
-    .digest('hex');
 }
 
 function writeMetadata(plan, snapshotCommitSha, recoveryHeadSha) {
@@ -206,7 +189,7 @@ function createPlan(cwd) {
     untrackedState,
     snapshotLimitation: SNAPSHOT_LIMITATION,
   };
-  return { id: planIdentity(plan), ...plan };
+  return { id: calculateRecoveryPlanId(plan), ...plan };
 }
 
 function performRecovery(cwd, {

@@ -45,7 +45,8 @@ function createFixture(t, { defaultBranch = 'main' } = {}) {
   git(seed, 'config', 'user.name', '实现基线测试');
   git(seed, 'config', 'user.email', 'preflight@example.com');
   write(seed, 'tracked.txt', '初始内容\n');
-  git(seed, 'add', 'tracked.txt');
+  write(seed, '.gitignore', 'node_modules/\ndist/\n.worktrees/\n');
+  git(seed, 'add', 'tracked.txt', '.gitignore');
   git(seed, 'commit', '-m', '建立远端基线');
   git(root, 'init', '--bare', `--initial-branch=${defaultBranch}`, origin);
   git(seed, 'remote', 'add', 'origin', origin);
@@ -121,6 +122,25 @@ test('首次放行干净且基于最新 main 的 codex 分支，并在后续校�
   assert.ok(continuedReport.statuses.includes('implementation-preflight-passed'));
 });
 
+test('只有 ignored 内容的合规 codex 工作树仍可进入实现阶段', (t) => {
+  const { implementation } = createFixture(t);
+  write(implementation, 'node_modules/依赖/索引.js', '不进入版本控制\n');
+  write(implementation, 'dist/产物.js', '不进入版本控制\n');
+  write(implementation, '.worktrees/嵌套工作树/占位.txt', '只用于模拟\n');
+
+  const result = runPreflight(implementation, '--json');
+
+  assert.equal(result.status, 0, result.stderr);
+  const report = parseReport(result);
+  assert.equal(report.mode, 'initial');
+  assert.deepEqual(report.workingTree.staged, []);
+  assert.deepEqual(report.workingTree.unstaged, []);
+  assert.deepEqual(report.workingTree.untracked, []);
+  assert.deepEqual(report.workingTree.ignored, ['.worktrees', 'dist', 'node_modules']);
+  assert.ok(report.statuses.includes('implementation-preflight-passed'));
+  assert.ok(!report.statuses.includes('working-tree-dirty'));
+});
+
 test('远端 main 在实现开始后正常前移时只警告且不重写实现基线', (t) => {
   const { seed, implementation } = createFixture(t);
   const recordedBaseline = git(implementation, 'rev-parse', 'origin/main');
@@ -190,7 +210,7 @@ test('已暂存、未暂存或未跟踪内容都会阻止首次实现校验且�
     {
       status: 'working-tree-untracked',
       change(repository) {
-        write(repository, '.superpowers/未跟踪.txt', '不得吸收\n');
+        write(repository, '普通未跟踪.txt', '不得吸收\n');
       },
     },
   ];
