@@ -566,6 +566,68 @@ test('post-checkout 钩子无法改写 untracked 或中断恢复分支创建', (
   );
 });
 
+test('reference-transaction 钩子无法改写 untracked', (t) => {
+  const { root, primary, linked } = createFixture(t);
+  write(primary, 'tracked.txt', '需要快照的 tracked 内容\n');
+  write(primary, 'reference 保护.bin', Buffer.from([7, 0, 6, 5]));
+  const hooks = path.join(root, 'reference hooks');
+  const hook = path.join(hooks, 'reference-transaction');
+  mkdirSync(hooks);
+  writeFileSync(
+    hook,
+    '#!/bin/sh\nprintf 被引用钩子污染 > "reference 保护.bin"\n',
+  );
+  chmodSync(hook, 0o755);
+  git(primary, 'config', 'core.hooksPath', hooks);
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr);
+  const plan = JSON.parse(planResult.stdout).plan;
+  const untrackedHash = fileHash(primary, 'reference 保护.bin');
+
+  const applied = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+  assert.equal(fileHash(primary, 'reference 保护.bin'), untrackedHash);
+  const report = JSON.parse(applied.stdout);
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), plan.oldMainSha);
+  assert.equal(
+    git(primary, 'rev-parse', `refs/heads/${plan.recoveryBranch}`),
+    report.result.recoveryHeadSha,
+  );
+});
+
+test('主工作目录存在进行中的 merge 时在创建 recovery 前安全阻止', (t) => {
+  const { primary, linked } = createFixture(t);
+  commitFile(linked, '待合并.txt', '尚未完成的合并\n', '建立待合并提交');
+  git(primary, 'merge', '--no-ff', '--no-commit', 'codex/恢复调用');
+  const mergeHead = git(primary, 'rev-parse', '--verify', 'MERGE_HEAD');
+  const mainBefore = git(primary, 'rev-parse', 'refs/heads/main');
+  const headsBefore = git(primary, 'for-each-ref', '--format=%(refname):%(objectname)', 'refs/heads');
+
+  const result = runBaseline(linked, 'recovery', '--json');
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.statuses, ['recovery-blocked']);
+  assert.match(report.error.message, /merge.*进行中/);
+  assert.equal(git(primary, 'branch', '--show-current'), 'main');
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), mainBefore);
+  assert.equal(git(primary, 'rev-parse', '--verify', 'MERGE_HEAD'), mergeHead);
+  assert.equal(
+    git(primary, 'for-each-ref', '--format=%(refname):%(objectname)', 'refs/heads'),
+    headsBefore,
+  );
+});
+
 test('人类计划明确展示确认值、目标 SHA 和三类文件路径', (t) => {
   const { primary, linked } = createFixture(t);
   write(primary, 'tracked.txt', '已暂存版本\n');

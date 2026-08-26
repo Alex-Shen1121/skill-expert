@@ -1,11 +1,26 @@
 import { spawnSync } from 'node:child_process';
 
+let disabledHooksPath = null;
+
+export function withGitHooksDisabled(hooksPath, operation) {
+  if (disabledHooksPath !== null) throw new Error('Git hooks 隔离范围不能嵌套');
+  disabledHooksPath = hooksPath;
+  try {
+    return operation();
+  } finally {
+    disabledHooksPath = null;
+  }
+}
+
 export function runGit(
   cwd,
   args,
   { allowFailure = false, input = undefined, encoding = 'utf8' } = {},
 ) {
-  const result = spawnSync('git', args, {
+  const effectiveArgs = disabledHooksPath === null
+    ? args
+    : ['-c', `core.hooksPath=${disabledHooksPath}`, ...args];
+  const result = spawnSync('git', effectiveArgs, {
     cwd,
     encoding,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },

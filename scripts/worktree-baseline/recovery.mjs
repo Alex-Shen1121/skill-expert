@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   linkSync,
+  mkdtempSync,
   mkdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { diagnose } from './diagnose.mjs';
-import { git, parseStatus, runGit } from './git.mjs';
+import { git, parseStatus, runGit, withGitHooksDisabled } from './git.mjs';
 
 const SNAPSHOT_LIMITATION = '快照保存 tracked 文件最终内容，不保留原先已暂存与未暂存内容的分界。';
 
@@ -39,6 +42,24 @@ function trackedContentDigest(cwd, { cached = false } = {}) {
     'HEAD',
     '--',
   ], { encoding: null }).stdout).digest('hex');
+}
+
+function findOngoingOperation(cwd) {
+  const markers = [
+    ['MERGE_HEAD', 'merge'],
+    ['CHERRY_PICK_HEAD', 'cherry-pick'],
+    ['REVERT_HEAD', 'revert'],
+    ['BISECT_LOG', 'bisect'],
+    ['rebase-merge', 'rebase'],
+    ['rebase-apply', 'rebase'],
+    ['sequencer', 'sequencer'],
+  ];
+  for (const [marker, operation] of markers) {
+    const gitPath = git(cwd, ['rev-parse', '--git-path', marker]);
+    const absolutePath = path.isAbsolute(gitPath) ? gitPath : path.resolve(cwd, gitPath);
+    if (existsSync(absolutePath)) return operation;
+  }
+  return null;
 }
 
 function stoppedAfterMutation(error, plan, { snapshotCommitSha, stage }) {
@@ -167,6 +188,10 @@ function createPlan(cwd) {
     blocked('无法唯一确认由主工作目录持有 main，已安全停止且未创建 recovery。');
   }
   const primary = diagnosis.repository.primaryWorktree;
+  const ongoingOperation = findOngoingOperation(primary);
+  if (ongoingOperation) {
+    blocked(`${ongoingOperation} 操作进行中，已安全停止且未创建 recovery。`);
+  }
   const status = parseStatus(
     runGit(primary, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).stdout,
   );
@@ -198,7 +223,7 @@ function createPlan(cwd) {
   return { id: planIdentity(plan), ...plan };
 }
 
-export function recovery(cwd, {
+function performRecovery(cwd, {
   apply = false,
   confirmation = null,
   primaryWorktree = null,
@@ -221,20 +246,9 @@ export function recovery(cwd, {
       blocked('确认的主工作目录与当前计划不匹配，已安全停止且未创建 recovery。');
     }
     let snapshotCommitSha = null;
-    let stage = 'recovery-ref-create';
+    let stage = 'branch-create';
     try {
-      git(plan.primaryWorktree, [
-        'update-ref',
-        `refs/heads/${plan.recoveryBranch}`,
-        plan.oldMainSha,
-        '0000000000000000000000000000000000000000',
-      ]);
-      stage = 'head-switch';
-      git(plan.primaryWorktree, [
-        'symbolic-ref',
-        'HEAD',
-        `refs/heads/${plan.recoveryBranch}`,
-      ]);
+      git(plan.primaryWorktree, ['switch', '--no-track', '-c', plan.recoveryBranch]);
       if (plan.trackedChanges.paths.length > 0) {
         stage = 'snapshot-stage';
         const indexPaths = new Set(
@@ -343,4 +357,13 @@ export function recovery(cwd, {
       plan.snapshotLimitation,
     ],
   };
+}
+
+export function recovery(cwd, options = {}) {
+  const emptyHooksDirectory = mkdtempSync(path.join(tmpdir(), 'skill-expert-hooks-disabled-'));
+  try {
+    return withGitHooksDisabled(emptyHooksDirectory, () => performRecovery(cwd, options));
+  } finally {
+    rmSync(emptyHooksDirectory, { recursive: true, force: true });
+  }
 }
