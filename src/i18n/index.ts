@@ -18,12 +18,35 @@ function getStoredLanguage(): SupportedLanguage | null {
   return isSupportedLanguage(stored) ? stored : null;
 }
 
+/**
+ * First-run language, from the OS locale list. Only reached when neither the
+ * saved setting nor localStorage has a value, so an existing user's choice is
+ * never overridden.
+ */
+function detectLanguage(): SupportedLanguage {
+  const tags = navigator.languages?.length
+    ? navigator.languages
+    : [navigator.language];
+
+  for (const tag of tags) {
+    const lower = tag.toLowerCase();
+    if (lower.startsWith("zh")) {
+      // An explicit script wins over the region, so zh-Hans-HK stays Simplified.
+      if (lower.includes("hans")) return "zh";
+      return /hant|-(tw|hk|mo)\b/.test(lower) ? "zh-TW" : "zh";
+    }
+    if (lower.startsWith("en")) return "en";
+  }
+
+  return "en";
+}
+
 export const i18nReady = (async () => {
   const storedLanguage = getStoredLanguage();
   const savedLanguage = await getSettings("language").catch(() => null);
   const lng = isSupportedLanguage(savedLanguage)
     ? savedLanguage
-    : storedLanguage || "zh";
+    : storedLanguage || detectLanguage();
 
   localStorage.setItem(LANGUAGE_STORAGE_KEY, lng);
 
