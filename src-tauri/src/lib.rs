@@ -723,8 +723,9 @@ fn ensure_tray_icon(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        // Render the original white PNG directly for maximum brightness.
-        builder = builder.icon_as_template(false);
+        // 让 macOS 根据浅色或深色菜单栏自动着色单色技能核心符号，
+        // 而不是直接渲染源图中的白色像素。
+        builder = builder.icon_as_template(true);
     }
 
     // On macOS, left-click on tray icon opens the menu by default;
