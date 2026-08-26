@@ -76,7 +76,8 @@ function createFixture(t) {
   git(seed, 'config', 'user.name', '同步测试');
   git(seed, 'config', 'user.email', 'sync@example.com');
   write(seed, 'tracked.txt', '初始内容\n');
-  git(seed, 'add', 'tracked.txt');
+  write(seed, '.gitignore', '.worktrees/\n');
+  git(seed, 'add', 'tracked.txt', '.gitignore');
   git(seed, 'commit', '-m', '建立远端基线');
   git(root, 'init', '--bare', '--initial-branch=main', origin);
   git(seed, 'remote', 'add', 'origin', origin);
@@ -206,6 +207,11 @@ test('从 linked worktree 验证 recovery 后事务性同步分叉的本地 main
   assert.equal(report.result.upstream, 'origin/main');
   assert.equal(report.result.recoveryBranch, recovery.result.recoveryBranch);
   assert.equal(report.result.recoveryHeadSha, recovery.result.recoveryHeadSha);
+  assert.deepEqual(report.result.verifiedUntrackedPaths, [
+    '.superpowers/cache.bin',
+    '.worktrees/nested/cache.bin',
+    '普通未跟踪.bin',
+  ].sort());
   assert.equal(git(primary, 'branch', '--show-current'), 'main');
   assert.equal(git(primary, 'rev-parse', 'HEAD'), targetSha);
   assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), targetSha);
@@ -265,6 +271,43 @@ test('重算摘要也不能让含额外字段的伪造 recovery 元数据通过'
   assert.deepEqual(report.statuses, ['sync-blocked']);
   assert.equal(report.error.kind, 'sync-blocked');
   assert.match(report.error.message, /元数据.*字段/);
+  assert.equal(report.error.details.stage, 'revalidate');
+  assert.equal(report.error.details.mainMoved, false);
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
+  assert.equal(git(primary, 'branch', '--show-current'), recovery.result.recoveryBranch);
+});
+
+test('即使重算元数据摘要也不能改写 recovery 计划字段', (t) => {
+  const { primary, linked, oldMainSha } = createFixture(t);
+  const recovery = createRecovery(linked, primary);
+  const metadataPath = recovery.result.metadataPath;
+  const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+  const { integrity: _originalIntegrity, ...payload } = metadata;
+  const rewrittenPayload = {
+    ...payload,
+    snapshotLimitation: '伪造的快照语义',
+  };
+  const rewrittenMetadata = {
+    ...rewrittenPayload,
+    integrity: createHash('sha256').update(JSON.stringify(rewrittenPayload)).digest('hex'),
+  };
+  writeFileSync(metadataPath, `${JSON.stringify(rewrittenMetadata, null, 2)}\n`);
+
+  const result = runBaseline(
+    linked,
+    'sync',
+    '--apply',
+    '--confirm',
+    recovery.plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.statuses, ['sync-blocked']);
+  assert.match(report.error.message, /recovery 计划确认值.*重算.*不匹配/);
   assert.equal(report.error.details.stage, 'revalidate');
   assert.equal(report.error.details.mainMoved, false);
   assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
@@ -527,6 +570,32 @@ test('只有 legacy recovery 分支而没有 #52 元数据时不允许自动同�
   assert.equal(refs(primary, 'refs/heads'), headsBefore);
 });
 
+test('sync 缺少显式 apply 时只返回用法且不读写恢复现场', (t) => {
+  const { primary, linked, oldMainSha } = createFixture(t);
+  const recovery = createRecovery(linked, primary);
+  const headsBefore = refs(primary, 'refs/heads');
+
+  const result = runBaseline(
+    linked,
+    'sync',
+    '--confirm',
+    recovery.plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(result.status, 2, result.stderr || result.stdout);
+  assert.equal(result.stderr, '');
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.statuses, ['invalid-arguments']);
+  assert.equal(report.error.kind, 'invalid-arguments');
+  assert.match(report.error.message, /sync --apply --confirm/);
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
+  assert.equal(git(primary, 'branch', '--show-current'), recovery.result.recoveryBranch);
+  assert.equal(refs(primary, 'refs/heads'), headsBefore);
+});
+
 test('目标 main 会覆盖 untracked 路径时在 CAS 前停止', (t) => {
   const { primary, linked, oldMainSha } = createFixture(t);
   write(primary, '远端后续.txt', '本地未跟踪内容，不得覆盖\n');
@@ -552,6 +621,34 @@ test('目标 main 会覆盖 untracked 路径时在 CAS 前停止', (t) => {
   assert.equal(report.error.details.mainMoved, false);
   assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
   assert.equal(fileHash(primary, '远端后续.txt'), untrackedHash);
+});
+
+test('不区分大小写的仓库会拦截仅大小写不同的 untracked 冲突', (t) => {
+  const { primary, linked, oldMainSha } = createFixture(t);
+  git(primary, 'config', 'core.ignoreCase', 'true');
+  write(primary, '远端后续.TXT', '大小写不同但仍不得覆盖\n');
+  const untrackedHash = fileHash(primary, '远端后续.TXT');
+  const recovery = createRecovery(linked, primary);
+
+  const result = runBaseline(
+    linked,
+    'sync',
+    '--apply',
+    '--confirm',
+    recovery.plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.statuses, ['sync-blocked']);
+  assert.match(report.error.message, /untracked 路径 远端后续\.TXT.*目标 main 冲突/);
+  assert.equal(report.error.details.stage, 'revalidate');
+  assert.equal(report.error.details.mainMoved, false);
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
+  assert.equal(fileHash(primary, '远端后续.TXT'), untrackedHash);
 });
 
 test('main 被新的 linked worktree 占用时拒绝绕过 Git 的分支保护', (t) => {

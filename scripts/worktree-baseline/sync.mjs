@@ -3,7 +3,10 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  closeSync,
+  openSync,
   readFileSync,
+  readSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -72,6 +75,25 @@ function sortedUniqueStrings(value) {
     JSON.stringify(value) === JSON.stringify([...value].sort());
 }
 
+function recoveryPlanIdentity(metadata) {
+  return createHash('sha256').update(JSON.stringify({
+    commonDir: metadata.commonDir,
+    primaryWorktree: metadata.primaryWorktree,
+    oldMainSha: metadata.oldMainSha,
+    targetRemoteSha: metadata.targetRemoteSha,
+    remoteRef: metadata.remoteRef,
+    recoveryBranch: metadata.recoveryBranch,
+    trackedChanges: {
+      staged: metadata.stagedBefore,
+      unstaged: metadata.unstagedBefore,
+      paths: metadata.trackedPaths,
+    },
+    trackedContentDigest: metadata.trackedContentDigest,
+    untrackedPaths: metadata.untrackedBefore,
+    snapshotLimitation: metadata.snapshotLimitation,
+  })).digest('hex');
+}
+
 function readRecoveryMetadata(commonDir, planId) {
   if (!PLAN_ID_PATTERN.test(planId)) {
     blocked('recovery 计划确认值格式无效，已安全停止。');
@@ -121,6 +143,9 @@ function readRecoveryMetadata(commonDir, planId) {
     typeof metadata.snapshotLimitation === 'string';
   if (!validShape) {
     blocked('recovery 元数据缺少必要字段或字段格式无效，已安全停止。');
+  }
+  if (recoveryPlanIdentity(metadata) !== metadata.planId) {
+    blocked('recovery 计划确认值重算后与元数据不匹配，已安全停止。');
   }
   return { metadata, metadataPath };
 }
@@ -222,27 +247,41 @@ function ongoingOperation(cwd) {
   return null;
 }
 
+function hashFileContents(absolutePath, digest) {
+  const descriptor = openSync(absolutePath, 'r');
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  try {
+    let bytesRead;
+    do {
+      bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) digest.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function untrackedFingerprint(cwd) {
-  const status = parseStatus(
-    runGit(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).stdout,
-  );
-  return Object.fromEntries([...status.untracked].sort().map((relativePath) => {
+  return Object.fromEntries(allUntrackedPaths(cwd).map((relativePath) => {
     const absolutePath = path.join(cwd, relativePath);
     const stat = lstatSync(absolutePath);
     const digest = createHash('sha256');
     if (stat.isSymbolicLink()) digest.update(readlinkSync(absolutePath));
-    else if (stat.isFile()) digest.update(readFileSync(absolutePath));
+    else if (stat.isFile()) hashFileContents(absolutePath, digest);
     else digest.update(`${stat.mode}:${stat.size}`);
     return [relativePath, `${stat.mode}:${digest.digest('hex')}`];
   }));
 }
 
 function captureWorktrees(worktrees) {
-  return Object.fromEntries(worktrees.filter((item) => !item.bare).map((item) => [item.path, {
-    head: resolveCommit(item.path, 'HEAD'),
-    branch: git(item.path, ['branch', '--show-current']) || null,
-    untracked: untrackedFingerprint(item.path),
-  }]));
+  return Object.fromEntries(worktrees.filter((item) => !item.bare).map((item) => {
+    const worktreePath = normalizePath(item.path);
+    return [worktreePath, {
+      head: resolveCommit(worktreePath, 'HEAD'),
+      branch: git(worktreePath, ['branch', '--show-current']) || null,
+      untracked: untrackedFingerprint(worktreePath),
+    }];
+  }));
 }
 
 function captureProtectedRefs(cwd) {
@@ -287,11 +326,21 @@ function targetCheckoutCollision(cwd, targetSha) {
     targetSha,
   ]).stdout.split('\0').filter(Boolean);
   const untrackedPaths = allUntrackedPaths(cwd);
-  return untrackedPaths.find((untrackedPath) => targetPaths.some((targetPath) =>
-    targetPath === untrackedPath ||
-    targetPath.startsWith(`${untrackedPath}/`) ||
-    untrackedPath.startsWith(`${targetPath}/`),
-  )) ?? null;
+  const ignoreCase = runGit(cwd, ['config', '--bool', 'core.ignoreCase'], {
+    allowFailure: true,
+  }).stdout.trim() === 'true';
+  const canonicalPath = ignoreCase
+    ? (relativePath) => relativePath.toLowerCase()
+    : (relativePath) => relativePath;
+  return untrackedPaths.find((untrackedPath) => {
+    const candidate = canonicalPath(untrackedPath);
+    return targetPaths.some((targetPath) => {
+      const target = canonicalPath(targetPath);
+      return target === candidate ||
+        target.startsWith(`${candidate}/`) ||
+        candidate.startsWith(`${target}/`);
+    });
+  }) ?? null;
 }
 
 function preservedRecoveryDetails(metadata) {
@@ -416,7 +465,10 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
   if (mainOwners.length !== 0) {
     blockedWithRecovery('main 被其他 worktree 占用，已安全停止。', metadata);
   }
-  if (recoveryOwners.length !== 1 || recoveryOwners[0].path !== confirmedPrimary) {
+  if (
+    recoveryOwners.length !== 1 ||
+    normalizePath(recoveryOwners[0].path) !== confirmedPrimary
+  ) {
     blockedWithRecovery(
       '无法唯一确认主工作目录中的 recovery 现场，已安全停止。',
       metadata,
@@ -559,6 +611,7 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
         upstream,
         recoveryBranch: metadata.recoveryBranch,
         recoveryHeadSha: metadata.recoveryHeadSha,
+        verifiedUntrackedPaths: Object.keys(worktreesBefore[confirmedPrimary].untracked),
       },
       conclusions: [
         `本地 main 已精确同步至 origin/main ${mainSha}，ahead/behind 为 0/0。`,
