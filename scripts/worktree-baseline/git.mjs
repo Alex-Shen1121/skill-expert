@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 
-export function runGit(cwd, args, { allowFailure = false } = {}) {
+export function runGit(cwd, args, { allowFailure = false, input = undefined } = {}) {
   const result = spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    input,
     shell: false,
   });
   if (!allowFailure && result.status !== 0) {
