@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { diagnose } from './worktree-baseline/diagnose.mjs';
 import { recovery } from './worktree-baseline/recovery.mjs';
+import { preflight } from './worktree-baseline/preflight.mjs';
 
 function renderPathSection(title, paths) {
   return [
@@ -31,6 +32,13 @@ function renderHuman(report) {
       ...renderPathSection('已暂存路径', report.plan.trackedChanges.staged),
       ...renderPathSection('未暂存路径', report.plan.trackedChanges.unstaged),
       ...renderPathSection('未跟踪路径', report.plan.untrackedPaths),
+      ...report.conclusions.map((message) => `- ${message}`),
+    ].join('\n');
+  }
+  if (report.command === 'preflight') {
+    return [
+      report.exitCode === 0 ? '实现阶段基线校验通过。' : '实现阶段基线校验未通过。',
+      `当前工作树：${report.repository.currentWorktree}`,
       ...report.conclusions.map((message) => `- ${message}`),
     ].join('\n');
   }
@@ -89,17 +97,28 @@ function parseRecoveryArguments(values) {
 const recoveryOptions = command === 'recovery' ? parseRecoveryArguments(args) : null;
 const validArguments =
   (command === 'diagnose' && args.every((argument) => ['--json', '--offline'].includes(argument))) ||
-  (command === 'recovery' && recoveryOptions !== null);
+  (command === 'recovery' && recoveryOptions !== null) ||
+  (command === 'preflight' && args.every((argument) => argument === '--json'));
+
+function usageFor(requestedCommand) {
+  if (requestedCommand === 'recovery') {
+    return '用法：node scripts/worktree-baseline.mjs recovery [--json] [--apply --confirm <计划确认值> --primary-worktree <路径>]';
+  }
+  if (requestedCommand === 'preflight') {
+    return '用法：node scripts/worktree-baseline.mjs preflight [--json]';
+  }
+  return '用法：node scripts/worktree-baseline.mjs diagnose [--json] [--offline]';
+}
 
 try {
   if (!validArguments) {
-    throw new Error(command === 'recovery'
-      ? '用法：node scripts/worktree-baseline.mjs recovery [--json] [--apply --confirm <计划确认值> --primary-worktree <路径>]'
-      : '用法：node scripts/worktree-baseline.mjs diagnose [--json] [--offline]');
+    throw new Error(usageFor(command));
   }
   const report = command === 'diagnose'
     ? diagnose(process.cwd(), { offline })
-    : recovery(process.cwd(), recoveryOptions);
+    : command === 'recovery'
+      ? recovery(process.cwd(), recoveryOptions)
+      : preflight(process.cwd());
   process.stdout.write(json ? `${JSON.stringify(report)}\n` : `${renderHuman(report)}\n`);
   process.exitCode = report.exitCode;
 } catch (error) {
@@ -107,12 +126,20 @@ try {
     error,
     command,
     validArguments
-      ? command === 'recovery' ? 'recovery-failed' : 'diagnosis-failed'
+      ? command === 'recovery'
+        ? 'recovery-failed'
+        : command === 'preflight'
+          ? 'preflight-failed'
+          : 'diagnosis-failed'
       : 'invalid-arguments',
   );
   if (json) process.stdout.write(`${JSON.stringify(report)}\n`);
   else process.stderr.write(
-    `${command === 'recovery' ? '无法完成本地 main 恢复点' : '无法完成工作树基线诊断'}：${report.error.message}\n`,
+    command === 'preflight'
+      ? `无法完成实现阶段基线校验：${report.error.message}\n`
+      : command === 'recovery'
+        ? `无法完成本地 main 恢复点：${report.error.message}\n`
+        : `无法完成工作树基线诊断：${report.error.message}\n`,
   );
   process.exitCode = report.exitCode;
 }
