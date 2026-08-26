@@ -459,6 +459,32 @@ test('为所有旧 detached worktree 报告远端关系和只读用途', (t) => 
   );
 });
 
+test('识别缺少工具元数据的人工 recovery 为 legacy/unverified', (t) => {
+  const { primary, linked } = createFixture(t);
+  const legacyBranch = 'codex/local-main-recovery-20260827';
+  git(primary, 'branch', legacyBranch, 'main');
+  const legacySha = git(primary, 'rev-parse', `refs/heads/${legacyBranch}`);
+
+  const result = runBaseline(linked, 'diagnose', '--offline', '--json');
+
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.recoveryRecords, [{
+    branch: legacyBranch,
+    ref: `refs/heads/${legacyBranch}`,
+    head: legacySha,
+    verification: 'legacy-unverified',
+    planId: null,
+  }]);
+  assert.ok(report.statuses.includes('recovery-records-present'));
+  assert.ok(report.statuses.includes('recovery-legacy-unverified'));
+  assert.ok(
+    report.conclusions.some(
+      (message) => message.includes(legacyBranch) && message.includes('legacy/unverified'),
+    ),
+  );
+});
+
 test('本地 main 缺失时报告无法安全判断并以非零状态结束', (t) => {
   const { primary, linked } = createFixture(t);
   git(primary, 'switch', '-c', 'codex/主目录临时分支');

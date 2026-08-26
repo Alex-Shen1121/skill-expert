@@ -147,6 +147,33 @@ function usageFor(requestedCommand) {
   return '用法：node scripts/worktree-baseline.mjs diagnose [--json] [--offline]';
 }
 
+function renderHelp() {
+  return [
+    'Skill Expert 工作树基线工具',
+    '',
+    '稳定入口：npm run worktree:baseline -- <命令> [选项]',
+    '',
+    '命令：',
+    '  diagnose [--offline] [--json]  只读诊断；默认只刷新 origin/main 远端跟踪引用',
+    '  preflight [--json]             实现前校验；失败时不得进入 /implement',
+    '  recovery [--json]              计划预览；不会移动 main',
+    '  recovery --apply --confirm <计划确认值> --primary-worktree <路径> [--json]',
+    '                                  经人工确认后显式创建本地恢复点',
+    '  sync --apply --confirm <计划确认值> --primary-worktree <路径> [--json]',
+    '                                  基于 verified recovery 执行显式变更',
+    '',
+    '退出码：',
+    '  0  请求完成且安全条件满足',
+    '  1  已完成判断，但被安全门阻止',
+    '  2  参数错误或无法安全判断',
+  ].join('\n');
+}
+
+if (command === 'help' && args.length === 0) {
+  process.stdout.write(`${renderHelp()}\n`);
+  process.exit(0);
+}
+
 try {
   if (!validArguments) {
     throw new Error(usageFor(command));

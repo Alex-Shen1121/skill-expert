@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { git, parseStatus, parseWorktrees, runGit } from './git.mjs';
+import { findVerifiedRecoveryMetadata } from './recovery-records.mjs';
 
 function normalizePath(value) {
   return realpathSync.native(path.resolve(value));
@@ -127,6 +128,29 @@ function compareDevelopmentIntegration(cwd, branch, localSha, remoteSha) {
   };
 }
 
+function readRecoveryRecords(cwd, commonDir) {
+  const verifiedMetadata = findVerifiedRecoveryMetadata(commonDir);
+  return runGit(cwd, [
+    'for-each-ref',
+    '--format=%(refname)%00%(objectname)',
+    'refs/heads/codex/local-main-recovery-*',
+  ]).stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((record) => {
+      const [ref, head] = record.split('\0');
+      const branch = ref.slice('refs/heads/'.length);
+      const metadata = verifiedMetadata.get(branch);
+      return {
+        branch,
+        ref,
+        head,
+        verification: metadata ? 'verified' : 'legacy-unverified',
+        planId: metadata?.planId ?? null,
+      };
+    });
+}
+
 export function diagnose(cwd, { offline = false } = {}) {
   const currentWorktree = normalizePath(git(cwd, ['rev-parse', '--show-toplevel']));
   const commonDir = normalizePath(git(cwd, [
@@ -212,6 +236,7 @@ export function diagnose(cwd, { offline = false } = {}) {
     localSha,
     remoteSha,
   );
+  const recoveryRecords = readRecoveryRecords(cwd, commonDir);
   const expectedBranch = 'main';
   const branchIsExpected = branch === expectedBranch;
   const statuses = [refresh.latest
@@ -240,6 +265,13 @@ export function diagnose(cwd, { offline = false } = {}) {
   if (otherReadOnlyWorktrees.length > 0) statuses.push('linked-worktree-read-only');
   for (const category of ['staged', 'unstaged', 'untracked']) {
     if (workingTree[category].length > 0) statuses.push(`working-tree-${category}`);
+  }
+  if (recoveryRecords.length > 0) statuses.push('recovery-records-present');
+  if (recoveryRecords.some((record) => record.verification === 'verified')) {
+    statuses.push('recovery-verified');
+  }
+  if (recoveryRecords.some((record) => record.verification === 'legacy-unverified')) {
+    statuses.push('recovery-legacy-unverified');
   }
   const conclusions = refresh.latest
     ? [`已确认 origin 的默认分支为 ${branch}，并刷新远端跟踪引用。`]
@@ -281,6 +313,11 @@ export function diagnose(cwd, { offline = false } = {}) {
   ) {
     conclusions.push('当前 HEAD 与远端的分支差异不是未提交修改，不应据此重复提交审查。');
   }
+  for (const record of recoveryRecords) {
+    conclusions.push(record.verification === 'verified'
+      ? `发现本地恢复分支 ${record.branch}，工具元数据完整且恢复引用已验证。`
+      : `发现本地恢复分支 ${record.branch}，但缺少工具完整元数据，状态为 legacy/unverified，不能用于自动同步。`);
+  }
 
   return {
     schemaVersion: 1,
@@ -306,6 +343,7 @@ export function diagnose(cwd, { offline = false } = {}) {
       relationshipToRemote: currentRelationship,
     },
     worktrees,
+    recoveryRecords,
     workingTree,
     developmentIntegration,
   };

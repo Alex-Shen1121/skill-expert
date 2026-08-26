@@ -211,6 +211,31 @@ test('prepares a fixed review branch while preserving Skill Expert release decis
   assert.match(verification.stdout, /Upstream review has no unresolved conflict paths\./);
 });
 
+test('按独立治理清单保护工作树基线入口与安全文档', (t) => {
+  const { root, upstreamWork, checkout } = createFixture(t);
+  write(checkout, 'scripts/worktree-baseline.mjs', 'Skill Expert 工作树入口\n');
+  write(checkout, 'docs/worktree-baseline.md', '# Skill Expert 安全同步\n');
+  git(checkout, 'add', '--', 'scripts/worktree-baseline.mjs', 'docs/worktree-baseline.md');
+  git(checkout, 'commit', '-m', '建立工作树安全治理');
+  git(checkout, 'push', 'origin', 'main');
+
+  write(upstreamWork, 'scripts/worktree-baseline.mjs', 'upstream worktree command\n');
+  write(upstreamWork, 'docs/worktree-baseline.md', '# upstream worktree guide\n');
+  git(upstreamWork, 'add', '--', 'scripts/worktree-baseline.mjs', 'docs/worktree-baseline.md');
+  git(upstreamWork, 'commit', '-m', '添加上游工作树工具');
+  git(upstreamWork, 'push', 'origin', 'main');
+  const resultPath = path.join(root, 'result.json');
+
+  const result = runTracking(checkout, resultPath);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(read(checkout, 'scripts/worktree-baseline.mjs'), 'Skill Expert 工作树入口\n');
+  assert.equal(read(checkout, 'docs/worktree-baseline.md'), '# Skill Expert 安全同步\n');
+  const outcome = JSON.parse(readFileSync(resultPath, 'utf8'));
+  assert.ok(outcome.protectedChanges.includes('scripts/worktree-baseline.mjs'));
+  assert.ok(outcome.protectedChanges.includes('docs/worktree-baseline.md'));
+});
+
 test('keeps a conflicting upstream change reviewable and reports the exact paths', (t) => {
   const { root, upstreamWork, checkout } = createFixture(t);
   write(checkout, 'src/shared.txt', 'Skill Expert adaptation\n');
