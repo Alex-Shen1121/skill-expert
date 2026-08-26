@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.3] - 2026-08-26
+
+### Release Overview
 - Replace the legacy S icon with the character-led Skill Expert production icon system.
 
 ### User-facing
