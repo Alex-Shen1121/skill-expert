@@ -41,8 +41,12 @@ function trackedContentDigest(cwd, { cached = false } = {}) {
   ], { encoding: null }).stdout).digest('hex');
 }
 
-function stoppedAfterMutation(error, plan, { branchCreated, snapshotCommitSha, stage }) {
-  const recoveryPreserved = branchCreated;
+function stoppedAfterMutation(error, plan, { snapshotCommitSha, stage }) {
+  const recoveryRefSha = resolveCommit(
+    plan.primaryWorktree,
+    `refs/heads/${plan.recoveryBranch}`,
+  );
+  const recoveryPreserved = recoveryRefSha !== null;
   const primaryBranchResult = runGit(
     plan.primaryWorktree,
     ['branch', '--show-current'],
@@ -58,10 +62,7 @@ function stoppedAfterMutation(error, plan, { branchCreated, snapshotCommitSha, s
       ? primaryBranchResult.stdout.trim() || null
       : null,
     mainRefSha: resolveCommit(plan.primaryWorktree, 'refs/heads/main'),
-    recoveryRefSha: resolveCommit(
-      plan.primaryWorktree,
-      `refs/heads/${plan.recoveryBranch}`,
-    ),
+    recoveryRefSha,
     recoveryPreserved,
     retryWithSameConfirmation: false,
     guidance: recoveryPreserved
@@ -219,12 +220,21 @@ export function recovery(cwd, {
     if (confirmedPrimary !== plan.primaryWorktree) {
       blocked('确认的主工作目录与当前计划不匹配，已安全停止且未创建 recovery。');
     }
-    let branchCreated = false;
     let snapshotCommitSha = null;
-    let stage = 'branch-create';
+    let stage = 'recovery-ref-create';
     try {
-      git(plan.primaryWorktree, ['switch', '--no-track', '-c', plan.recoveryBranch]);
-      branchCreated = true;
+      git(plan.primaryWorktree, [
+        'update-ref',
+        `refs/heads/${plan.recoveryBranch}`,
+        plan.oldMainSha,
+        '0000000000000000000000000000000000000000',
+      ]);
+      stage = 'head-switch';
+      git(plan.primaryWorktree, [
+        'symbolic-ref',
+        'HEAD',
+        `refs/heads/${plan.recoveryBranch}`,
+      ]);
       if (plan.trackedChanges.paths.length > 0) {
         stage = 'snapshot-stage';
         const indexPaths = new Set(
@@ -317,7 +327,7 @@ export function recovery(cwd, {
         ],
       };
     } catch (error) {
-      stoppedAfterMutation(error, plan, { branchCreated, snapshotCommitSha, stage });
+      stoppedAfterMutation(error, plan, { snapshotCommitSha, stage });
     }
   }
   return {

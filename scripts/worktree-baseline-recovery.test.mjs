@@ -525,6 +525,47 @@ test('提交钩子无法把 untracked 文件加入恢复快照', (t) => {
   );
 });
 
+test('post-checkout 钩子无法改写 untracked 或中断恢复分支创建', (t) => {
+  const { root, primary, linked } = createFixture(t);
+  write(primary, 'tracked.txt', '需要快照的 tracked 内容\n');
+  write(primary, 'checkout 保护.bin', Buffer.from([3, 0, 2, 1]));
+  const untrackedHash = fileHash(primary, 'checkout 保护.bin');
+  const hooks = path.join(root, 'checkout hooks');
+  const hook = path.join(hooks, 'post-checkout');
+  mkdirSync(hooks);
+  writeFileSync(
+    hook,
+    '#!/bin/sh\nprintf 被钩子污染 > "checkout 保护.bin"\nexit 1\n',
+  );
+  chmodSync(hook, 0o755);
+  git(primary, 'config', 'core.hooksPath', hooks);
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr);
+  const plan = JSON.parse(planResult.stdout).plan;
+
+  const applied = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+  const report = JSON.parse(applied.stdout);
+  assert.deepEqual(report.statuses, ['recovery-created']);
+  assert.equal(git(primary, 'branch', '--show-current'), plan.recoveryBranch);
+  assert.equal(fileHash(primary, 'checkout 保护.bin'), untrackedHash);
+  assert.ok(
+    runGit(primary, ['ls-files', '--others', '--exclude-standard', '-z']).stdout
+      .split('\0')
+      .includes('checkout 保护.bin'),
+  );
+});
+
 test('人类计划明确展示确认值、目标 SHA 和三类文件路径', (t) => {
   const { primary, linked } = createFixture(t);
   write(primary, 'tracked.txt', '已暂存版本\n');
