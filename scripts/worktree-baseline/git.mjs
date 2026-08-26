@@ -1,14 +1,37 @@
 import { spawnSync } from 'node:child_process';
 
-export function runGit(cwd, args, { allowFailure = false } = {}) {
-  const result = spawnSync('git', args, {
+let disabledHooksPath = null;
+
+export function withGitHooksDisabled(hooksPath, operation) {
+  if (disabledHooksPath !== null) throw new Error('Git hooks 隔离范围不能嵌套');
+  disabledHooksPath = hooksPath;
+  try {
+    return operation();
+  } finally {
+    disabledHooksPath = null;
+  }
+}
+
+export function runGit(
+  cwd,
+  args,
+  { allowFailure = false, input = undefined, encoding = 'utf8' } = {},
+) {
+  const effectiveArgs = disabledHooksPath === null
+    ? args
+    : ['-c', `core.hooksPath=${disabledHooksPath}`, ...args];
+  const result = spawnSync('git', effectiveArgs, {
     cwd,
-    encoding: 'utf8',
+    encoding,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    input,
     shell: false,
   });
   if (!allowFailure && result.status !== 0) {
-    throw new Error(result.stderr.trim() || `Git 命令执行失败：git ${args.join(' ')}`);
+    const stderr = Buffer.isBuffer(result.stderr)
+      ? result.stderr.toString('utf8').trim()
+      : result.stderr.trim();
+    throw new Error(stderr || `Git 命令执行失败：git ${args.join(' ')}`);
   }
   return result;
 }
