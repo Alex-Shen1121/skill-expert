@@ -145,7 +145,7 @@ function readRecoveryRecords(cwd, commonDir) {
         branch,
         ref,
         head,
-        verification: metadata ? 'verified' : 'legacy-unverified',
+        verification: metadata ? 'verified' : 'legacy/unverified',
         planId: metadata?.planId ?? null,
       };
     });
@@ -270,7 +270,7 @@ export function diagnose(cwd, { offline = false } = {}) {
   if (recoveryRecords.some((record) => record.verification === 'verified')) {
     statuses.push('recovery-verified');
   }
-  if (recoveryRecords.some((record) => record.verification === 'legacy-unverified')) {
+  if (recoveryRecords.some((record) => record.verification === 'legacy/unverified')) {
     statuses.push('recovery-legacy-unverified');
   }
   const conclusions = refresh.latest

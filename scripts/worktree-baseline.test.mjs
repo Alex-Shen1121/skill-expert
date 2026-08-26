@@ -473,7 +473,7 @@ test('识别缺少工具元数据的人工 recovery 为 legacy/unverified', (t) 
     branch: legacyBranch,
     ref: `refs/heads/${legacyBranch}`,
     head: legacySha,
-    verification: 'legacy-unverified',
+    verification: 'legacy/unverified',
     planId: null,
   }]);
   assert.ok(report.statuses.includes('recovery-records-present'));
