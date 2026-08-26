@@ -1,12 +1,12 @@
-import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
-import { git, parseStatus, parseWorktrees, runGit } from './git.mjs';
+import { git, parseWorktrees, runGit } from './git.mjs';
 import { findVerifiedRecoveryMetadata } from './recovery-records.mjs';
-
-function normalizePath(value) {
-  return realpathSync.native(path.resolve(value));
-}
+import {
+  normalizePath,
+  readWorkingTreeStatus,
+  repositoryPathsEqual,
+} from './safety.mjs';
 
 function resolveCachedDefaultBranch(cwd) {
   const cached = runGit(cwd, [
@@ -224,12 +224,11 @@ export function diagnose(cwd, { offline = false } = {}) {
   const currentRelationship = compareCommits(cwd, currentHead, remoteSha);
   const worktrees = worktreeRecords.map((worktree) => ({
     ...worktree,
+    path: normalizePath(worktree.path),
     suitability: worktree.detached || worktree.bare ? 'read-only' : 'named-branch',
     relationshipToRemote: compareCommits(cwd, worktree.head, remoteSha),
   }));
-  const workingTree = parseStatus(
-    runGit(cwd, ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all']).stdout,
-  );
+  const workingTree = readWorkingTreeStatus(cwd);
   const developmentIntegration = compareDevelopmentIntegration(
     cwd,
     branch,
@@ -260,10 +259,12 @@ export function diagnose(cwd, { offline = false } = {}) {
   }
   if (!currentBranch) statuses.push('detached-head');
   const otherReadOnlyWorktrees = worktrees.filter(
-    (worktree) => worktree.path !== currentWorktree && worktree.suitability === 'read-only',
+    (worktree) =>
+      !repositoryPathsEqual(currentWorktree, worktree.path, currentWorktree) &&
+      worktree.suitability === 'read-only',
   );
   if (otherReadOnlyWorktrees.length > 0) statuses.push('linked-worktree-read-only');
-  for (const category of ['staged', 'unstaged', 'untracked']) {
+  for (const category of ['staged', 'unstaged', 'untracked', 'ignored']) {
     if (workingTree[category].length > 0) statuses.push(`working-tree-${category}`);
   }
   if (recoveryRecords.length > 0) statuses.push('recovery-records-present');
@@ -305,11 +306,15 @@ export function diagnose(cwd, { offline = false } = {}) {
   if (workingTree.staged.length > 0) conclusions.push('当前工作树存在已暂存变更。');
   if (workingTree.unstaged.length > 0) conclusions.push('当前工作树存在未暂存变更。');
   if (workingTree.untracked.length > 0) conclusions.push('当前工作树存在未跟踪内容，诊断不会修改它们。');
+  if (workingTree.ignored.length > 0) {
+    conclusions.push('当前工作树存在 ignored 内容，包括嵌套工作树目录时也只报告、不修改。');
+  }
   if (
     currentRelationship.relation === 'diverged' &&
     workingTree.staged.length === 0 &&
     workingTree.unstaged.length === 0 &&
-    workingTree.untracked.length === 0
+    workingTree.untracked.length === 0 &&
+    workingTree.ignored.length === 0
   ) {
     conclusions.push('当前 HEAD 与远端的分支差异不是未提交修改，不应据此重复提交审查。');
   }

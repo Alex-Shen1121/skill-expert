@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
-  existsSync,
   linkSync,
   mkdtempSync,
   mkdirSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,7 +10,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { diagnose } from './diagnose.mjs';
-import { git, parseStatus, runGit, withGitHooksDisabled } from './git.mjs';
+import { git, runGit, withGitHooksDisabled } from './git.mjs';
+import {
+  captureUntrackedState,
+  findOngoingOperation,
+  readWorkingTreeStatus,
+  repositoryPathsEqual,
+  resolveCommit,
+} from './safety.mjs';
 
 const SNAPSHOT_LIMITATION = '快照保存 tracked 文件最终内容，不保留原先已暂存与未暂存内容的分界。';
 
@@ -21,13 +26,6 @@ function blocked(message) {
   error.kind = 'recovery-blocked';
   error.exitCode = 1;
   throw error;
-}
-
-function resolveCommit(cwd, ref) {
-  const result = runGit(cwd, ['rev-parse', '--verify', `${ref}^{commit}`], {
-    allowFailure: true,
-  });
-  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 function trackedContentDigest(cwd, { cached = false } = {}) {
@@ -42,24 +40,6 @@ function trackedContentDigest(cwd, { cached = false } = {}) {
     'HEAD',
     '--',
   ], { encoding: null }).stdout).digest('hex');
-}
-
-function findOngoingOperation(cwd) {
-  const markers = [
-    ['MERGE_HEAD', 'merge'],
-    ['CHERRY_PICK_HEAD', 'cherry-pick'],
-    ['REVERT_HEAD', 'revert'],
-    ['BISECT_LOG', 'bisect'],
-    ['rebase-merge', 'rebase'],
-    ['rebase-apply', 'rebase'],
-    ['sequencer', 'sequencer'],
-  ];
-  for (const [marker, operation] of markers) {
-    const gitPath = git(cwd, ['rev-parse', '--git-path', marker]);
-    const absolutePath = path.isAbsolute(gitPath) ? gitPath : path.resolve(cwd, gitPath);
-    if (existsSync(absolutePath)) return operation;
-  }
-  return null;
 }
 
 function stoppedAfterMutation(error, plan, { snapshotCommitSha, stage }) {
@@ -88,7 +68,7 @@ function stoppedAfterMutation(error, plan, { snapshotCommitSha, stage }) {
     retryWithSameConfirmation: false,
     guidance: recoveryPreserved
       ? snapshotCommitSha === null
-        ? `恢复分支 ${plan.recoveryBranch} 已保留；核验现场后，可手动切回 main、删除这个未完成的 recovery，再重新生成计划重试。`
+        ? `恢复分支 ${plan.recoveryBranch} 已保留；本地 main 未由本阶段移动。核验现场后，可手动切回 main、删除这个未完成的 recovery，再重新生成计划重试。`
         : `恢复分支 ${plan.recoveryBranch} 及快照 ${snapshotCommitSha} 已保留；本地 main 未由本阶段移动。`
       : '文件内容已保留；请重新生成并确认恢复计划后重试。',
   };
@@ -129,6 +109,7 @@ function planIdentity(plan) {
       trackedChanges: plan.trackedChanges,
       trackedContentDigest: plan.trackedContentDigest,
       untrackedPaths: plan.untrackedPaths,
+      untrackedState: plan.untrackedState,
       snapshotLimitation: plan.snapshotLimitation,
     }))
     .digest('hex');
@@ -140,7 +121,7 @@ function writeMetadata(plan, snapshotCommitSha, recoveryHeadSha) {
   const metadataPath = path.join(metadataDirectory, `${plan.id}.json`);
   const temporaryPath = `${metadataPath}.${process.pid}.tmp`;
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     planId: plan.id,
     createdAt: new Date().toISOString(),
     commonDir: plan.commonDir,
@@ -157,6 +138,7 @@ function writeMetadata(plan, snapshotCommitSha, recoveryHeadSha) {
     stagedBefore: plan.trackedChanges.staged,
     unstagedBefore: plan.trackedChanges.unstaged,
     untrackedBefore: plan.untrackedPaths,
+    untrackedStateBefore: plan.untrackedState,
     snapshotLimitation: plan.snapshotLimitation,
   };
   const metadata = {
@@ -183,7 +165,11 @@ function createPlan(cwd) {
   const mainOwners = diagnosis.worktrees.filter((worktree) => worktree.branch === 'main');
   if (
     mainOwners.length !== 1 ||
-    mainOwners[0].path !== diagnosis.repository.primaryWorktree
+    !repositoryPathsEqual(
+      diagnosis.repository.primaryWorktree,
+      mainOwners[0].path,
+      diagnosis.repository.primaryWorktree,
+    )
   ) {
     blocked('无法唯一确认由主工作目录持有 main，已安全停止且未创建 recovery。');
   }
@@ -192,9 +178,8 @@ function createPlan(cwd) {
   if (ongoingOperation) {
     blocked(`${ongoingOperation} 操作进行中，已安全停止且未创建 recovery。`);
   }
-  const status = parseStatus(
-    runGit(primary, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).stdout,
-  );
+  const status = readWorkingTreeStatus(primary);
+  const untrackedState = captureUntrackedState(primary);
   const trackedPaths = runGit(primary, [
     'diff',
     '--name-only',
@@ -217,7 +202,8 @@ function createPlan(cwd) {
       paths: trackedPaths,
     },
     trackedContentDigest: contentDigest,
-    untrackedPaths: [...status.untracked].sort(),
+    untrackedPaths: untrackedState.untrackedPaths,
+    untrackedState,
     snapshotLimitation: SNAPSHOT_LIMITATION,
   };
   return { id: planIdentity(plan), ...plan };
@@ -236,13 +222,17 @@ function performRecovery(cwd, {
     if (!primaryWorktree) {
       blocked('显式执行 recovery 时必须确认主工作目录路径。');
     }
-    let confirmedPrimary;
+    let primaryMatchesPlan;
     try {
-      confirmedPrimary = realpathSync.native(path.resolve(primaryWorktree));
+      primaryMatchesPlan = repositoryPathsEqual(
+        plan.primaryWorktree,
+        primaryWorktree,
+        plan.primaryWorktree,
+      );
     } catch {
       blocked('确认的主工作目录不存在，已安全停止且未创建 recovery。');
     }
-    if (confirmedPrimary !== plan.primaryWorktree) {
+    if (!primaryMatchesPlan) {
       blocked('确认的主工作目录与当前计划不匹配，已安全停止且未创建 recovery。');
     }
     let snapshotCommitSha = null;

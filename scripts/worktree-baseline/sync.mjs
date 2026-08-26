@@ -1,21 +1,23 @@
-import { createHash } from 'node:crypto';
 import {
-  existsSync,
-  lstatSync,
   mkdtempSync,
-  closeSync,
-  openSync,
-  readSync,
-  readlinkSync,
-  realpathSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { diagnose } from './diagnose.mjs';
-import { git, parseStatus, runGit, withGitHooksDisabled } from './git.mjs';
+import { git, runGit, withGitHooksDisabled } from './git.mjs';
 import { readRecoveryMetadata, verifyRecoveryMetadata } from './recovery-records.mjs';
+import {
+  captureUntrackedState,
+  findOngoingOperation,
+  normalizePath,
+  readWorkingTreeStatus,
+  repositoryPathKey,
+  repositoryPathsEqual,
+  repositoryRelativePathKey,
+  resolveCommit,
+} from './safety.mjs';
 
 function syncError(kind, message, details) {
   const error = new Error(message);
@@ -33,68 +35,14 @@ function blocked(message, details = {}) {
   });
 }
 
-function resolveCommit(cwd, ref) {
-  const result = runGit(cwd, ['rev-parse', '--verify', `${ref}^{commit}`], {
-    allowFailure: true,
-  });
-  return result.status === 0 ? result.stdout.trim() : null;
-}
-
-function normalizePath(value) {
-  return realpathSync.native(path.resolve(value));
-}
-
-function ongoingOperation(cwd) {
-  const markers = [
-    ['MERGE_HEAD', 'merge'],
-    ['CHERRY_PICK_HEAD', 'cherry-pick'],
-    ['REVERT_HEAD', 'revert'],
-    ['BISECT_LOG', 'bisect'],
-    ['rebase-merge', 'rebase'],
-    ['rebase-apply', 'rebase'],
-    ['sequencer', 'sequencer'],
-  ];
-  for (const [marker, operation] of markers) {
-    const gitPath = git(cwd, ['rev-parse', '--git-path', marker]);
-    const absolutePath = path.isAbsolute(gitPath) ? gitPath : path.resolve(cwd, gitPath);
-    if (existsSync(absolutePath)) return operation;
-  }
-  return null;
-}
-
-function hashFileContents(absolutePath, digest) {
-  const descriptor = openSync(absolutePath, 'r');
-  const buffer = Buffer.allocUnsafe(64 * 1024);
-  try {
-    let bytesRead;
-    do {
-      bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
-      if (bytesRead > 0) digest.update(buffer.subarray(0, bytesRead));
-    } while (bytesRead > 0);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function untrackedFingerprint(cwd) {
-  return Object.fromEntries(allUntrackedPaths(cwd).map((relativePath) => {
-    const absolutePath = path.join(cwd, relativePath);
-    const stat = lstatSync(absolutePath);
-    const digest = createHash('sha256');
-    if (stat.isSymbolicLink()) digest.update(readlinkSync(absolutePath));
-    else if (stat.isFile()) hashFileContents(absolutePath, digest);
-    else digest.update(`${stat.mode}:${stat.size}`);
-    return [relativePath, `${stat.mode}:${digest.digest('hex')}`];
-  }));
-}
-
-function captureWorktrees(worktrees) {
+function captureWorktrees(worktrees, comparisonCwd) {
   return Object.fromEntries(worktrees.filter((item) => !item.bare).map((item) => {
     const worktreePath = normalizePath(item.path);
-    return [worktreePath, {
+    return [repositoryPathKey(comparisonCwd, worktreePath), {
+      path: worktreePath,
       head: resolveCommit(worktreePath, 'HEAD'),
       branch: git(worktreePath, ['branch', '--show-current']) || null,
-      untracked: untrackedFingerprint(worktreePath),
+      untrackedState: captureUntrackedState(worktreePath),
     }];
   }));
 }
@@ -115,24 +63,7 @@ function compareProtectedRefs(before, after) {
     JSON.stringify(after.filter((entry) => !entry.startsWith(allowedRef)));
 }
 
-function allUntrackedPaths(cwd) {
-  const ordinary = runGit(cwd, [
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-    '-z',
-  ]).stdout.split('\0').filter(Boolean);
-  const ignored = runGit(cwd, [
-    'ls-files',
-    '--others',
-    '--ignored',
-    '--exclude-standard',
-    '-z',
-  ]).stdout.split('\0').filter(Boolean);
-  return [...new Set([...ordinary, ...ignored])].sort();
-}
-
-function targetCheckoutCollision(cwd, targetSha) {
+function targetCheckoutCollision(cwd, targetSha, untrackedState) {
   const targetPaths = runGit(cwd, [
     'ls-tree',
     '-r',
@@ -140,17 +71,11 @@ function targetCheckoutCollision(cwd, targetSha) {
     '-z',
     targetSha,
   ]).stdout.split('\0').filter(Boolean);
-  const untrackedPaths = allUntrackedPaths(cwd);
-  const ignoreCase = runGit(cwd, ['config', '--bool', 'core.ignoreCase'], {
-    allowFailure: true,
-  }).stdout.trim() === 'true';
-  const canonicalPath = ignoreCase
-    ? (relativePath) => relativePath.toLowerCase()
-    : (relativePath) => relativePath;
+  const untrackedPaths = untrackedState.entries.map((entry) => entry.path);
   return untrackedPaths.find((untrackedPath) => {
-    const candidate = canonicalPath(untrackedPath);
+    const candidate = repositoryRelativePathKey(cwd, untrackedPath);
     return targetPaths.some((targetPath) => {
-      const target = canonicalPath(targetPath);
+      const target = repositoryRelativePathKey(cwd, targetPath);
       return target === candidate ||
         target.startsWith(`${candidate}/`) ||
         candidate.startsWith(`${target}/`);
@@ -242,8 +167,8 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
     blocked('显式确认的主工作目录不存在，已安全停止。');
   }
   if (
-    confirmedPrimary !== diagnosis.repository.primaryWorktree ||
-    confirmedPrimary !== normalizePath(metadata.primaryWorktree)
+    !repositoryPathsEqual(confirmedPrimary, confirmedPrimary, diagnosis.repository.primaryWorktree) ||
+    !repositoryPathsEqual(confirmedPrimary, confirmedPrimary, metadata.primaryWorktree)
   ) {
     blockedWithRecovery(
       '显式确认的主工作目录与 recovery 或当前仓库不一致，已安全停止。',
@@ -282,7 +207,7 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
   }
   if (
     recoveryOwners.length !== 1 ||
-    normalizePath(recoveryOwners[0].path) !== confirmedPrimary
+    !repositoryPathsEqual(confirmedPrimary, recoveryOwners[0].path, confirmedPrimary)
   ) {
     blockedWithRecovery(
       '无法唯一确认主工作目录中的 recovery 现场，已安全停止。',
@@ -290,7 +215,7 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
     );
   }
   for (const worktree of diagnosis.worktrees.filter((item) => !item.bare)) {
-    const operation = ongoingOperation(worktree.path);
+    const operation = findOngoingOperation(worktree.path);
     if (operation) {
       blockedWithRecovery(
         `${worktree.path} 存在进行中的 ${operation} 操作，已安全停止。`,
@@ -298,24 +223,24 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
       );
     }
   }
-  const primaryStatus = parseStatus(
-    runGit(confirmedPrimary, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).stdout,
-  );
+  const primaryStatus = readWorkingTreeStatus(confirmedPrimary);
   if (primaryStatus.staged.length > 0 || primaryStatus.unstaged.length > 0) {
     blockedWithRecovery(
       '主工作目录在 recovery 后出现 tracked 变化，已安全停止。',
       metadata,
     );
   }
-  if (JSON.stringify([...primaryStatus.untracked].sort()) !== JSON.stringify(metadata.untrackedBefore)) {
+  const currentUntrackedState = captureUntrackedState(confirmedPrimary);
+  if (JSON.stringify(currentUntrackedState) !== JSON.stringify(metadata.untrackedStateBefore)) {
     blockedWithRecovery(
-      '主工作目录的 untracked 路径在 recovery 后发生变化，已安全停止。',
+      '主工作目录的 untracked 与 ignored 完整状态在 recovery 后发生变化，已安全停止。',
       metadata,
     );
   }
   const conflictingUntrackedPath = targetCheckoutCollision(
     confirmedPrimary,
     metadata.targetRemoteSha,
+    currentUntrackedState,
   );
   if (conflictingUntrackedPath) {
     blockedWithRecovery(
@@ -335,7 +260,17 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
     );
   }
 
-  const worktreesBefore = captureWorktrees(diagnosis.worktrees);
+  const worktreesBefore = captureWorktrees(diagnosis.worktrees, confirmedPrimary);
+  const primaryKey = repositoryPathKey(confirmedPrimary, confirmedPrimary);
+  if (
+    JSON.stringify(worktreesBefore[primaryKey].untrackedState) !==
+    JSON.stringify(metadata.untrackedStateBefore)
+  ) {
+    blockedWithRecovery(
+      '主工作目录的 untracked 与 ignored 完整状态在最终复核时发生变化，已安全停止。',
+      metadata,
+    );
+  }
   const protectedRefsBefore = captureProtectedRefs(confirmedPrimary);
   let stage = 'main-ref-update';
   try {
@@ -377,30 +312,28 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
     }
     verifyRecoveryMetadata(diagnosis.repository.commonDir, metadata);
     const finalWorktreeRecords = diagnose(cwd, { offline: true }).worktrees;
-    const worktreesAfter = captureWorktrees(finalWorktreeRecords);
+    const worktreesAfter = captureWorktrees(finalWorktreeRecords, confirmedPrimary);
     if (JSON.stringify(Object.keys(worktreesAfter).sort()) !==
       JSON.stringify(Object.keys(worktreesBefore).sort())) {
       throw new Error('同步期间 worktree 集合发生变化。');
     }
-    for (const [worktreePath, before] of Object.entries(worktreesBefore)) {
-      const after = worktreesAfter[worktreePath];
-      if (worktreePath === confirmedPrimary) {
+    for (const [worktreeKey, before] of Object.entries(worktreesBefore)) {
+      const after = worktreesAfter[worktreeKey];
+      if (worktreeKey === primaryKey) {
         if (after.head !== metadata.targetRemoteSha || after.branch !== 'main') {
           throw new Error('主工作目录未正确切回 main。');
         }
       } else if (after.head !== before.head || after.branch !== before.branch) {
-        throw new Error(`同步意外改变了 worktree ${worktreePath} 的上下文。`);
+        throw new Error(`同步意外改变了 worktree ${before.path} 的上下文。`);
       }
-      if (JSON.stringify(after.untracked) !== JSON.stringify(before.untracked)) {
-        throw new Error(`同步意外改变了 worktree ${worktreePath} 的 untracked 内容。`);
+      if (JSON.stringify(after.untrackedState) !== JSON.stringify(before.untrackedState)) {
+        throw new Error(`同步意外改变了 worktree ${before.path} 的 untracked 或 ignored 内容。`);
       }
     }
     if (!compareProtectedRefs(protectedRefsBefore, captureProtectedRefs(confirmedPrimary))) {
       throw new Error('同步意外改变了 main 以外的本地或远端跟踪引用。');
     }
-    const finalStatus = parseStatus(
-      runGit(confirmedPrimary, ['status', '--porcelain=v2', '-z', '--untracked-files=all']).stdout,
-    );
+    const finalStatus = readWorkingTreeStatus(confirmedPrimary);
     if (finalStatus.staged.length > 0 || finalStatus.unstaged.length > 0) {
       throw new Error('同步后主工作目录出现意外的 tracked 变化。');
     }
@@ -426,7 +359,10 @@ function performSync(cwd, { confirmation, primaryWorktree }) {
         upstream,
         recoveryBranch: metadata.recoveryBranch,
         recoveryHeadSha: metadata.recoveryHeadSha,
-        verifiedUntrackedPaths: Object.keys(worktreesBefore[confirmedPrimary].untracked),
+        verifiedUntrackedPaths: [
+          ...worktreesBefore[primaryKey].untrackedState.untrackedPaths,
+          ...worktreesBefore[primaryKey].untrackedState.ignoredPaths,
+        ].sort(),
       },
       conclusions: [
         `本地 main 已精确同步至 origin/main ${mainSha}，ahead/behind 为 0/0。`,

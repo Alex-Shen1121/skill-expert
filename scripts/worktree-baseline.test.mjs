@@ -44,14 +44,18 @@ function createFixture(t, { defaultBranch = 'main' } = {}) {
   const seed = path.join(root, '远端种子');
   const origin = path.join(root, 'origin.git');
   const primary = path.join(root, '主工作目录');
-  const linked = path.join(root, 'linked worktree\n第二行');
+  const linked = path.join(
+    root,
+    process.platform === 'win32' ? 'linked worktree 第二行' : 'linked worktree\n第二行',
+  );
 
   mkdirSync(seed);
   git(seed, 'init', '-b', defaultBranch);
   git(seed, 'config', 'user.name', '基线测试');
   git(seed, 'config', 'user.email', 'baseline@example.com');
   write(seed, 'tracked.txt', '初始内容\n');
-  git(seed, 'add', 'tracked.txt');
+  write(seed, '.gitignore', '.superpowers/\n.worktrees/\n');
+  git(seed, 'add', 'tracked.txt', '.gitignore');
   git(seed, 'commit', '-m', '建立远端基线');
   git(root, 'init', '--bare', `--initial-branch=${defaultBranch}`, origin);
   git(seed, 'remote', 'add', 'origin', origin);
@@ -105,20 +109,30 @@ test('从 linked worktree 以 JSON 报告真实远端 main 和干净基线', (t)
   assert.equal(report.current.branch, 'codex/诊断测试');
   assert.equal(report.current.detached, false);
   assert.equal(report.worktrees.length, 2);
-  assert.deepEqual(report.workingTree, { staged: [], unstaged: [], untracked: [] });
+  assert.deepEqual(report.workingTree, {
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    ignored: [],
+  });
   assert.equal(report.developmentIntegration.relation, 'in-sync');
   assert.equal(report.developmentIntegration.ahead, 0);
   assert.equal(report.developmentIntegration.behind, 0);
 });
 
-test('准确报告 detached 与含换行路径的三类工作区状态', (t) => {
+test('准确报告 detached 与含 ignored 的三类工作区状态', (t) => {
   const { linked } = createFixture(t);
   git(linked, 'switch', '--detach');
-  write(linked, '已暂存\n文件.txt', '暂存内容\n');
-  git(linked, 'add', '已暂存\n文件.txt');
+  const stagedPath = process.platform === 'win32' ? '已暂存 文件.txt' : '已暂存\n文件.txt';
+  write(linked, stagedPath, '暂存内容\n');
+  git(linked, 'add', stagedPath);
   write(linked, 'tracked.txt', '未暂存修改\n');
+  write(linked, '普通未跟踪 文件.txt', '只报告\n');
   write(linked, '.superpowers/未跟踪 文件.txt', '不得修改\n');
-  write(linked, '.worktrees/嵌套\n目录.txt', '同样不得修改\n');
+  const ignoredNestedPath = process.platform === 'win32'
+    ? '.worktrees/嵌套 目录.txt'
+    : '.worktrees/嵌套\n目录.txt';
+  write(linked, ignoredNestedPath, '同样不得修改\n');
 
   const result = runBaseline(linked, 'diagnose', '--json');
 
@@ -127,12 +141,13 @@ test('准确报告 detached 与含换行路径的三类工作区状态', (t) => 
   assert.equal(report.current.branch, null);
   assert.equal(report.current.detached, true);
   assert.equal(report.worktrees.find((item) => item.path === linked).detached, true);
-  assert.deepEqual(report.workingTree.staged, ['已暂存\n文件.txt']);
+  assert.deepEqual(report.workingTree.staged, [stagedPath]);
   assert.deepEqual(report.workingTree.unstaged, ['tracked.txt']);
-  assert.deepEqual(report.workingTree.untracked, [
-    '.superpowers/未跟踪 文件.txt',
-    '.worktrees/嵌套\n目录.txt',
-  ]);
+  assert.deepEqual(report.workingTree.untracked, ['普通未跟踪 文件.txt']);
+  assert.deepEqual(report.workingTree.ignored, [
+    '.superpowers',
+    '.worktrees',
+  ].sort());
   assert.deepEqual(report.statuses, [
     'remote-baseline-confirmed',
     'main-in-sync',
@@ -140,7 +155,21 @@ test('准确报告 detached 与含换行路径的三类工作区状态', (t) => 
     'working-tree-staged',
     'working-tree-unstaged',
     'working-tree-untracked',
+    'working-tree-ignored',
   ]);
+
+  const humanResult = runBaseline(linked, 'diagnose');
+  assert.equal(humanResult.status, 0, humanResult.stderr);
+  assert.match(humanResult.stdout, /main 提交：[0-9a-f]{40}/);
+  assert.match(humanResult.stdout, /origin\/main 提交：[0-9a-f]{40}/);
+  assert.match(humanResult.stdout, /merge base：[0-9a-f]{40}/);
+  assert.match(humanResult.stdout, /全部 worktree：/);
+  assert.match(humanResult.stdout, new RegExp(linked.replaceAll('\\', '\\\\').replaceAll('\n', '\\\\n')));
+  assert.match(humanResult.stdout, /已暂存路径：/);
+  assert.match(humanResult.stdout, /未暂存路径：/);
+  assert.match(humanResult.stdout, /未跟踪路径：/);
+  assert.match(humanResult.stdout, /ignored 路径：/);
+  assert.match(humanResult.stdout, /\.worktrees/);
 });
 
 test('把本地和远端各自前进识别为普通双向分叉', (t) => {
@@ -197,7 +226,12 @@ test('相同最终树的不同历史只提示可能存在 squash 纳入', (t) =>
     evidence: 'matching-local-change-set',
     matchedRemoteSha: squashSha,
   });
-  assert.deepEqual(report.workingTree, { staged: [], unstaged: [], untracked: [] });
+  assert.deepEqual(report.workingTree, {
+    staged: [],
+    unstaged: [],
+    untracked: [],
+    ignored: [],
+  });
   assert.ok(report.conclusions.some((message) => message.includes('分支差异不是未提交修改')));
 
   const humanResult = runBaseline(linked, 'diagnose');
@@ -434,7 +468,10 @@ test('远端默认分支和本地缓存均缺失时拒绝猜测', (t) => {
 
 test('为所有旧 detached worktree 报告远端关系和只读用途', (t) => {
   const { root, seed, primary, linked } = createFixture(t);
-  const oldReviewPath = path.join(root, '旧 detached\n审查');
+  const oldReviewPath = path.join(
+    root,
+    process.platform === 'win32' ? '旧 detached 审查' : '旧 detached\n审查',
+  );
   git(primary, 'worktree', 'add', '--detach', oldReviewPath, 'origin/main');
   const normalizedOldReviewPath = realpathSync.native(oldReviewPath);
   commitFile(seed, '远端后续.txt', '新内容\n', '远端继续前进');

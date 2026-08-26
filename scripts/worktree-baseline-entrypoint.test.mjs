@@ -5,12 +5,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const baselineCli = path.join(repositoryRoot, 'scripts/worktree-baseline.mjs');
 
-test('稳定 npm 入口提供中文帮助并区分只读、校验、计划与显式变更', () => {
+test('稳定公开入口提供中文帮助并区分只读、校验、计划与显式变更', () => {
   const result = spawnSync(
-    npmCommand,
-    ['run', '--silent', 'worktree:baseline', '--', 'help'],
+    process.execPath,
+    [baselineCli, 'help'],
     { cwd: repositoryRoot, encoding: 'utf8', shell: false },
   );
 
