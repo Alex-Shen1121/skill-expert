@@ -1,15 +1,22 @@
 import { spawnSync } from 'node:child_process';
 
-export function runGit(cwd, args, { allowFailure = false, input = undefined } = {}) {
+export function runGit(
+  cwd,
+  args,
+  { allowFailure = false, input = undefined, encoding = 'utf8' } = {},
+) {
   const result = spawnSync('git', args, {
     cwd,
-    encoding: 'utf8',
+    encoding,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     input,
     shell: false,
   });
   if (!allowFailure && result.status !== 0) {
-    throw new Error(result.stderr.trim() || `Git 命令执行失败：git ${args.join(' ')}`);
+    const stderr = Buffer.isBuffer(result.stderr)
+      ? result.stderr.toString('utf8').trim()
+      : result.stderr.trim();
+    throw new Error(stderr || `Git 命令执行失败：git ${args.join(' ')}`);
   }
   return result;
 }

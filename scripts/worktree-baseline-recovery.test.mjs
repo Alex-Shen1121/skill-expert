@@ -96,6 +96,15 @@ function runBaseline(repository, ...args) {
   });
 }
 
+function runBaselineWithEnvironment(repository, environment, ...args) {
+  return spawnSync(process.execPath, [baselineCli, ...args], {
+    cwd: repository,
+    encoding: 'utf8',
+    env: { ...process.env, ...environment, GIT_TERMINAL_PROMPT: '0' },
+    shell: false,
+  });
+}
+
 test('默认 recovery 只生成绑定仓库事实的计划', (t) => {
   const { origin, primary, linked } = createFixture(t);
   const mainBefore = git(primary, 'rev-parse', 'refs/heads/main');
@@ -297,24 +306,24 @@ test('快照提交保存 tracked 最终内容并保持所有 untracked 字节不
   assert.equal(git(origin, 'for-each-ref', '--format=%(refname):%(objectname)'), remoteBefore);
 });
 
-test('快照提交失败后回滚临时分支并可重新计划安全重试', (t) => {
-  const { root, primary, linked } = createFixture(t);
+test('快照提交失败后保留 recovery 现场且不移动 main', (t) => {
+  const { primary, linked } = createFixture(t);
   write(primary, 'tracked.txt', '需要恢复的最终内容\n');
   write(primary, '未跟踪.bin', Buffer.from([1, 0, 2, 255]));
   const untrackedHash = fileHash(primary, '未跟踪.bin');
-  const hooks = path.join(root, '拒绝提交 hooks');
-  const hook = path.join(hooks, 'pre-commit');
-  mkdirSync(hooks);
-  writeFileSync(hook, '#!/bin/sh\necho 快照提交被测试钩子拒绝 >&2\nexit 1\n');
-  chmodSync(hook, 0o755);
-  git(primary, 'config', 'core.hooksPath', hooks);
   const planResult = runBaseline(linked, 'recovery', '--json');
   assert.equal(planResult.status, 0, planResult.stderr);
   const plan = JSON.parse(planResult.stdout).plan;
   const mainBefore = git(primary, 'rev-parse', 'refs/heads/main');
 
-  const failed = runBaseline(
+  const failed = runBaselineWithEnvironment(
     linked,
+    {
+      GIT_AUTHOR_NAME: '',
+      GIT_AUTHOR_EMAIL: '',
+      GIT_COMMITTER_NAME: '',
+      GIT_COMMITTER_EMAIL: '',
+    },
     'recovery',
     '--apply',
     '--confirm',
@@ -328,42 +337,17 @@ test('快照提交失败后回滚临时分支并可重新计划安全重试', (t
   const failure = JSON.parse(failed.stdout);
   assert.deepEqual(failure.statuses, ['recovery-stopped']);
   assert.equal(failure.error.kind, 'recovery-stopped');
-  assert.match(failure.error.message, /快照提交被测试钩子拒绝/);
+  assert.match(failure.error.message, /empty ident|身份|姓名|email/i);
   assert.equal(failure.error.details.mainRefSha, mainBefore);
-  assert.equal(failure.error.details.primaryBranch, 'main');
-  assert.equal(failure.error.details.recoveryPreserved, false);
+  assert.equal(failure.error.details.primaryBranch, plan.recoveryBranch);
+  assert.equal(failure.error.details.recoveryRefSha, mainBefore);
+  assert.equal(failure.error.details.recoveryPreserved, true);
   assert.equal(failure.error.details.retryWithSameConfirmation, false);
-  assert.match(failure.error.details.guidance, /重新生成并确认恢复计划/);
-  assert.equal(git(primary, 'branch', '--show-current'), 'main');
+  assert.match(failure.error.details.guidance, /恢复分支.*已保留/);
+  assert.equal(git(primary, 'branch', '--show-current'), plan.recoveryBranch);
   assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), mainBefore);
-  assert.notEqual(
-    runGit(primary, ['show-ref', '--verify', '--quiet', `refs/heads/${plan.recoveryBranch}`], {
-      allowFailure: true,
-    }).status,
-    0,
-  );
+  assert.equal(git(primary, 'rev-parse', `refs/heads/${plan.recoveryBranch}`), mainBefore);
   assert.equal(readFileSync(path.join(primary, 'tracked.txt'), 'utf8'), '需要恢复的最终内容\n');
-  assert.equal(fileHash(primary, '未跟踪.bin'), untrackedHash);
-
-  rmSync(hook);
-  const retryPlanResult = runBaseline(linked, 'recovery', '--json');
-  assert.equal(retryPlanResult.status, 0, retryPlanResult.stderr);
-  const retryPlan = JSON.parse(retryPlanResult.stdout).plan;
-  assert.notEqual(retryPlan.id, plan.id);
-  const retried = runBaseline(
-    linked,
-    'recovery',
-    '--apply',
-    '--confirm',
-    retryPlan.id,
-    '--primary-worktree',
-    primary,
-    '--json',
-  );
-  assert.equal(retried.status, 0, retried.stderr || retried.stdout);
-  const result = JSON.parse(retried.stdout);
-  assert.match(result.result.snapshotCommitSha, /^[0-9a-f]{40}$/);
-  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), mainBefore);
   assert.equal(fileHash(primary, '未跟踪.bin'), untrackedHash);
 });
 
@@ -473,6 +457,74 @@ test('tracked 与 untracked 路径集合在计划后变化时旧确认值失效'
   );
 });
 
+test('同一 tracked 路径的最终内容变化时旧确认值失效', (t) => {
+  const { primary, linked } = createFixture(t);
+  write(primary, 'tracked.txt', '第一次计划内容\n');
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr);
+  const plan = JSON.parse(planResult.stdout).plan;
+
+  write(primary, 'tracked.txt', '确认后被替换的内容\n');
+  const applied = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(applied.status, 1, applied.stderr || applied.stdout);
+  const report = JSON.parse(applied.stdout);
+  assert.deepEqual(report.statuses, ['recovery-blocked']);
+  assert.match(report.error.message, /确认值.*不匹配/);
+  assert.equal(git(primary, 'branch', '--show-current'), 'main');
+});
+
+test('提交钩子无法把 untracked 文件加入恢复快照', (t) => {
+  const { root, primary, linked } = createFixture(t);
+  write(primary, 'tracked.txt', '需要快照的 tracked 内容\n');
+  write(primary, '钩子目标.bin', Buffer.from([9, 0, 8, 255]));
+  const untrackedHash = fileHash(primary, '钩子目标.bin');
+  const hooks = path.join(root, '尝试污染快照 hooks');
+  const hook = path.join(hooks, 'pre-commit');
+  mkdirSync(hooks);
+  writeFileSync(hook, '#!/bin/sh\ngit add -- 钩子目标.bin\n');
+  chmodSync(hook, 0o755);
+  git(primary, 'config', 'core.hooksPath', hooks);
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr);
+  const plan = JSON.parse(planResult.stdout).plan;
+
+  const applied = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+  const report = JSON.parse(applied.stdout);
+  const snapshotSha = report.result.snapshotCommitSha;
+  assert.match(snapshotSha, /^[0-9a-f]{40}$/);
+  assert.notEqual(
+    runGit(primary, ['cat-file', '-e', `${snapshotSha}:钩子目标.bin`], { allowFailure: true }).status,
+    0,
+  );
+  assert.equal(fileHash(primary, '钩子目标.bin'), untrackedHash);
+  assert.ok(
+    runGit(primary, ['ls-files', '--others', '--exclude-standard', '-z']).stdout
+      .split('\0')
+      .includes('钩子目标.bin'),
+  );
+});
+
 test('人类计划明确展示确认值、目标 SHA 和三类文件路径', (t) => {
   const { primary, linked } = createFixture(t);
   write(primary, 'tracked.txt', '已暂存版本\n');
@@ -509,7 +561,7 @@ test('recovery 非法参数返回本命令的稳定中文用法', (t) => {
   );
 });
 
-test('已有同计划元数据时拒绝覆盖并回滚未提交的临时恢复分支', (t) => {
+test('已有同计划元数据时拒绝覆盖并保留临时恢复分支', (t) => {
   const { primary, linked } = createFixture(t);
   const planResult = runBaseline(linked, 'recovery', '--json');
   assert.equal(planResult.status, 0, planResult.stderr);
@@ -534,15 +586,11 @@ test('已有同计划元数据时拒绝覆盖并回滚未提交的临时恢复�
   const report = JSON.parse(result.stdout);
   assert.deepEqual(report.statuses, ['recovery-stopped']);
   assert.equal(report.error.details.stage, 'metadata-write');
-  assert.equal(report.error.details.primaryBranch, 'main');
-  assert.equal(report.error.details.recoveryPreserved, false);
-  assert.equal(report.error.details.retryWithSameConfirmation, true);
+  assert.equal(report.error.details.primaryBranch, plan.recoveryBranch);
+  assert.equal(report.error.details.recoveryPreserved, true);
+  assert.equal(report.error.details.retryWithSameConfirmation, false);
   assert.equal(readFileSync(metadataPath, 'utf8'), '不得覆盖的旧记录\n');
-  assert.equal(git(primary, 'branch', '--show-current'), 'main');
-  assert.notEqual(
-    runGit(primary, ['show-ref', '--verify', '--quiet', `refs/heads/${plan.recoveryBranch}`], {
-      allowFailure: true,
-    }).status,
-    0,
-  );
+  assert.equal(git(primary, 'branch', '--show-current'), plan.recoveryBranch);
+  assert.equal(git(primary, 'rev-parse', `refs/heads/${plan.recoveryBranch}`), plan.oldMainSha);
+  assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), plan.oldMainSha);
 });

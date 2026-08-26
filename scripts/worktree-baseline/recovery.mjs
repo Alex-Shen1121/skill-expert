@@ -27,27 +27,22 @@ function resolveCommit(cwd, ref) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function trackedContentDigest(cwd, { cached = false } = {}) {
+  return createHash('sha256').update(runGit(cwd, [
+    'diff',
+    ...(cached ? ['--cached'] : []),
+    '--binary',
+    '--full-index',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--no-renames',
+    'HEAD',
+    '--',
+  ], { encoding: null }).stdout).digest('hex');
+}
+
 function stoppedAfterMutation(error, plan, { branchCreated, snapshotCommitSha, stage }) {
-  let retryWithSameConfirmation = false;
-  let recoveryPreserved = branchCreated;
-  if (branchCreated && snapshotCommitSha === null) {
-    const switched = runGit(plan.primaryWorktree, ['switch', 'main'], { allowFailure: true });
-    if (switched.status === 0) {
-      const removed = runGit(
-        plan.primaryWorktree,
-        ['branch', '-d', plan.recoveryBranch],
-        { allowFailure: true },
-      );
-      recoveryPreserved = removed.status !== 0;
-      if (removed.status === 0) {
-        try {
-          retryWithSameConfirmation = createPlan(plan.primaryWorktree).id === plan.id;
-        } catch {
-          retryWithSameConfirmation = false;
-        }
-      }
-    }
-  }
+  const recoveryPreserved = branchCreated;
   const primaryBranchResult = runGit(
     plan.primaryWorktree,
     ['branch', '--show-current'],
@@ -68,12 +63,12 @@ function stoppedAfterMutation(error, plan, { branchCreated, snapshotCommitSha, s
       `refs/heads/${plan.recoveryBranch}`,
     ),
     recoveryPreserved,
-    retryWithSameConfirmation,
-    guidance: retryWithSameConfirmation
-      ? '排除失败原因后，可使用同一计划确认值重试。'
-      : recoveryPreserved
-        ? `恢复分支 ${plan.recoveryBranch} 已保留；本地 main 未由本阶段移动。`
-        : '文件内容已保留；请重新生成并确认恢复计划后重试。',
+    retryWithSameConfirmation: false,
+    guidance: recoveryPreserved
+      ? snapshotCommitSha === null
+        ? `恢复分支 ${plan.recoveryBranch} 已保留；核验现场后，可手动切回 main、删除这个未完成的 recovery，再重新生成计划重试。`
+        : `恢复分支 ${plan.recoveryBranch} 及快照 ${snapshotCommitSha} 已保留；本地 main 未由本阶段移动。`
+      : '文件内容已保留；请重新生成并确认恢复计划后重试。',
   };
   throw stopped;
 }
@@ -110,6 +105,7 @@ function planIdentity(plan) {
       remoteRef: plan.remoteRef,
       recoveryBranch: plan.recoveryBranch,
       trackedChanges: plan.trackedChanges,
+      trackedContentDigest: plan.trackedContentDigest,
       untrackedPaths: plan.untrackedPaths,
       snapshotLimitation: plan.snapshotLimitation,
     }))
@@ -135,6 +131,7 @@ function writeMetadata(plan, snapshotCommitSha, recoveryHeadSha) {
     snapshotCommitSha,
     recoveryHeadSha,
     trackedPaths: plan.trackedChanges.paths,
+    trackedContentDigest: plan.trackedContentDigest,
     stagedBefore: plan.trackedChanges.staged,
     unstagedBefore: plan.trackedChanges.unstaged,
     untrackedBefore: plan.untrackedPaths,
@@ -180,6 +177,7 @@ function createPlan(cwd) {
     'HEAD',
     '--',
   ]).stdout.split('\0').filter(Boolean).sort();
+  const contentDigest = trackedContentDigest(primary);
   const plan = {
     commonDir: diagnosis.repository.commonDir,
     primaryWorktree: primary,
@@ -192,6 +190,7 @@ function createPlan(cwd) {
       unstaged: [...status.unstaged].sort(),
       paths: trackedPaths,
     },
+    trackedContentDigest: contentDigest,
     untrackedPaths: [...status.untracked].sort(),
     snapshotLimitation: SNAPSHOT_LIMITATION,
   };
@@ -254,13 +253,40 @@ export function recovery(cwd, {
         if (JSON.stringify(stagedPaths) !== JSON.stringify(plan.trackedChanges.paths)) {
           blocked('快照暂存路径与计划不一致，已安全停止；本地 main 未移动。');
         }
+        if (trackedContentDigest(plan.primaryWorktree, { cached: true }) !== plan.trackedContentDigest) {
+          blocked('tracked 最终内容与已确认计划不一致，已安全停止；本地 main 未移动。');
+        }
         stage = 'snapshot-commit';
+        const snapshotTreeSha = git(plan.primaryWorktree, ['write-tree']);
+        const candidateSnapshotSha = runGit(plan.primaryWorktree, [
+          'commit-tree',
+          snapshotTreeSha,
+          '-p',
+          plan.oldMainSha,
+          '-F',
+          '-',
+        ], { input: '恢复：保存本地 main 同步前的 tracked 最终内容\n' }).stdout.trim();
+        const snapshotPaths = runGit(plan.primaryWorktree, [
+          'diff-tree',
+          '--no-commit-id',
+          '--name-only',
+          '--no-renames',
+          '-r',
+          '-z',
+          plan.oldMainSha,
+          candidateSnapshotSha,
+        ]).stdout.split('\0').filter(Boolean).sort();
+        if (JSON.stringify(snapshotPaths) !== JSON.stringify(plan.trackedChanges.paths)) {
+          blocked('快照提交路径与计划不一致，已安全停止；本地 main 未移动。');
+        }
+        stage = 'recovery-ref-update';
         git(plan.primaryWorktree, [
-          'commit',
-          '-m',
-          '恢复：保存本地 main 同步前的 tracked 最终内容',
+          'update-ref',
+          `refs/heads/${plan.recoveryBranch}`,
+          candidateSnapshotSha,
+          plan.oldMainSha,
         ]);
-        snapshotCommitSha = git(plan.primaryWorktree, ['rev-parse', 'HEAD^{commit}']);
+        snapshotCommitSha = candidateSnapshotSha;
       }
       const recoveryHeadSha = git(plan.primaryWorktree, ['rev-parse', 'HEAD^{commit}']);
       if (git(plan.primaryWorktree, ['rev-parse', 'refs/heads/main^{commit}']) !== plan.oldMainSha) {
