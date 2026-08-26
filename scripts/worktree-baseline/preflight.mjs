@@ -135,9 +135,9 @@ export function preflight(cwd) {
   if (!diagnosis.current.branch.startsWith('codex/')) {
     return block(diagnosis, 'implementation-branch-disallowed', '实现阶段必须使用 codex/* 命名分支。');
   }
-  const dirtyStatuses = Object.entries(diagnosis.workingTree)
-    .filter(([, paths]) => paths.length > 0)
-    .map(([category]) => `working-tree-${category}`);
+  const dirtyStatuses = ['staged', 'unstaged', 'untracked']
+    .filter((category) => diagnosis.workingTree[category].length > 0)
+    .map((category) => `working-tree-${category}`);
   if (dirtyStatuses.length > 0) {
     return block(
       diagnosis,

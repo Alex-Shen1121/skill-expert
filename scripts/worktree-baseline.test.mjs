@@ -172,6 +172,25 @@ test('准确报告 detached 与含 ignored 的三类工作区状态', (t) => {
   assert.match(humanResult.stdout, /\.worktrees/);
 });
 
+test('ignored-only 不会把提交历史分叉误判为未提交修改', (t) => {
+  const { seed, linked } = createFixture(t);
+  commitFile(linked, '本地提交.txt', '本地内容\n', '本地分支前进');
+  commitFile(seed, '远端提交.txt', '远端内容\n', '远端分支前进');
+  git(seed, 'push', 'origin', 'main');
+  write(linked, '.superpowers/产物.js', '只报告、不修改\n');
+
+  const result = runBaseline(linked, 'diagnose', '--json');
+
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.current.relationshipToRemote.relation, 'diverged');
+  assert.deepEqual(report.workingTree.staged, []);
+  assert.deepEqual(report.workingTree.unstaged, []);
+  assert.deepEqual(report.workingTree.untracked, []);
+  assert.deepEqual(report.workingTree.ignored, ['.superpowers']);
+  assert.ok(report.conclusions.some((message) => message.includes('分支差异不是未提交修改')));
+});
+
 test('把本地和远端各自前进识别为普通双向分叉', (t) => {
   const { seed, primary, linked } = createFixture(t);
   commitFile(primary, '仅本地.txt', '本地内容\n', '本地提交');

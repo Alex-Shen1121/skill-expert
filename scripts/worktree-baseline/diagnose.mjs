@@ -313,8 +313,7 @@ export function diagnose(cwd, { offline = false } = {}) {
     currentRelationship.relation === 'diverged' &&
     workingTree.staged.length === 0 &&
     workingTree.unstaged.length === 0 &&
-    workingTree.untracked.length === 0 &&
-    workingTree.ignored.length === 0
+    workingTree.untracked.length === 0
   ) {
     conclusions.push('当前 HEAD 与远端的分支差异不是未提交修改，不应据此重复提交审查。');
   }

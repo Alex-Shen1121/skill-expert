@@ -7,6 +7,7 @@ import {
 import path from 'node:path';
 
 import { git, runGit } from './git.mjs';
+import { calculateRecoveryPlanId } from './recovery-plan.mjs';
 import {
   normalizePath,
   repositoryPathsEqual,
@@ -84,26 +85,6 @@ function validUntrackedState(value) {
     .digest('hex');
 }
 
-function recoveryPlanIdentity(metadata) {
-  return createHash('sha256').update(JSON.stringify({
-    commonDir: metadata.commonDir,
-    primaryWorktree: metadata.primaryWorktree,
-    oldMainSha: metadata.oldMainSha,
-    targetRemoteSha: metadata.targetRemoteSha,
-    remoteRef: metadata.remoteRef,
-    recoveryBranch: metadata.recoveryBranch,
-    trackedChanges: {
-      staged: metadata.stagedBefore,
-      unstaged: metadata.unstagedBefore,
-      paths: metadata.trackedPaths,
-    },
-    trackedContentDigest: metadata.trackedContentDigest,
-    untrackedPaths: metadata.untrackedBefore,
-    untrackedState: metadata.untrackedStateBefore,
-    snapshotLimitation: metadata.snapshotLimitation,
-  })).digest('hex');
-}
-
 function diffDigest(cwd, leftSha, rightSha) {
   return createHash('sha256').update(runGit(cwd, [
     'diff',
@@ -175,7 +156,7 @@ export function readRecoveryMetadata(commonDir, planId) {
   if (!validShape) {
     throw new Error('recovery 元数据缺少必要字段或字段格式无效，已安全停止。');
   }
-  if (recoveryPlanIdentity(metadata) !== metadata.planId) {
+  if (calculateRecoveryPlanId(metadata) !== metadata.planId) {
     throw new Error('recovery 计划确认值重算后与元数据不匹配，已安全停止。');
   }
   return { metadata, metadataPath };
