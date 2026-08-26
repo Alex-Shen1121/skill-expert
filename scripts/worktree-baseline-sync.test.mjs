@@ -76,6 +76,7 @@ function createFixture(t) {
 
   mkdirSync(seed);
   git(seed, 'init', '-b', 'main');
+  git(seed, 'config', 'core.autocrlf', 'false');
   git(seed, 'config', 'user.name', '同步测试');
   git(seed, 'config', 'user.email', 'sync@example.com');
   write(seed, 'tracked.txt', '初始内容\n');
@@ -86,7 +87,7 @@ function createFixture(t) {
   git(seed, 'remote', 'add', 'origin', origin);
   git(seed, 'push', '-u', 'origin', 'main');
 
-  git(root, 'clone', origin, primary);
+  git(root, 'clone', '--config', 'core.autocrlf=false', origin, primary);
   git(primary, 'config', 'user.name', '同步测试');
   git(primary, 'config', 'user.email', 'sync@example.com');
   git(primary, 'branch', 'release', 'origin/main');
@@ -319,12 +320,17 @@ test('即使重算元数据摘要也不能改写 recovery 计划字段', (t) => 
 
 test('带 tracked 快照的 recovery 同步后仍能完整取回本地最终内容', (t) => {
   const { primary, linked, targetSha } = createFixture(t);
+  assert.equal(git(primary, 'config', '--local', '--get', 'core.autocrlf'), 'false');
   write(primary, 'tracked.txt', '已暂存草稿\n');
   git(primary, 'add', '--', 'tracked.txt');
   write(primary, 'tracked.txt', '需要恢复的最终内容\n');
   const recovery = createRecovery(linked, primary);
   const snapshotSha = recovery.result.snapshotCommitSha;
   assert.match(snapshotSha, /^[0-9a-f]{40}$/);
+  assert.equal(
+    runGit(primary, ['show', `${targetSha}:tracked.txt`]).stdout,
+    '相同最终内容\n',
+  );
 
   const result = runBaseline(
     linked,
@@ -340,7 +346,10 @@ test('带 tracked 快照的 recovery 同步后仍能完整取回本地最终内�
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(git(primary, 'rev-parse', 'HEAD'), targetSha);
   assert.equal(readFileSync(path.join(primary, 'tracked.txt'), 'utf8'), '相同最终内容\n');
-  assert.equal(git(primary, 'show', `${snapshotSha}:tracked.txt`), '需要恢复的最终内容');
+  assert.equal(
+    runGit(primary, ['show', `${snapshotSha}:tracked.txt`]).stdout,
+    '需要恢复的最终内容\n',
+  );
   assert.equal(git(primary, 'rev-parse', `${snapshotSha}^`), recovery.plan.oldMainSha);
   assert.equal(
     git(primary, 'rev-parse', `refs/heads/${recovery.result.recoveryBranch}`),
