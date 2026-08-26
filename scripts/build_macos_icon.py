@@ -1,29 +1,28 @@
-"""Compose a macOS-compliant app icon from a bare artwork source.
+"""从原始插画生成符合 macOS 规范的应用图标。
 
-macOS Big Sur+ no longer auto-masks Dock icons; apps must ship the squircle
-themselves. This script wraps the source artwork in Apple's standard
-continuous-corner squircle (G2 superellipse, n=5) on a 1024x1024 canvas with
-an 824x824 icon body, matching Apple's macOS app icon production template.
+macOS Big Sur 及更高版本不再自动为 Dock 图标添加遮罩，因此应用必须自行提供圆角矩形。
+本脚本在 1024x1024 画布上使用 824x824 的 Apple 标准连续圆角矩形
+（G2 超椭圆，n=5）包裹插画，以匹配 macOS 应用图标制作模板。
 
-Usage:
+用法：
     python scripts/build_macos_icon.py
-    # then regenerate all bundle assets:
+    python scripts/build_macos_icon.py --source artwork.png --output icon.png
+    # 然后重新生成全部 bundle 资产：
     npx tauri icon src-tauri/icons/icon.png
 
-Inputs:
-    src-tauri/icons/icon-source.png   bare artwork on a transparent background
-                                      (full bleed, square aspect preferred)
+输入：
+    src-tauri/icons/icon-source.png   满版方形插画；本脚本负责生成透明外角
 
-Output:
-    src-tauri/icons/icon.png          1024x1024 squircle-wrapped icon
+输出：
+    src-tauri/icons/icon.png          1024x1024 连续圆角矩形图标
 
-Tunables:
-    INNER_FRACTION  how much of the squircle the artwork fills (0..1)
-    SQUIRCLE_N      superellipse exponent; ~5 matches Apple's continuous corner
-    SSAA            mask supersampling factor for anti-aliased edges
+可调参数：
+    SQUIRCLE_N      超椭圆指数；约 5 时接近 Apple 连续圆角
+    SSAA            遮罩的超采样抗锯齿倍数
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -37,12 +36,11 @@ OUTPUT = ICON_DIR / "icon.png"
 CANVAS = 1024
 BODY = 824
 SQUIRCLE_N = 5.0
-INNER_FRACTION = 0.86
 SSAA = 8
 
 
 def make_squircle_mask(size: int, n: float) -> Image.Image:
-    """Vectorised superellipse mask, supersampled then downscaled for AA."""
+    """以向量化方式生成超椭圆遮罩，并通过超采样缩小实现抗锯齿。"""
     big = size * SSAA
     half = big / 2.0
     coords = (np.arange(big) - half + 0.5) / half
@@ -52,11 +50,11 @@ def make_squircle_mask(size: int, n: float) -> Image.Image:
     return Image.fromarray(arr, mode="L").resize((size, size), Image.LANCZOS)
 
 
-def main() -> None:
-    if not SOURCE.exists():
-        raise SystemExit(f"missing source artwork: {SOURCE}")
+def main(source: Path = SOURCE, output: Path = OUTPUT) -> None:
+    if not source.exists():
+        raise SystemExit(f"缺少源插画：{source}")
 
-    src = Image.open(SOURCE).convert("RGBA")
+    src = Image.open(source).convert("RGBA")
     bbox = src.getbbox()
     if bbox:
         src = src.crop(bbox)
@@ -64,7 +62,7 @@ def main() -> None:
     canvas = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
     sq_mask = make_squircle_mask(BODY, SQUIRCLE_N)
 
-    # Soft drop shadow for Dock depth.
+    # 使用柔和阴影增加 Dock 图标的层次感。
     shadow_pad = 60
     shadow_layer = Image.new("RGBA", (BODY + shadow_pad * 2, BODY + shadow_pad * 2), (0, 0, 0, 0))
     shadow_alpha = Image.new("L", shadow_layer.size, 0)
@@ -77,15 +75,15 @@ def main() -> None:
     sy = (CANVAS - shadow_layer.size[1]) // 2 + 6
     canvas.alpha_composite(shadow_rgba, (sx, sy))
 
-    # White squircle body.
+    # 白色连续圆角矩形底板。
     body = Image.new("RGBA", (BODY, BODY), (255, 255, 255, 255))
     body.putalpha(sq_mask)
     qx = (CANVAS - BODY) // 2
     qy = (CANVAS - BODY) // 2
     canvas.alpha_composite(body, (qx, qy))
 
-    # Artwork inside the squircle, clipped to the mask.
-    target = int(BODY * INNER_FRACTION)
+    # 将插画放入连续圆角矩形，并裁切到遮罩范围内。
+    target = BODY
     sw, sh = src.size
     scale = min(target / sw, target / sh)
     new_size = (max(1, int(sw * scale)), max(1, int(sh * scale)))
@@ -101,10 +99,15 @@ def main() -> None:
     art_layer.putalpha(Image.fromarray(np.minimum(art_alpha, mask_arr).astype(np.uint8), mode="L"))
     canvas.alpha_composite(art_layer, (qx, qy))
 
-    canvas.save(OUTPUT, format="PNG", optimize=True)
-    print(f"wrote {OUTPUT}  size={canvas.size}")
-    print("next: npx tauri icon src-tauri/icons/icon.png")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output, format="PNG", optimize=True)
+    print(f"已写入 {output}，尺寸={canvas.size}")
+    print("下一步：npx tauri icon src-tauri/icons/icon.png")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    args = parser.parse_args()
+    main(args.source, args.output)
