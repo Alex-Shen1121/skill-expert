@@ -13,6 +13,25 @@ function renderPathSection(title, paths) {
   ];
 }
 
+function renderDisplayPath(value) {
+  return value.replaceAll('\n', '\\n');
+}
+
+function renderWorktrees(worktrees, remoteBranch) {
+  return [
+    '全部 worktree：',
+    ...worktrees.map((worktree) => {
+      const escapedPath = renderDisplayPath(worktree.path);
+      const context = worktree.bare
+        ? 'bare'
+        : worktree.detached
+          ? 'detached HEAD'
+          : `分支 ${worktree.branch}`;
+      return `- ${escapedPath} | ${context} | HEAD ${worktree.head ?? '未知'} | 相对 origin/${remoteBranch} ${worktree.relationshipToRemote.relation}`;
+    }),
+  ];
+}
+
 function renderHuman(report) {
   if (report.command === 'sync') {
     return [
@@ -33,7 +52,7 @@ function renderHuman(report) {
     }
     return [
       '本地 main 恢复计划已生成，尚未执行。',
-      `主工作目录：${report.plan.primaryWorktree}`,
+      `主工作目录：${renderDisplayPath(report.plan.primaryWorktree)}`,
       `恢复分支：${report.plan.recoveryBranch}`,
       `计划确认值：${report.plan.id}`,
       `原本地 main：${report.plan.oldMainSha}`,
@@ -41,20 +60,30 @@ function renderHuman(report) {
       ...renderPathSection('已暂存路径', report.plan.trackedChanges.staged),
       ...renderPathSection('未暂存路径', report.plan.trackedChanges.unstaged),
       ...renderPathSection('未跟踪路径', report.plan.untrackedPaths),
+      ...renderPathSection('ignored 路径', report.plan.untrackedState.ignoredPaths),
       ...report.conclusions.map((message) => `- ${message}`),
     ].join('\n');
   }
   if (report.command === 'preflight') {
     return [
       report.exitCode === 0 ? '实现阶段基线校验通过。' : '实现阶段基线校验未通过。',
-      `当前工作树：${report.repository.currentWorktree}`,
+      `当前工作树：${renderDisplayPath(report.repository.currentWorktree)}`,
       ...report.conclusions.map((message) => `- ${message}`),
     ].join('\n');
   }
   return [
     '工作树基线诊断完成。',
-    `主工作目录：${report.repository.primaryWorktree}`,
-    `当前工作树：${report.repository.currentWorktree}`,
+    `主工作目录：${renderDisplayPath(report.repository.primaryWorktree)}`,
+    `当前工作树：${renderDisplayPath(report.repository.currentWorktree)}`,
+    `${report.remoteBaseline.branch} 提交：${report.developmentIntegration.localSha ?? '未知'}`,
+    `origin/${report.remoteBaseline.branch} 提交：${report.developmentIntegration.remoteSha ?? '未知'}`,
+    `merge base：${report.developmentIntegration.mergeBase ?? '未知'}`,
+    `ahead/behind：${report.developmentIntegration.ahead ?? '未知'}/${report.developmentIntegration.behind ?? '未知'}`,
+    ...renderWorktrees(report.worktrees, report.remoteBaseline.branch),
+    ...renderPathSection('已暂存路径', report.workingTree.staged),
+    ...renderPathSection('未暂存路径', report.workingTree.unstaged),
+    ...renderPathSection('未跟踪路径', report.workingTree.untracked),
+    ...renderPathSection('ignored 路径', report.workingTree.ignored),
     ...report.conclusions.map((message) => `- ${message}`),
   ].join('\n');
 }
@@ -90,7 +119,15 @@ function renderHumanError(report, command) {
     return `无法完成实现阶段基线校验：${report.error.message}`;
   }
   if (command === 'recovery') {
-    return `无法完成本地 main 恢复点：${report.error.message}`;
+    return [
+      `无法完成本地 main 恢复点：${report.error.message}`,
+      ...(report.error.details?.stage
+        ? [`失败阶段：${report.error.details.stage}`]
+        : []),
+      ...(report.error.details?.guidance
+        ? [report.error.details.guidance]
+        : []),
+    ].join('\n');
   }
   return `无法完成工作树基线诊断：${report.error.message}`;
 }

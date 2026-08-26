@@ -71,10 +71,15 @@ export function parseStatus(output) {
   const staged = [];
   const unstaged = [];
   const untracked = [];
+  const ignored = [];
   const fields = output.split('\0');
   for (let index = 0; index < fields.length; index += 1) {
     const record = fields[index];
-    if (!record || record.startsWith('# ') || record.startsWith('! ')) continue;
+    if (!record || record.startsWith('# ')) continue;
+    if (record.startsWith('! ')) {
+      ignored.push(record.slice(2));
+      continue;
+    }
     if (record.startsWith('? ')) {
       untracked.push(record.slice(2));
       continue;
@@ -94,5 +99,5 @@ export function parseStatus(output) {
     if (state[1] !== '.') unstaged.push(currentPath);
     if (kind === '2') index += 1;
   }
-  return { staged, unstaged, untracked };
+  return { staged, unstaged, untracked, ignored };
 }

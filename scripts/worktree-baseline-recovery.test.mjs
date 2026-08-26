@@ -130,6 +130,12 @@ test('默认 recovery 只生成绑定仓库事实的计划', (t) => {
   assert.match(report.plan.recoveryBranch, /^codex\/local-main-recovery-\d{8}$/);
   assert.deepEqual(report.plan.trackedChanges, { staged: [], unstaged: [], paths: [] });
   assert.deepEqual(report.plan.untrackedPaths, []);
+  assert.deepEqual(report.plan.untrackedState, {
+    untrackedPaths: [],
+    ignoredPaths: [],
+    entries: [],
+    digest: createHash('sha256').update('[]').digest('hex'),
+  });
   assert.match(report.plan.snapshotLimitation, /不保留.*已暂存.*未暂存.*分界/);
   assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), mainBefore);
   assert.equal(git(primary, 'branch', '--show-current'), 'main');
@@ -179,7 +185,7 @@ test('显式确认计划后创建无 upstream 的本地恢复点且不移动 mai
   );
   assert.match(report.result.metadataPath, /skill-expert-recovery/);
   const metadata = JSON.parse(readFileSync(report.result.metadataPath, 'utf8'));
-  assert.equal(metadata.schemaVersion, 1);
+  assert.equal(metadata.schemaVersion, 2);
   assert.equal(metadata.planId, plan.id);
   assert.equal(metadata.recoveryBranch, plan.recoveryBranch);
   assert.equal(metadata.oldMainSha, mainBefore);
@@ -263,10 +269,11 @@ test('缺少计划确认值时安全阻止显式执行且不创建恢复分支',
 
 test('快照提交保存 tracked 最终内容并保持所有 untracked 字节不变', (t) => {
   const { origin, primary, linked } = createFixture(t);
+  const lineBreakPath = process.platform === 'win32' ? '换行 路径.txt' : '换行\n路径.txt';
   write(primary, '待删除.txt', '删除前\n');
   write(primary, '待重命名.txt', '重命名前\n');
-  write(primary, '换行\n路径.txt', '换行路径初始内容\n');
-  git(primary, 'add', '--', '待删除.txt', '待重命名.txt', '换行\n路径.txt');
+  write(primary, lineBreakPath, '换行路径初始内容\n');
+  git(primary, 'add', '--', '待删除.txt', '待重命名.txt', lineBreakPath);
   git(primary, 'commit', '-m', '建立本地 main 独有历史');
   const oldMainSha = git(primary, 'rev-parse', 'HEAD');
 
@@ -279,7 +286,7 @@ test('快照提交保存 tracked 最终内容并保持所有 untracked 字节不
   write(primary, '已暂存新增.txt', '新增暂存版本\n');
   git(primary, 'add', '--', '已暂存新增.txt');
   write(primary, '已暂存新增.txt', '新增最终版本\n');
-  write(primary, '换行\n路径.txt', '换行路径最终内容\n');
+  write(primary, lineBreakPath, '换行路径最终内容\n');
   write(primary, '.superpowers/cache.bin', Buffer.from([0, 1, 2, 255]));
   write(primary, '.worktrees/nested/cache.bin', Buffer.from([8, 7, 0, 6]));
   write(primary, '普通未跟踪.bin', Buffer.from([5, 0, 4, 3]));
@@ -299,7 +306,7 @@ test('快照提交保存 tracked 最终内容并保持所有 untracked 字节不
     '已重命名.txt',
     '待删除.txt',
     '待重命名.txt',
-    '换行\n路径.txt',
+    lineBreakPath,
   ].sort());
 
   const result = runBaseline(
@@ -322,7 +329,7 @@ test('快照提交保存 tracked 最终内容并保持所有 untracked 字节不
   assert.equal(git(primary, 'show', `${snapshotSha}:tracked.txt`), '最终版本');
   assert.equal(git(primary, 'show', `${snapshotSha}:已重命名.txt`), '重命名后的最终版本');
   assert.equal(git(primary, 'show', `${snapshotSha}:已暂存新增.txt`), '新增最终版本');
-  assert.equal(git(primary, 'show', `${snapshotSha}:换行\n路径.txt`), '换行路径最终内容');
+  assert.equal(git(primary, 'show', `${snapshotSha}:${lineBreakPath}`), '换行路径最终内容');
   assert.notEqual(
     runGit(primary, ['cat-file', '-e', `${snapshotSha}:待删除.txt`], { allowFailure: true }).status,
     0,
@@ -389,6 +396,36 @@ test('快照提交失败后保留 recovery 现场且不移动 main', (t) => {
   assert.equal(git(primary, 'rev-parse', `refs/heads/${plan.recoveryBranch}`), mainBefore);
   assert.equal(readFileSync(path.join(primary, 'tracked.txt'), 'utf8'), '需要恢复的最终内容\n');
   assert.equal(fileHash(primary, '未跟踪.bin'), untrackedHash);
+});
+
+test('recovery 人类错误输出包含失败阶段与可执行恢复指引', (t) => {
+  const { primary, linked } = createFixture(t);
+  write(primary, 'tracked.txt', '需要恢复的最终内容\n');
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr || planResult.stdout);
+  const plan = JSON.parse(planResult.stdout).plan;
+
+  const result = runBaselineWithEnvironment(
+    linked,
+    {
+      GIT_AUTHOR_NAME: '',
+      GIT_AUTHOR_EMAIL: '',
+      GIT_COMMITTER_NAME: '',
+      GIT_COMMITTER_EMAIL: '',
+    },
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /失败阶段：snapshot-commit/);
+  assert.match(result.stderr, new RegExp(`恢复分支 ${plan.recoveryBranch}.*已保留`));
+  assert.match(result.stderr, /本地 main 未由本阶段移动/);
 });
 
 test('已有同名恢复分支时选择无冲突后缀且不覆盖旧恢复点', (t) => {
@@ -495,6 +532,47 @@ test('tracked 与 untracked 路径集合在计划后变化时旧确认值失效'
     }).status,
     0,
   );
+});
+
+test('ignored 目录树的路径、类型与内容哈希变化时旧确认值失效', (t) => {
+  const { primary, linked } = createFixture(t);
+  write(primary, '.gitignore', '.worktrees/\n');
+  git(primary, 'add', '.gitignore');
+  git(primary, 'commit', '-m', '记录 ignored 目录');
+  write(primary, '.worktrees/嵌套工作树/状态.bin', Buffer.from([1, 0, 2, 255]));
+
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr || planResult.stdout);
+  const plan = JSON.parse(planResult.stdout).plan;
+  assert.deepEqual(plan.untrackedState.ignoredPaths, [
+    '.worktrees',
+  ]);
+  assert.match(plan.untrackedState.digest, /^[0-9a-f]{64}$/);
+  assert.ok(plan.untrackedState.entries.some((entry) =>
+    entry.path === '.worktrees/嵌套工作树/状态.bin' &&
+    entry.source === 'ignored' &&
+    entry.type === 'file' &&
+    /^[0-9a-f]{64}$/.test(entry.digest)));
+  assert.ok(plan.untrackedState.entries.some((entry) =>
+    entry.path === '.worktrees/嵌套工作树' && entry.type === 'directory'));
+
+  write(primary, '.worktrees/嵌套工作树/状态.bin', Buffer.from([9, 8, 7, 6]));
+  const applied = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+
+  assert.equal(applied.status, 1, applied.stderr || applied.stdout);
+  const report = JSON.parse(applied.stdout);
+  assert.deepEqual(report.statuses, ['recovery-blocked']);
+  assert.match(report.error.message, /确认值.*不匹配/);
+  assert.equal(git(primary, 'branch', '--show-current'), 'main');
 });
 
 test('同一 tracked 路径的最终内容变化时旧确认值失效', (t) => {

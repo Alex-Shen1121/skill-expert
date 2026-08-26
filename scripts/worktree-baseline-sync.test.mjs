@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -209,7 +212,7 @@ test('从 linked worktree 验证 recovery 后事务性同步分叉的本地 main
   assert.equal(report.result.recoveryHeadSha, recovery.result.recoveryHeadSha);
   assert.deepEqual(report.result.verifiedUntrackedPaths, [
     '.superpowers/cache.bin',
-    '.worktrees/nested/cache.bin',
+    '.worktrees',
     '普通未跟踪.bin',
   ].sort());
   assert.equal(git(primary, 'branch', '--show-current'), 'main');
@@ -408,7 +411,7 @@ test('recovery 后 untracked 路径集变化时不移动 main 且不改写文件
   assert.equal(result.status, 1, result.stderr || result.stdout);
   const report = JSON.parse(result.stdout);
   assert.deepEqual(report.statuses, ['sync-blocked']);
-  assert.match(report.error.message, /untracked 路径.*发生变化/);
+  assert.match(report.error.message, /untracked.*ignored.*完整状态.*发生变化/i);
   assert.equal(report.error.details.stage, 'revalidate');
   assert.equal(report.error.details.mainMoved, false);
   assert.equal(report.error.details.recoveryBranch, recovery.result.recoveryBranch);
@@ -419,6 +422,74 @@ test('recovery 后 untracked 路径集变化时不移动 main 且不改写文件
   assert.equal(fileHash(primary, '恢复后新增.bin'), addedHash);
   assert.equal(fileHash(primary, '普通未跟踪.bin'), existingHash);
 });
+
+for (const mutation of [
+  {
+    name: '新增',
+    apply(primary) {
+      write(primary, '.worktrees/nested/新增.bin', Buffer.from([10, 11, 12]));
+      return () => assert.equal(fileHash(primary, '.worktrees/nested/新增.bin'),
+        createHash('sha256').update(Buffer.from([10, 11, 12])).digest('hex'));
+    },
+  },
+  {
+    name: '删除',
+    apply(primary) {
+      unlinkSync(path.join(primary, '.worktrees/nested/cache.bin'));
+      return () => assert.equal(
+        existsSync(path.join(primary, '.worktrees/nested/cache.bin')),
+        false,
+      );
+    },
+  },
+  {
+    name: '改名',
+    apply(primary) {
+      renameSync(
+        path.join(primary, '.worktrees/nested/cache.bin'),
+        path.join(primary, '.worktrees/nested/改名.bin'),
+      );
+      const renamedHash = fileHash(primary, '.worktrees/nested/改名.bin');
+      return () => assert.equal(fileHash(primary, '.worktrees/nested/改名.bin'), renamedHash);
+    },
+  },
+  {
+    name: '改内容',
+    apply(primary) {
+      write(primary, '.worktrees/nested/cache.bin', Buffer.from([99, 0, 98, 97]));
+      const changedHash = fileHash(primary, '.worktrees/nested/cache.bin');
+      return () => assert.equal(fileHash(primary, '.worktrees/nested/cache.bin'), changedHash);
+    },
+  },
+]) {
+  test(`recovery 后 ignored 目录内${mutation.name}时阻止 sync 且不改写现场`, (t) => {
+    const { primary, linked, oldMainSha } = createFixture(t);
+    const recovery = createRecovery(linked, primary);
+    const verifyMutationPreserved = mutation.apply(primary);
+
+    const result = runBaseline(
+      linked,
+      'sync',
+      '--apply',
+      '--confirm',
+      recovery.plan.id,
+      '--primary-worktree',
+      primary,
+      '--json',
+    );
+
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.statuses, ['sync-blocked']);
+    assert.match(report.error.message, /untracked.*ignored.*完整状态.*发生变化/i);
+    assert.equal(report.error.details.stage, 'revalidate');
+    assert.equal(report.error.details.mainMoved, false);
+    assert.equal(report.error.details.recoveryPreserved, true);
+    assert.equal(git(primary, 'rev-parse', 'refs/heads/main'), oldMainSha);
+    assert.equal(git(primary, 'branch', '--show-current'), recovery.result.recoveryBranch);
+    verifyMutationPreserved();
+  });
+}
 
 test('fetch 失败时不用缓存基线放行并报告已验证 recovery', (t) => {
   const { root, primary, linked, oldMainSha } = createFixture(t);

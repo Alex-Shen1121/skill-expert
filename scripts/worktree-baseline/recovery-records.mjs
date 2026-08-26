@@ -3,11 +3,15 @@ import {
   lstatSync,
   readFileSync,
   readdirSync,
-  realpathSync,
 } from 'node:fs';
 import path from 'node:path';
 
 import { git, runGit } from './git.mjs';
+import {
+  normalizePath,
+  repositoryPathsEqual,
+  resolveCommit,
+} from './safety.mjs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const PLAN_ID_PATTERN = /^[0-9a-f]{64}$/;
@@ -31,24 +35,53 @@ const RECOVERY_METADATA_FIELDS = [
   'trackedPaths',
   'unstagedBefore',
   'untrackedBefore',
+  'untrackedStateBefore',
 ].sort();
-
-function normalizePath(value) {
-  return realpathSync.native(path.resolve(value));
-}
-
-function resolveCommit(cwd, ref) {
-  const result = runGit(cwd, ['rev-parse', '--verify', `${ref}^{commit}`], {
-    allowFailure: true,
-  });
-  return result.status === 0 ? result.stdout.trim() : null;
-}
 
 function sortedUniqueStrings(value) {
   return Array.isArray(value) &&
     value.every((item) => typeof item === 'string') &&
     new Set(value).size === value.length &&
     JSON.stringify(value) === JSON.stringify([...value].sort());
+}
+
+function validUntrackedState(value) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    JSON.stringify(Object.keys(value).sort()) !==
+      JSON.stringify(['digest', 'entries', 'ignoredPaths', 'untrackedPaths']) ||
+    !sortedUniqueStrings(value.untrackedPaths) ||
+    !sortedUniqueStrings(value.ignoredPaths) ||
+    !Array.isArray(value.entries) ||
+    !/^[0-9a-f]{64}$/.test(value.digest)
+  ) return false;
+  const keys = [];
+  for (const entry of value.entries) {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      Array.isArray(entry) ||
+      JSON.stringify(Object.keys(entry).sort()) !==
+        JSON.stringify(['digest', 'mode', 'path', 'size', 'source', 'type']) ||
+      typeof entry.path !== 'string' ||
+      entry.path.length === 0 ||
+      !['untracked', 'ignored'].includes(entry.source) ||
+      !['file', 'directory', 'symlink', 'other'].includes(entry.type) ||
+      !Number.isInteger(entry.mode) ||
+      !Number.isInteger(entry.size) ||
+      entry.size < 0 ||
+      !/^[0-9a-f]{64}$/.test(entry.digest)
+    ) return false;
+    keys.push(`${entry.path}\0${entry.source}`);
+  }
+  if (new Set(keys).size !== keys.length || JSON.stringify(keys) !== JSON.stringify([...keys].sort())) {
+    return false;
+  }
+  return value.digest === createHash('sha256')
+    .update(JSON.stringify(value.entries))
+    .digest('hex');
 }
 
 function recoveryPlanIdentity(metadata) {
@@ -66,6 +99,7 @@ function recoveryPlanIdentity(metadata) {
     },
     trackedContentDigest: metadata.trackedContentDigest,
     untrackedPaths: metadata.untrackedBefore,
+    untrackedState: metadata.untrackedStateBefore,
     snapshotLimitation: metadata.snapshotLimitation,
   })).digest('hex');
 }
@@ -116,7 +150,7 @@ export function readRecoveryMetadata(commonDir, planId) {
   }
   const validShape =
     JSON.stringify(Object.keys(metadata).sort()) === JSON.stringify(RECOVERY_METADATA_FIELDS) &&
-    metadata.schemaVersion === 1 &&
+    metadata.schemaVersion === 2 &&
     metadata.planId === planId &&
     typeof metadata.createdAt === 'string' &&
     !Number.isNaN(Date.parse(metadata.createdAt)) &&
@@ -134,6 +168,9 @@ export function readRecoveryMetadata(commonDir, planId) {
     sortedUniqueStrings(metadata.stagedBefore) &&
     sortedUniqueStrings(metadata.unstagedBefore) &&
     sortedUniqueStrings(metadata.untrackedBefore) &&
+    validUntrackedState(metadata.untrackedStateBefore) &&
+    JSON.stringify(metadata.untrackedBefore) ===
+      JSON.stringify(metadata.untrackedStateBefore.untrackedPaths) &&
     typeof metadata.snapshotLimitation === 'string';
   if (!validShape) {
     throw new Error('recovery 元数据缺少必要字段或字段格式无效，已安全停止。');
@@ -153,7 +190,7 @@ export function verifyRecoveryMetadata(commonDir, metadata, { requireCheckedOut 
   } catch {
     throw new Error('recovery 元数据中的仓库路径已无法解析，已安全停止。');
   }
-  if (metadataCommonDir !== normalizePath(commonDir)) {
+  if (!repositoryPathsEqual(metadataPrimary, metadataCommonDir, commonDir)) {
     throw new Error('recovery 元数据不属于当前仓库，已安全停止。');
   }
   const recoveryHeadSha = resolveCommit(metadataPrimary, metadata.recoveryRef);
