@@ -2,6 +2,7 @@
 import { diagnose } from './worktree-baseline/diagnose.mjs';
 import { recovery } from './worktree-baseline/recovery.mjs';
 import { preflight } from './worktree-baseline/preflight.mjs';
+import { sync } from './worktree-baseline/sync.mjs';
 
 function renderPathSection(title, paths) {
   return [
@@ -13,6 +14,14 @@ function renderPathSection(title, paths) {
 }
 
 function renderHuman(report) {
+  if (report.command === 'sync') {
+    return [
+      '本地 main 安全同步已完成。',
+      `开发集成分支提交：${report.result.mainSha}`,
+      `恢复分支：${report.result.recoveryBranch}`,
+      ...report.conclusions.map((message) => `- ${message}`),
+    ].join('\n');
+  }
   if (report.command === 'recovery') {
     if (report.applied) {
       return [
@@ -65,10 +74,31 @@ function errorReport(error, command, kind) {
   };
 }
 
+function renderHumanError(report, command) {
+  if (command === 'sync') {
+    return [
+      `无法完成本地 main 安全同步：${report.error.message}`,
+      ...(report.error.details?.stage
+        ? [`失败阶段：${report.error.details.stage}`]
+        : []),
+      ...(report.error.details?.guidance
+        ? [report.error.details.guidance]
+        : []),
+    ].join('\n');
+  }
+  if (command === 'preflight') {
+    return `无法完成实现阶段基线校验：${report.error.message}`;
+  }
+  if (command === 'recovery') {
+    return `无法完成本地 main 恢复点：${report.error.message}`;
+  }
+  return `无法完成工作树基线诊断：${report.error.message}`;
+}
+
 const [command, ...args] = process.argv.slice(2);
 const json = args.includes('--json');
 const offline = args.includes('--offline');
-function parseRecoveryArguments(values) {
+function parseMutationArguments(values) {
   const options = { apply: false, confirmation: null, primaryWorktree: null };
   const seen = new Set();
   for (let index = 0; index < values.length; index += 1) {
@@ -94,10 +124,14 @@ function parseRecoveryArguments(values) {
   }
   return options;
 }
-const recoveryOptions = command === 'recovery' ? parseRecoveryArguments(args) : null;
+const mutationOptions = ['recovery', 'sync'].includes(command)
+  ? parseMutationArguments(args)
+  : null;
 const validArguments =
   (command === 'diagnose' && args.every((argument) => ['--json', '--offline'].includes(argument))) ||
-  (command === 'recovery' && recoveryOptions !== null) ||
+  (command === 'recovery' && mutationOptions !== null) ||
+  (command === 'sync' && mutationOptions !== null && mutationOptions.apply &&
+    mutationOptions.confirmation !== null && mutationOptions.primaryWorktree !== null) ||
   (command === 'preflight' && args.every((argument) => argument === '--json'));
 
 function usageFor(requestedCommand) {
@@ -106,6 +140,9 @@ function usageFor(requestedCommand) {
   }
   if (requestedCommand === 'preflight') {
     return '用法：node scripts/worktree-baseline.mjs preflight [--json]';
+  }
+  if (requestedCommand === 'sync') {
+    return '用法：node scripts/worktree-baseline.mjs sync --apply --confirm <recovery 计划确认值> --primary-worktree <路径> [--json]';
   }
   return '用法：node scripts/worktree-baseline.mjs diagnose [--json] [--offline]';
 }
@@ -117,8 +154,10 @@ try {
   const report = command === 'diagnose'
     ? diagnose(process.cwd(), { offline })
     : command === 'recovery'
-      ? recovery(process.cwd(), recoveryOptions)
-      : preflight(process.cwd());
+      ? recovery(process.cwd(), mutationOptions)
+      : command === 'sync'
+        ? sync(process.cwd(), mutationOptions)
+        : preflight(process.cwd());
   process.stdout.write(json ? `${JSON.stringify(report)}\n` : `${renderHuman(report)}\n`);
   process.exitCode = report.exitCode;
 } catch (error) {
@@ -128,18 +167,14 @@ try {
     validArguments
       ? command === 'recovery'
         ? 'recovery-failed'
+        : command === 'sync'
+          ? 'sync-failed'
         : command === 'preflight'
           ? 'preflight-failed'
           : 'diagnosis-failed'
       : 'invalid-arguments',
   );
   if (json) process.stdout.write(`${JSON.stringify(report)}\n`);
-  else process.stderr.write(
-    command === 'preflight'
-      ? `无法完成实现阶段基线校验：${report.error.message}\n`
-      : command === 'recovery'
-        ? `无法完成本地 main 恢复点：${report.error.message}\n`
-        : `无法完成工作树基线诊断：${report.error.message}\n`,
-  );
+  else process.stderr.write(`${renderHumanError(report, command)}\n`);
   process.exitCode = report.exitCode;
 }
