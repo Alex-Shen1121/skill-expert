@@ -17,6 +17,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ### Developer & Governance
 -
 
+## [1.0.3] - 2026-08-26
+
+### Release Overview
+- Replace the legacy S icon with the character-led Skill Expert production icon system.
+
+### User-facing
+- Show the character artwork on application icons at 64px and larger, while using the simplified Skill Core Symbol on small system surfaces for legibility.
+
+### Developer & Governance
+- Add deterministic builders, cross-platform hybrid ICO/ICNS assets, and pixel-level tests for application, tray, favicon, sidebar, and Windows tile icons.
+
 ## [1.0.2] - 2026-08-25
 
 ### Release Overview

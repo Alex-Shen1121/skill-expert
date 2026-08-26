@@ -54,3 +54,25 @@ The serialized backup protocol retains `.skills-manager` metadata paths,
 schema marker so existing backups remain readable. These strings are protocol
 compatibility identifiers, not user-facing product or repository identities.
 Historical changelog entries remain unchanged as records of shipped releases.
+
+## 品牌语言
+
+**角色标识**：
+以用户提供的棕色卷发、星形元素 Q 版人物为核心的品牌识别形象。
+_避免使用_：S 人物、S 吉祥物
+
+**星际技能管理员**：
+角色标识在 Skill Expert 品牌中的身份，代表对 Skills 的收集、整理与调度。
+_避免使用_：技能召唤师、纯角色头像
+
+**技能核心**：
+由角色星球灯棒演化而来的品牌道具，以透明星球、粉色握柄和星形核心表达被收集与调度的 Skills。
+_避免使用_：麦克风、普通灯棒
+
+**技能核心符号**：
+技能核心在 16–32px 场景中的极简图形，以星形核心与单条星环保持小尺寸辨识度。
+_避免使用_：迷你角色头像、旧 S 标识
+
+**旧 S 标识**：
+上一代版本使用的 S 形品牌符号；新一代图标不以保留该符号为约束。
+_避免使用_：新角色标识
