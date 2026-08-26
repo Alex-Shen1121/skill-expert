@@ -190,6 +190,46 @@ test('显式确认计划后创建无 upstream 的本地恢复点且不移动 mai
   assert.equal(git(origin, 'for-each-ref', '--format=%(refname):%(objectname)'), remoteBefore);
 });
 
+test('diagnose 把具有完整工具元数据的 recovery 标记为 verified', (t) => {
+  const { primary, linked } = createFixture(t);
+  const planResult = runBaseline(linked, 'recovery', '--json');
+  assert.equal(planResult.status, 0, planResult.stderr);
+  const plan = JSON.parse(planResult.stdout).plan;
+  const applyResult = runBaseline(
+    linked,
+    'recovery',
+    '--apply',
+    '--confirm',
+    plan.id,
+    '--primary-worktree',
+    primary,
+    '--json',
+  );
+  assert.equal(applyResult.status, 0, applyResult.stderr);
+  const recoveryReport = JSON.parse(applyResult.stdout);
+
+  const result = runBaseline(linked, 'diagnose', '--offline', '--json');
+
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.recoveryRecords, [{
+    branch: recoveryReport.result.recoveryBranch,
+    ref: `refs/heads/${recoveryReport.result.recoveryBranch}`,
+    head: recoveryReport.result.recoveryHeadSha,
+    verification: 'verified',
+    planId: plan.id,
+  }]);
+  assert.ok(report.statuses.includes('recovery-records-present'));
+  assert.ok(report.statuses.includes('recovery-verified'));
+  assert.ok(!report.statuses.includes('recovery-legacy-unverified'));
+  assert.ok(
+    report.conclusions.some(
+      (message) => message.includes(recoveryReport.result.recoveryBranch) &&
+        message.includes('工具元数据完整'),
+    ),
+  );
+});
+
 test('缺少计划确认值时安全阻止显式执行且不创建恢复分支', (t) => {
   const { origin, primary, linked } = createFixture(t);
   const mainBefore = git(primary, 'rev-parse', 'refs/heads/main');
