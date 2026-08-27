@@ -535,14 +535,12 @@ export function ProjectDetail() {
   const isLocallyEdited = (v: ProjectSkill) =>
     v.sync_status === "project_newer" || v.sync_status === "diverged";
 
-  // A variant is safe to *overwrite* from center only when it is provably at or
-  // behind center (in_sync / center_newer), i.e. holds nothing the pull would
-  // discard. Everything else may carry unique local work: an edited copy
-  // (project_newer / diverged) OR a project_only copy that exists solely in the
-  // project and was never pushed to center. The frontend has no hash to prove
-  // such a copy is redundant, so it must NOT be auto-overwritten.
-  const isSafeToRealign = (v: ProjectSkill) =>
-    v.sync_status === "in_sync" || v.sync_status === "center_newer";
+  // Only in_sync proves a copy holds nothing the pull would discard: it is a
+  // content-hash match. center_newer is NOT that proof — classify_sync_status
+  // reaches it only after the hashes already differed, then picks a side by
+  // mtime, so a center_newer copy can carry content of its own that a pull
+  // would destroy. Everything but in_sync is therefore left alone.
+  const isSafeToRealign = (v: ProjectSkill) => v.sync_status === "in_sync";
 
   // Push the winner (a variant with local edits, else the group-status variant)
   // to center, then realign only the siblings that are safe to overwrite. Any
@@ -557,10 +555,21 @@ export function ProjectDetail() {
   // right after the user updated *to* center).
   const pushSkillToCenterAndAlign = async (
     skill: ProjectSkillGroup
-  ): Promise<{ alignFailed: number; skipped: number }> => {
-    if (!id) return { alignFailed: 0, skipped: 0 };
+  ): Promise<{ alignFailed: number; skipped: number; conflicting: number }> => {
+    if (!id) return { alignFailed: 0, skipped: 0, conflicting: 0 };
+
+    // Two agents edited the same skill: which edit wins is a question only a
+    // person can answer, and pushing one strands the other for good. The push
+    // rewrites the center, moving its mtime to now, so the edit left behind
+    // reads as center_newer; the card then offers only "update to project",
+    // which overwrites every variant. Refuse the whole operation instead.
+    const edited = skill.variants.filter(isLocallyEdited);
+    if (edited.length > 1) {
+      return { alignFailed: 0, skipped: 0, conflicting: edited.length };
+    }
+
     const winner =
-      skill.variants.find(isLocallyEdited) ??
+      edited[0] ??
       skill.variants.find((v) => v.sync_status === skill.status) ??
       skill.primaryVariant;
     await api.updateProjectSkillToCenter(id, winner.relative_path, winner.agent);
@@ -568,30 +577,43 @@ export function ProjectDetail() {
     const others = skill.variants.filter((v) => v !== winner);
     const alignable = others.filter(isSafeToRealign);
     const skipped = others.length - alignable.length;
-    const results = await Promise.allSettled(
-      alignable.map((v) =>
-        api.updateProjectSkillFromCenter(id, v.relative_path, v.agent)
-      )
-    );
-    const alignFailed = results.filter((r) => r.status === "rejected").length;
-    return { alignFailed, skipped };
+    // Serially: two agents' skills roots can be symlinks onto one real
+    // directory, and each realign removes and rebuilds its target, so
+    // concurrent calls on the same path make one of them fail spuriously.
+    let alignFailed = 0;
+    for (const variant of alignable) {
+      try {
+        await api.updateProjectSkillFromCenter(id, variant.relative_path, variant.agent);
+      } catch {
+        alignFailed += 1;
+      }
+    }
+    return { alignFailed, skipped, conflicting: 0 };
   };
 
   const handleUpdateCenter = async (skill: ProjectSkillGroup) => {
     if (!id) return;
     setUpdatingCenterSkill(getSkillKey(skill));
     try {
-      const { alignFailed, skipped } = await pushSkillToCenterAndAlign(skill);
-      if (skipped > 0) {
+      const { alignFailed, skipped, conflicting } = await pushSkillToCenterAndAlign(skill);
+      if (conflicting > 0) {
         toast.warning(
-          t("project.updateCenterSkippedEdited", { name: skill.name, count: skipped })
-        );
-      } else if (alignFailed > 0) {
-        toast.warning(
-          t("project.updateCenterAlignFailed", { name: skill.name, count: alignFailed })
+          t("project.updateCenterConflict", { name: skill.name, count: conflicting })
         );
       } else {
-        toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+        if (skipped > 0) {
+          toast.warning(
+            t("project.updateCenterSkippedEdited", { name: skill.name, count: skipped })
+          );
+        }
+        if (alignFailed > 0) {
+          toast.warning(
+            t("project.updateCenterAlignFailed", { name: skill.name, count: alignFailed })
+          );
+        }
+        if (skipped === 0 && alignFailed === 0) {
+          toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+        }
       }
       await Promise.all([refreshManagedSkills(), refreshPresets(), loadSkills()]);
     } catch (error: unknown) {
@@ -764,6 +786,7 @@ export function ProjectDetail() {
       let updated = 0;
       let failed = 0;
       let skipped = 0;
+      let conflicting = 0;
       for (const skill of selectedSkills) {
         const canUpdateCenter =
           skill.status === "project_only" ||
@@ -771,7 +794,17 @@ export function ProjectDetail() {
           skill.status === "diverged";
         if (!canUpdateCenter) continue;
         try {
-          const { alignFailed, skipped: skippedForSkill } = await pushSkillToCenterAndAlign(skill);
+          const {
+            alignFailed,
+            skipped: skippedForSkill,
+            conflicting: conflictingForSkill,
+          } = await pushSkillToCenterAndAlign(skill);
+          // Refused outright: neither written nor failed, so it is counted on
+          // its own rather than folded into either total.
+          if (conflictingForSkill > 0) {
+            conflicting += 1;
+            continue;
+          }
           skipped += skippedForSkill;
           // The push landed but some sibling failed to realign → the group is
           // not fully in sync, so count it as failed rather than reporting a
@@ -787,6 +820,9 @@ export function ProjectDetail() {
       }
       if (skipped > 0) {
         toast.warning(t("project.batchUpdateCenterSkipped", { count: skipped }));
+      }
+      if (conflicting > 0) {
+        toast.warning(t("project.batchUpdateCenterConflict", { count: conflicting }));
       }
       if (failed > 0) {
         toast.error(t("project.batchUpdateCenterFailed", { count: failed }));
