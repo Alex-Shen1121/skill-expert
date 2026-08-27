@@ -2,8 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+import { findProductVersion, parseProductVersion } from './product-version.mjs';
 
 function readJson(root, relativePath) {
   const filePath = path.join(root, relativePath);
@@ -39,8 +38,7 @@ function packageVersionFromCargoLock(content, packageName) {
 }
 
 function translatedVersion(value) {
-  if (typeof value !== 'string') return null;
-  return value.match(/\b\d+\.\d+\.\d+\b/)?.[0] ?? null;
+  return findProductVersion(value);
 }
 
 function firstChangelogVersion(content) {
@@ -57,13 +55,17 @@ export function checkVersionConsistency(root = process.cwd()) {
   const mismatches = [];
   const packageJson = readJson(root, 'package.json');
   const version = packageJson.version;
+  const parsedVersion = parseProductVersion(version);
 
-  if (typeof version !== 'string' || !VERSION_PATTERN.test(version)) {
+  if (!parsedVersion) {
     return {
       version,
-      mismatches: [`package.json: expected a stable x.y.z version, found ${version ?? 'missing'}`],
+      mismatches: [
+        `package.json：版本必须是 x.y.z 或开发序号 x.y.z-N，实际为 ${version ?? '缺失'}`,
+      ],
     };
   }
+  const stableVersion = parsedVersion.stable;
 
   const packageLock = readJson(root, 'package-lock.json');
   compare(mismatches, 'package-lock.json root version', packageLock.version, version);
@@ -99,7 +101,12 @@ export function checkVersionConsistency(root = process.cwd()) {
   }
 
   for (const changelog of ['CHANGELOG.md', 'CHANGELOG-zh.md']) {
-    compare(mismatches, `${changelog} latest release`, firstChangelogVersion(readText(root, changelog)), version);
+    compare(
+      mismatches,
+      `${changelog} latest release`,
+      firstChangelogVersion(readText(root, changelog)),
+      stableVersion,
+    );
   }
 
   return { version, mismatches };

@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
 import { checkVersionConsistency } from './check-version-consistency.mjs';
+import { nextPatchVersion, parseProductVersion } from './product-version.mjs';
 
-const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const DEFAULT_RELEASE_BASELINE_SHA = 'e7ed2157726b50b585ee0c53df61870a12cd9893';
 
 function fail(message) {
@@ -58,16 +58,11 @@ function resolveBranch(branch) {
 }
 
 function parseStableVersion(version, label) {
-  const match = version?.match(STABLE_SEMVER);
-  if (!match) fail(`${label} must be a stable SemVer x.y.z, found ${version ?? 'missing'}`);
-  return match.slice(1).map(Number);
-}
-
-function compareVersions(left, right) {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index];
+  const parsed = parseProductVersion(version);
+  if (!parsed || parsed.development !== null) {
+    fail(`${label}必须是稳定 SemVer x.y.z，实际为 ${version ?? '缺失'}`);
   }
-  return 0;
+  return parsed;
 }
 
 function packageAt(ref) {
@@ -180,7 +175,7 @@ function verifyCandidate(options) {
   verifyPromotionBase(baseSha, candidateSha, base);
 
   const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  const candidateVersion = parseStableVersion(manifest.version, 'candidate version');
+  parseStableVersion(manifest.version, '候选版本');
   const { version, mismatches } = checkVersionConsistency(process.cwd());
   if (mismatches.length > 0) {
     fail(`candidate version contract is inconsistent:\n- ${mismatches.join('\n- ')}`);
@@ -197,9 +192,12 @@ function verifyCandidate(options) {
   }
   const basePackage = packageAt(baseSha);
   if (basePackage.name === 'skill-expert') {
-    const baseVersion = parseStableVersion(basePackage.version, 'release branch version');
-    if (compareVersions(candidateVersion, baseVersion) <= 0) {
-      fail(`candidate version ${version} must be newer than release version ${basePackage.version}`);
+    const baseVersion = parseStableVersion(basePackage.version, 'release 分支版本');
+    const expectedVersion = nextPatchVersion(baseVersion);
+    if (version !== expectedVersion) {
+      fail(
+        `正式候选版本 ${version} 必须是 release 版本 ${basePackage.version} 的下一补丁版本；预期 ${expectedVersion}`,
+      );
     }
   } else if (manifest.name !== 'skill-expert' || version !== '1.0.0') {
     fail('a legacy release baseline can only promote the Skill Expert 1.0.0 bootstrap');
