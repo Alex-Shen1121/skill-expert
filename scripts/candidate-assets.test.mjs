@@ -92,7 +92,7 @@ const buildArtifacts = {
   ],
 };
 
-test('prints the exact stable candidate inventory for all four targets', () => {
+test('输出四个平台的精确稳定候选清单', () => {
   for (const [target, expected] of Object.entries(expectedInventory)) {
     const result = runCandidateAssets(['expected', '--version', version, '--target', target]);
 
@@ -101,7 +101,7 @@ test('prints the exact stable candidate inventory for all four targets', () => {
   }
 });
 
-test('accepts a candidate asset directory containing the exact expected set', (t) => {
+test('接受只包含精确预期集合的候选资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'macos-arm64');
   const result = runCandidateAssets([
     'verify',
@@ -114,10 +114,10 @@ test('accepts a candidate asset directory containing the exact expected set', (t
   ]);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /exact candidate asset inventory verified/);
+  assert.match(result.stdout, /候选资产精确清单验证通过/);
 });
 
-test('rejects a candidate asset directory with a missing expected file', (t) => {
+test('拒绝缺少预期文件的候选资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'windows-x64');
   rmSync(path.join(assetDirectory, expectedInventory['windows-x64'][0]));
   const result = runCandidateAssets([
@@ -131,10 +131,10 @@ test('rejects a candidate asset directory with a missing expected file', (t) => 
   ]);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing: skill-expert-cli-v1\.2\.3-windows-x64\.exe/);
+  assert.match(result.stderr, /缺少：skill-expert-cli-v1\.2\.3-windows-x64\.exe/);
 });
 
-test('rejects a candidate asset directory with an unexpected extra file', (t) => {
+test('拒绝包含意外文件的候选资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'linux-x64');
   writeFileSync(path.join(assetDirectory, 'debug-symbols.zip'), 'unexpected\n');
   const result = runCandidateAssets([
@@ -148,10 +148,10 @@ test('rejects a candidate asset directory with an unexpected extra file', (t) =>
   ]);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unexpected: debug-symbols\.zip/);
+  assert.match(result.stderr, /意外：debug-symbols\.zip/);
 });
 
-test('stages each Tauri target as the exact stable candidate inventory', (t) => {
+test('把每个 Tauri 目标暂存为精确稳定候选清单', (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-candidate-stage-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
@@ -178,4 +178,17 @@ test('stages each Tauri target as the exact stable candidate inventory', (t) => 
       assert.match(readFileSync(path.join(assetDirectory, filename), 'utf8'), /bundle\/|skill-expert-cli/);
     }
   }
+});
+
+test('手工测试包允许开发序号版本进入隔离资产命名', () => {
+  const result = runCandidateAssets([
+    'expected',
+    '--version',
+    '1.0.3-2',
+    '--target',
+    'macos-arm64',
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /skill-expert-v1\.0\.3-2-macos-arm64\.dmg/);
 });

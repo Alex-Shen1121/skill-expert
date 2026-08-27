@@ -1,0 +1,76 @@
+name: 构建手动测试包
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_arm64:
+        description: 构建 macOS arm64
+        required: true
+        default: true
+        type: boolean
+      macos_x64:
+        description: 构建 macOS x64
+        required: true
+        default: false
+        type: boolean
+      windows_x64:
+        description: 构建 Windows x64
+        required: true
+        default: false
+        type: boolean
+      linux_x64:
+        description: 构建 Linux x64
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  select-targets:
+    name: 选择测试目标
+    runs-on: ubuntu-22.04
+    outputs:
+      targets_json: ${{ steps.matrix.outputs.targets_json }}
+    steps:
+      - name: 生成精确测试矩阵
+        id: matrix
+        shell: bash
+        env:
+          MACOS_ARM64: ${{ inputs.macos_arm64 }}
+          MACOS_X64: ${{ inputs.macos_x64 }}
+          WINDOWS_X64: ${{ inputs.windows_x64 }}
+          LINUX_X64: ${{ inputs.linux_x64 }}
+        run: |
+          set -euo pipefail
+          TARGETS='[]'
+          if [ "$MACOS_ARM64" = "true" ]; then
+            TARGETS="$(jq -c '. + [{"target_id":"macos-arm64","runner":"macos-latest","rust_target":"aarch64-apple-darwin","bundles":"app,dmg"}]' <<<"$TARGETS")"
+          fi
+          if [ "$MACOS_X64" = "true" ]; then
+            TARGETS="$(jq -c '. + [{"target_id":"macos-x64","runner":"macos-latest","rust_target":"x86_64-apple-darwin","bundles":"app,dmg"}]' <<<"$TARGETS")"
+          fi
+          if [ "$WINDOWS_X64" = "true" ]; then
+            TARGETS="$(jq -c '. + [{"target_id":"windows-x64","runner":"windows-latest","rust_target":"x86_64-pc-windows-msvc","bundles":"nsis,msi"}]' <<<"$TARGETS")"
+          fi
+          if [ "$LINUX_X64" = "true" ]; then
+            TARGETS="$(jq -c '. + [{"target_id":"linux-x64","runner":"ubuntu-22.04","rust_target":"x86_64-unknown-linux-gnu","bundles":"appimage,deb,rpm"}]' <<<"$TARGETS")"
+          fi
+          if [ "$(jq 'length' <<<"$TARGETS")" = "0" ]; then
+            echo "至少选择一个测试目标" >&2
+            exit 1
+          fi
+          echo "targets_json=$TARGETS" >> "$GITHUB_OUTPUT"
+
+  manual-package:
+    name: 不可晋级手动测试包
+    needs: select-targets
+    permissions:
+      contents: read
+    uses: ./.github/workflows/candidate-build.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      purpose: manual-test-package
+      artifact_prefix: skill-expert-manual-test
+      targets_json: ${{ needs.select-targets.outputs.targets_json }}

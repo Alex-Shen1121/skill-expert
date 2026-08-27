@@ -229,17 +229,22 @@ expect(
 );
 
 const releaseWorkflow = read('.github/workflows/release.yml');
+const candidateWorkflow = read('.github/workflows/candidate-build.yml');
 const candidateAssets = read('scripts/candidate-assets.mjs');
+const macosReleaseVerifier = read('scripts/verify-macos-release.mjs');
 const cliAssetContract = '`skill-expert-cli-v${version}-${target}${contract.cliSuffix}`';
 expect(
   '正式发布 CLI 资产身份',
-  releaseWorkflow.includes('candidate-assets.mjs stage') &&
+  candidateWorkflow.includes('candidate-assets.mjs stage') &&
+    releaseWorkflow.includes('release-promotion.mjs materialize-release') &&
     candidateAssets.split(cliAssetContract).length - 1 === 2,
-  '正式工作流必须通过资产契约生成 skill-expert-cli-v<version>-<target> 资产',
+  '候选工作流必须生成、正式工作流必须逐字节搬运 skill-expert-cli-v<version>-<target> 资产',
 );
 expect(
   'desktop release asset identity',
-  releaseWorkflow.includes('$BUNDLE_DIR/Skill Expert.app'),
+  candidateWorkflow.includes('$BUILD_ROOT/bundle/macos/Skill Expert.app') &&
+    releaseWorkflow.includes('verify-macos-release.mjs') &&
+    macosReleaseVerifier.includes("'Skill Expert.app'"),
   'missing Skill Expert desktop asset',
 );
 

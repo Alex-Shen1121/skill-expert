@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { checkVersionConsistency } from './check-version-consistency.mjs';
 import { nextPatchVersion, parseProductVersion } from './product-version.mjs';
@@ -151,7 +153,7 @@ function releaseNotes(content, version) {
   return remaining.slice(0, nextHeading?.index ?? remaining.length).trim();
 }
 
-function verifyCandidate(options) {
+export function verifyCandidate(options) {
   const { candidate_sha: candidateSha, head, base } = options;
   if (!candidateSha || !head || !base) {
     fail('verify requires --candidate-sha, --head, and --base');
@@ -163,14 +165,37 @@ function verifyCandidate(options) {
     fail('candidate SHA must be a full lowercase 40-character commit SHA');
   }
 
-  const headSha = resolveBranch(head);
-  const baseSha = resolveBranch(base);
   const checkoutSha = git(['rev-parse', 'HEAD^{commit}']).stdout.trim();
-  if (candidateSha !== headSha) {
-    fail(`candidate SHA ${candidateSha} is stale; ${head} is ${headSha}`);
-  }
   if (checkoutSha !== candidateSha) {
     fail(`checked-out HEAD ${checkoutSha} does not match candidate SHA ${candidateSha}`);
+  }
+  let baseSha;
+  if (options.approved_release_sha) {
+    const releaseSha = options.approved_release_sha;
+    const previousReleaseSha = options.previous_release_sha;
+    if (!/^[0-9a-f]{40}$/.test(releaseSha) || !/^[0-9a-f]{40}$/.test(previousReleaseSha ?? '')) {
+      fail('已批准发布恢复必须提供完整的 release SHA 与 previous release SHA');
+    }
+    const parents = git(['show', '-s', '--format=%P', releaseSha]).stdout.trim().split(/\s+/);
+    if (
+      parents.length !== 2 ||
+      parents[0] !== previousReleaseSha ||
+      parents[1] !== candidateSha
+    ) {
+      fail('已批准 release merge 的双亲与候选绑定不一致');
+    }
+    const releaseTree = git(['rev-parse', `${releaseSha}^{tree}`]).stdout.trim();
+    const candidateTree = git(['rev-parse', `${candidateSha}^{tree}`]).stdout.trim();
+    if (releaseTree !== candidateTree) {
+      fail('已批准 release merge 的 tree 与候选 tree 不一致');
+    }
+    baseSha = previousReleaseSha;
+  } else {
+    const headSha = resolveBranch(head);
+    baseSha = resolveBranch(base);
+    if (candidateSha !== headSha) {
+      fail(`candidate SHA ${candidateSha} is stale; ${head} is ${headSha}`);
+    }
   }
   verifyPromotionBase(baseSha, candidateSha, base);
 
@@ -204,20 +229,22 @@ function verifyCandidate(options) {
   }
 
   const tag = `v${version}`;
-  const tagLookup = git(['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], {
-    allowFailure: true,
-  });
-  if (tagLookup.status === 0) fail(`tag ${tag} already exists`);
-  if (tagLookup.status !== 1) fail(`unable to inspect tag ${tag}`);
   const originLookup = git(['remote', 'get-url', 'origin'], { allowFailure: true });
   const hasOrigin = originLookup.status === 0;
-  if (hasOrigin) {
-    const remoteTagLookup = git(
-      ['ls-remote', '--exit-code', '--tags', '--refs', 'origin', `refs/tags/${tag}`],
-      { allowFailure: true },
-    );
-    if (remoteTagLookup.status === 0) fail(`tag ${tag} already exists on origin`);
-    if (remoteTagLookup.status !== 2) fail(`unable to inspect tag ${tag} on origin`);
+  if (!options.approved_release_sha) {
+    const tagLookup = git(['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], {
+      allowFailure: true,
+    });
+    if (tagLookup.status === 0) fail(`tag ${tag} already exists`);
+    if (tagLookup.status !== 1) fail(`unable to inspect tag ${tag}`);
+    if (hasOrigin) {
+      const remoteTagLookup = git(
+        ['ls-remote', '--exit-code', '--tags', '--refs', 'origin', `refs/tags/${tag}`],
+        { allowFailure: true },
+      );
+      if (remoteTagLookup.status === 0) fail(`tag ${tag} already exists on origin`);
+      if (remoteTagLookup.status !== 2) fail(`unable to inspect tag ${tag} on origin`);
+    }
   }
 
   return {
@@ -226,32 +253,34 @@ function verifyCandidate(options) {
     candidateSha,
     baseSha,
     commitRange: `${baseSha}..${candidateSha}`,
-    tagAbsence: hasOrigin
-      ? `refs/tags/${tag} is absent locally and on origin`
-      : `refs/tags/${tag} is absent locally (no origin configured)`,
+    tagAbsence: options.approved_release_sha
+      ? 'tag 身份已由 release merge 恢复契约验证'
+      : hasOrigin
+        ? `refs/tags/${tag} 在本地和 origin 均不存在`
+        : `refs/tags/${tag} 在本地不存在（未配置 origin）`,
   };
 }
 
-function renderPrBody(options) {
+export function renderPrBody(options) {
   if (!options.output) fail('render-pr-body requires --output');
   const candidate = verifyCandidate(options);
   const englishNotes = releaseNotes(fs.readFileSync('CHANGELOG.md', 'utf8'), candidate.version);
   const chineseNotes = releaseNotes(fs.readFileSync('CHANGELOG-zh.md', 'utf8'), candidate.version);
-  const body = `# Release promotion: Skill Expert v${candidate.version}
+  const body = `# 发布晋级：Skill Expert v${candidate.version}
 
 > [!IMPORTANT]
-> **Merge means publication approval / 合并即批准正式发布。** Merging this \`main\` → \`release\` pull request is the sole approval to publish this exact candidate.
+> **合并即批准正式发布。** 合并这一个 \`main\` → \`release\` PR，就是发布该精确候选的唯一批准。
 >
-> **Merge commit required / 必须使用 merge commit。** Normal feature pull requests may still use squash; this rule applies only to Release promotion pull requests.
+> **必须使用 merge commit。** 普通功能 PR 仍可使用 squash；本规则只适用于 Release PR。
 
-## Candidate identity
+## 候选身份
 
-- Version: \`${candidate.version}\`
-- Candidate SHA: \`${candidate.candidateSha}\`
-- Commit range: \`${candidate.commitRange}\` (\`release..main\`)
-- Promotion: \`head=main\` → \`base=release\`
+- 版本：\`${candidate.version}\`
+- Candidate SHA：\`${candidate.candidateSha}\`
+- 提交范围：\`${candidate.commitRange}\`（\`release..main\`）
+- 晋级方向：\`head=main\` → \`base=release\`
 
-## Release notes (English)
+## 英文 Changelog 条目
 
 ${englishNotes}
 
@@ -259,29 +288,29 @@ ${englishNotes}
 
 ${chineseNotes}
 
-## Candidate platform matrix
+## 候选四平台矩阵
 
-| Target | Desktop packages | Updater structure | Standalone CLI | Result |
+| 目标 | 桌面安装包 | Updater 结构 | 独立 CLI | 结果 |
 | --- | --- | --- | --- | --- |
-| macOS arm64 | app, DMG | app archive + signature | skill-expert-cli | passed |
-| macOS x64 | app, DMG | app archive + signature | skill-expert-cli | passed |
-| Windows x64 | NSIS, MSI | installer signatures | skill-expert-cli.exe | passed |
-| Linux x64 | AppImage, DEB, RPM | AppImage signature | skill-expert-cli | passed |
+| macOS arm64 | app、DMG | app archive 与签名 | skill-expert-cli | 通过 |
+| macOS x64 | app、DMG | app archive 与签名 | skill-expert-cli | 通过 |
+| Windows x64 | NSIS、MSI | 安装包签名 | skill-expert-cli.exe | 通过 |
+| Linux x64 | AppImage、DEB、RPM | AppImage 签名 | skill-expert-cli | 通过 |
 
-## macOS distribution limitation
+## macOS 分发边界
 
-The macOS candidate is **ad-hoc signed** and **not notarized**. Gatekeeper may require **System Settings → Privacy & Security → Open Anyway**. These checks prove package structure and signature integrity; they do not claim Gatekeeper acceptance or Apple notarization.
+macOS 候选使用 **ad-hoc 签名**且**未经 Apple 公证**。Gatekeeper 可能要求进入**系统设置 → 隐私与安全性 → 仍要打开**。这些检查只证明包结构和签名完整性，不代表通过 Gatekeeper 或 Apple 公证。
 
-## Validation results
+## 验证结果
 
-- Ordinary main CI: passed for \`${candidate.candidateSha}\`.
-- Candidate guard: passed for exact \`head=main\`, \`base=release\`, and current main SHA.
-- Four-target candidate packaging: passed for the exact candidate SHA above.
-- Version consistency: passed for manifest, lockfiles, Tauri, Rust, UI locales, and both Changelogs.
-- Stable version: \`${candidate.version}\` is a stable three-part SemVer.
-- Tag absence proof: \`${candidate.tagAbsence}\`.
+- 日常 main CI：\`${candidate.candidateSha}\` 已通过。
+- 候选门禁：精确 \`head=main\`、\`base=release\` 和当前 main SHA 已通过。
+- 四平台候选打包：上述精确 candidate SHA 已通过。
+- 版本一致性：manifest、lockfile、Tauri、Rust、UI locale 和双语 Changelog 已通过。
+- 稳定版本：\`${candidate.version}\` 是三段式 SemVer。
+- tag 不存在证明：\`${candidate.tagAbsence}\`。
 
-This pull request was created or refreshed by the successful candidate run on the same main SHA. It does not rely on a \`pull_request\` event generated by its own \`GITHUB_TOKEN\`.
+本 PR 由同一 main SHA 上成功的候选 run 创建或刷新，不依赖自身 \`GITHUB_TOKEN\` 触发的 \`pull_request\` 事件。
 `;
   fs.writeFileSync(options.output, body);
   return candidate;
@@ -292,7 +321,7 @@ function main() {
     const { command, options } = parseArguments(process.argv.slice(2));
     if (command === 'render-pr-body') {
       const result = renderPrBody(options);
-      console.log(`Release promotion body rendered for v${result.version} at ${result.candidateSha}.`);
+      console.log(`已为 ${result.candidateSha} 生成 v${result.version} 的发布晋级正文。`);
       return;
     }
     if (command !== 'verify') {
@@ -303,11 +332,13 @@ function main() {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
-    console.log(`Release candidate v${result.version} verified at ${result.candidateSha}.`);
+    console.log(`正式候选 v${result.version} 已通过验证：${result.candidateSha}`);
   } catch (error) {
-    console.error(`Release candidate validation failed: ${error.message}`);
+    console.error(`正式候选验证失败：${error.message}`);
     process.exitCode = 1;
   }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

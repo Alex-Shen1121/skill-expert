@@ -14,19 +14,30 @@ permissions:
 
 jobs:
   prepare-release:
-    name: 验证晋级并建立 Draft
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
-    runs-on: ubuntu-latest
+    name: 验证晋级证据并建立 Draft
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release' && vars.RELEASE_PIPELINE_MODE == 'candidate-reuse'
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
+      actions: read
       pull-requests: read
+      attestations: read
     outputs:
       version: ${{ steps.contract.outputs.version }}
       tag: ${{ steps.contract.outputs.tag }}
       release_sha: ${{ steps.contract.outputs.release_sha }}
+      previous_release_sha: ${{ steps.contract.outputs.previous_release_sha }}
       candidate_sha: ${{ steps.contract.outputs.candidate_sha }}
+      candidate_tree: ${{ steps.contract.outputs.candidate_tree }}
+      candidate_run_id: ${{ steps.contract.outputs.candidate_run_id }}
+      candidate_run_attempt: ${{ steps.contract.outputs.candidate_run_attempt }}
+      evidence_artifact_id: ${{ steps.contract.outputs.evidence_artifact_id }}
+      evidence_artifact_name: ${{ steps.contract.outputs.evidence_artifact_name }}
+      evidence_artifact_digest: ${{ steps.contract.outputs.evidence_artifact_digest }}
+      manifest_sha256: ${{ steps.contract.outputs.manifest_sha256 }}
       tag_exists: ${{ steps.contract.outputs.tag_exists }}
       draft_exists: ${{ steps.contract.outputs.draft_exists }}
+      reuse_draft_assets: ${{ steps.contract.outputs.reuse_draft_assets }}
     steps:
       - name: 检出精确 release HEAD
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -35,15 +46,10 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-
       - name: 生产发布必须使用已配置的 Updater 信任根
         run: npm run updater:check:production
 
-      - name: 绑定合法 main 到 release 合并身份
+      - name: 绑定 release merge、唯一 Release PR 与候选证据
         id: contract
         shell: bash
         env:
@@ -59,33 +65,24 @@ jobs:
             echo "当前 release HEAD 已变化：预期 ${RELEASE_SHA}，实际 ${CURRENT_RELEASE_SHA}" >&2
             exit 1
           fi
-
           PARENTS="$(git show -s --format=%P "$RELEASE_SHA")"
-          PREVIOUS_RELEASE_SHA="$(awk '{print $1}' <<<"$PARENTS")"
-          CANDIDATE_SHA="$(awk '{print $2}' <<<"$PARENTS")"
           if [ "$(wc -w <<<"$PARENTS" | tr -d ' ')" != "2" ]; then
             echo "release HEAD 必须是 main 到 release 的双父 merge commit" >&2
             exit 1
           fi
+          PREVIOUS_RELEASE_SHA="$(awk '{print $1}' <<<"$PARENTS")"
+          CANDIDATE_SHA="$(awk '{print $2}' <<<"$PARENTS")"
 
-          gh api \
-            -H "Accept: application/vnd.github+json" \
+          gh api -H "Accept: application/vnd.github+json" \
             "repos/${REPO}/commits/${RELEASE_SHA}/pulls" > "$RUNNER_TEMP/release-pulls.json"
-          VALID_PRS="$(jq \
-            --arg repo "$REPO" \
-            --arg release_sha "$RELEASE_SHA" \
-            '[.[] | select(
-              .merged_at != null and
-              .head.ref == "main" and
-              .base.ref == "release" and
-              .head.repo.full_name == $repo and
-              .merge_commit_sha == $release_sha
-            )]' "$RUNNER_TEMP/release-pulls.json")"
+          VALID_PRS="$(jq --arg repo "$REPO" --arg release_sha "$RELEASE_SHA" \
+            '[.[] | select(.merged_at != null and .head.ref == "main" and .base.ref == "release" and .head.repo.full_name == $repo and .merge_commit_sha == $release_sha)]' \
+            "$RUNNER_TEMP/release-pulls.json")"
           if [ "$(jq 'length' <<<"$VALID_PRS")" != "1" ]; then
             echo "release push 必须对应唯一且已合并的同仓库 main 到 release PR" >&2
-            jq '.' "$RUNNER_TEMP/release-pulls.json" >&2
             exit 1
           fi
+          jq -r '.[0].body // ""' <<<"$VALID_PRS" > "$RUNNER_TEMP/release-pr.md"
 
           RECOVERY_ARGUMENTS=()
           if [ "$RUN_ATTEMPT" -gt 1 ]; then
@@ -95,11 +92,65 @@ jobs:
             --release-sha "$RELEASE_SHA" \
             --candidate-sha "$CANDIDATE_SHA" \
             --previous-release-sha "$PREVIOUS_RELEASE_SHA" \
-            --json \
-            "${RECOVERY_ARGUMENTS[@]}" > "$RUNNER_TEMP/release-contract.json"
+            --json "${RECOVERY_ARGUMENTS[@]}" > "$RUNNER_TEMP/release-contract.json"
           VERSION="$(jq -r '.version' "$RUNNER_TEMP/release-contract.json")"
           TAG="$(jq -r '.tag' "$RUNNER_TEMP/release-contract.json")"
           TAG_EXISTS="$(jq -r '.tagExists' "$RUNNER_TEMP/release-contract.json")"
+          CANDIDATE_TREE="$(git rev-parse "${CANDIDATE_SHA}^{tree}")"
+
+          node scripts/release-promotion.mjs read-selector \
+            --pr-body "$RUNNER_TEMP/release-pr.md" > "$RUNNER_TEMP/candidate-selector.json"
+          CANDIDATE_RUN_ID="$(jq -r '.runId' "$RUNNER_TEMP/candidate-selector.json")"
+          CANDIDATE_RUN_ATTEMPT="$(jq -r '.runAttempt' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_ID="$(jq -r '.evidenceArtifactId' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_NAME="$(jq -r '.evidenceArtifactName' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_DIGEST="$(jq -r '.evidenceArtifactDigest' "$RUNNER_TEMP/candidate-selector.json")"
+          MANIFEST_SHA256="$(jq -r '.manifestSha256' "$RUNNER_TEMP/candidate-selector.json")"
+
+          gh api "repos/${REPO}/actions/runs/${CANDIDATE_RUN_ID}" > "$RUNNER_TEMP/candidate-run.json"
+          gh api "repos/${REPO}/actions/runs/${CANDIDATE_RUN_ID}/attempts/${CANDIDATE_RUN_ATTEMPT}/jobs?per_page=100" \
+            > "$RUNNER_TEMP/candidate-jobs.json"
+          gh api "repos/${REPO}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/candidate-artifacts.json"
+          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
+          if [ "sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
+            echo "候选证据 artifact 下载摘要不一致" >&2
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/candidate-evidence"
+          unzip -q "$EVIDENCE_ARCHIVE" -d "$RUNNER_TEMP/candidate-evidence"
+          if [ "$(sha256sum "$RUNNER_TEMP/candidate-evidence/candidate-manifest.json" | awk '{print $1}')" != "$MANIFEST_SHA256" ]; then
+            echo "候选清单摘要与 Release PR 选择器不一致" >&2
+            exit 1
+          fi
+          gh attestation verify "$RUNNER_TEMP/candidate-evidence/candidate-manifest.json" \
+            --repo "$REPO" \
+            --bundle "$RUNNER_TEMP/candidate-evidence/candidate-build-provenance.json" \
+            --source-digest "$CANDIDATE_SHA" \
+            --source-ref refs/heads/main \
+            --signer-workflow "$REPO/.github/workflows/candidate-build.yml" \
+            --signer-digest "$CANDIDATE_SHA" \
+            --format json > "$RUNNER_TEMP/candidate-provenance-report.json"
+
+          git worktree add --detach "$RUNNER_TEMP/candidate-checkout" "$CANDIDATE_SHA"
+          (
+            cd "$RUNNER_TEMP/candidate-checkout"
+            env -u GH_TOKEN node "$GITHUB_WORKSPACE/scripts/release-promotion.mjs" verify-candidate \
+              --repository "$REPO" \
+              --candidate-sha "$CANDIDATE_SHA" \
+              --head main \
+              --base release \
+              --approved-release-sha "$RELEASE_SHA" \
+              --previous-release-sha "$PREVIOUS_RELEASE_SHA" \
+              --pr-body "$RUNNER_TEMP/release-pr.md" \
+              --run-response "$RUNNER_TEMP/candidate-run.json" \
+              --jobs-response "$RUNNER_TEMP/candidate-jobs.json" \
+              --artifacts-response "$RUNNER_TEMP/candidate-artifacts.json" \
+              --evidence-directory "$RUNNER_TEMP/candidate-evidence" \
+              --provenance-report "$RUNNER_TEMP/candidate-provenance-report.json"
+          )
 
           gh api "repos/${REPO}/releases?per_page=100" > "$RUNNER_TEMP/existing-releases.json"
           MATCHING_RELEASES="$(jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' "$RUNNER_TEMP/existing-releases.json")"
@@ -115,24 +166,41 @@ jobs:
             exit 1
           fi
           if [ "$DRAFT_COUNT" = "1" ]; then
-            if [ "$TAG_EXISTS" != "true" ]; then
-              echo "恢复用 Draft 必须绑定已经精确验证的 annotated tag" >&2
-              exit 1
-            fi
+            [ "$TAG_EXISTS" = "true" ] || { echo "恢复用 Draft 必须绑定已验证 tag" >&2; exit 1; }
             DRAFT_EXISTS=true
+            jq '.[0] | {assets: (.assets // [])}' <<<"$DRAFT_RELEASES" > "$RUNNER_TEMP/draft-assets.json"
+            DRAFT_STATE="$(node scripts/release-assets.mjs draft-state \
+              --version "$VERSION" \
+              --assets-response "$RUNNER_TEMP/draft-assets.json" \
+              --json | jq -r '.state')"
+            if [ "$DRAFT_STATE" = "complete" ]; then
+              REUSE_DRAFT_ASSETS=true
+            else
+              REUSE_DRAFT_ASSETS=false
+            fi
           else
             DRAFT_EXISTS=false
+            REUSE_DRAFT_ASSETS=false
           fi
           {
             echo "version=$VERSION"
             echo "tag=$TAG"
             echo "release_sha=$RELEASE_SHA"
+            echo "previous_release_sha=$PREVIOUS_RELEASE_SHA"
             echo "candidate_sha=$CANDIDATE_SHA"
+            echo "candidate_tree=$CANDIDATE_TREE"
+            echo "candidate_run_id=$CANDIDATE_RUN_ID"
+            echo "candidate_run_attempt=$CANDIDATE_RUN_ATTEMPT"
+            echo "evidence_artifact_id=$EVIDENCE_ARTIFACT_ID"
+            echo "evidence_artifact_name=$EVIDENCE_ARTIFACT_NAME"
+            echo "evidence_artifact_digest=$EVIDENCE_ARTIFACT_DIGEST"
+            echo "manifest_sha256=$MANIFEST_SHA256"
             echo "tag_exists=$TAG_EXISTS"
             echo "draft_exists=$DRAFT_EXISTS"
+            echo "reuse_draft_assets=$REUSE_DRAFT_ASSETS"
           } >> "$GITHUB_OUTPUT"
 
-      - name: 生成双语 Draft 说明
+      - name: 生成 Draft 说明
         shell: bash
         env:
           VERSION: ${{ steps.contract.outputs.version }}
@@ -141,7 +209,6 @@ jobs:
           CANDIDATE_SHA: ${{ steps.contract.outputs.candidate_sha }}
         run: |
           set -euo pipefail
-          BODY_EN="$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" CHANGELOG.md | awk -f scripts/strip-empty-sections.awk)"
           BODY_ZH="$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" CHANGELOG-zh.md | awk -f scripts/strip-empty-sections.awk)"
           RELEASE_DATE="$(grep -m1 "^## \[${VERSION}\] - " CHANGELOG.md | sed -E "s/^## \[${VERSION}\] - ([0-9-]+).*/\1/")"
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
@@ -156,18 +223,6 @@ jobs:
           ## macOS 分发说明
 
           macOS 版本使用 ad-hoc 签名且不经过 Apple 公证。首次打开时可能需要前往「系统设置 → 隐私与安全性 → 仍要打开」；无需关闭 Gatekeeper。
-
-          <details><summary>English release notes</summary>
-
-          Release date: \`${RELEASE_DATE}\`
-          Release commit: \`${RELEASE_SHA}\`
-          Candidate commit: \`${CANDIDATE_SHA}\`
-
-          ${BODY_EN}
-
-          The macOS build is ad-hoc signed and is not notarized by Apple. First launch may require System Settings → Privacy & Security → Open Anyway. Do not disable Gatekeeper.
-
-          </details>
           EOF
 
       - name: 创建不可变 annotated tag
@@ -184,366 +239,301 @@ jobs:
           TAG_OBJECT_SHA="$(gh api --method POST "repos/${REPO}/git/tags" \
             -f tag="$TAG" \
             -f message="Skill Expert $TAG"$'\n'"workflow-run-id: ${RUN_ID}" \
-            -f object="$RELEASE_SHA" \
-            -f type="commit" \
+            -f object="$RELEASE_SHA" -f type="commit" \
             -f 'tagger[name]=Skill Expert 发布机器人' \
             -f 'tagger[email]=skill-expert-release@users.noreply.github.com' \
-            -f "tagger[date]=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --jq '.sha')"
-          gh api --method POST "repos/${REPO}/git/refs" \
-            -f ref="refs/tags/$TAG" \
-            -f sha="$TAG_OBJECT_SHA"
+            -f "tagger[date]=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --jq '.sha')"
+          gh api --method POST "repos/${REPO}/git/refs" -f ref="refs/tags/$TAG" -f sha="$TAG_OBJECT_SHA"
 
       - name: 创建不可见 Draft Release
         if: steps.contract.outputs.draft_exists != 'true'
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.contract.outputs.tag }}
           RELEASE_SHA: ${{ steps.contract.outputs.release_sha }}
           VERSION: ${{ steps.contract.outputs.version }}
+        run: >-
+          gh release create "$TAG" --repo "$REPO" --target "$RELEASE_SHA"
+          --title "Skill Expert v${VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          --draft --latest=false --verify-tag
+
+  stage-candidate:
+    name: 精确搬运候选字节
+    needs: prepare-release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    outputs:
+      staging_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      staging_artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - name: 检出正式搬运工具
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+
+      - name: 下载并验证精确候选 artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ needs.prepare-release.outputs.candidate_run_id }}
+          EVIDENCE_ARTIFACT_ID: ${{ needs.prepare-release.outputs.evidence_artifact_id }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.prepare-release.outputs.evidence_artifact_digest }}
+          MANIFEST_SHA256: ${{ needs.prepare-release.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --target "$RELEASE_SHA" \
-            --title "Skill Expert v${VERSION}" \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            --draft \
-            --latest=false \
-            --verify-tag
+          mkdir -p staging/candidate-evidence staging/candidate-assets staging/release-assets
+          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
+          if [ "sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
+            echo "候选证据 artifact 下载摘要不一致" >&2
+            exit 1
+          fi
+          unzip -q "$EVIDENCE_ARCHIVE" -d staging/candidate-evidence
+          if [ "$(sha256sum staging/candidate-evidence/candidate-manifest.json | awk '{print $1}')" != "$MANIFEST_SHA256" ]; then
+            echo "候选清单摘要不一致" >&2
+            exit 1
+          fi
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" > "$RUNNER_TEMP/candidate-artifacts.json"
+          jq -c '.artifacts[]' staging/candidate-evidence/candidate-manifest.json | while IFS= read -r EXPECTED; do
+            TARGET_ID="$(jq -r '.target' <<<"$EXPECTED")"
+            ARTIFACT_ID="$(jq -r '.id' <<<"$EXPECTED")"
+            ARTIFACT_NAME="$(jq -r '.name' <<<"$EXPECTED")"
+            ARTIFACT_DIGEST="$(jq -r '.digest' <<<"$EXPECTED")"
+            MATCHES="$(jq --argjson id "$ARTIFACT_ID" --arg name "$ARTIFACT_NAME" --arg digest "$ARTIFACT_DIGEST" \
+              '[.artifacts[] | select(.id == $id and .name == $name and .digest == $digest and .expired == false)]' \
+              "$RUNNER_TEMP/candidate-artifacts.json")"
+            [ "$(jq 'length' <<<"$MATCHES")" = "1" ] || { echo "候选 artifact ${ARTIFACT_ID} 不可用" >&2; exit 1; }
+            ARCHIVE="$RUNNER_TEMP/${ARTIFACT_ID}.zip"
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" > "$ARCHIVE"
+            [ "sha256:$(sha256sum "$ARCHIVE" | awk '{print $1}')" = "$ARTIFACT_DIGEST" ] || { echo "候选 artifact ${ARTIFACT_ID} 摘要不一致" >&2; exit 1; }
+            mkdir "staging/candidate-assets/${TARGET_ID}"
+            unzip -q "$ARCHIVE" -d "staging/candidate-assets/${TARGET_ID}"
+          done
 
-  build-release:
-    name: 正式构建（${{ matrix.target_id }}）
-    needs: prepare-release
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+      - name: 验证候选字节的真实候选构建来源证明
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ needs.prepare-release.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          BUNDLE=staging/candidate-evidence/candidate-build-provenance.json
+          gh attestation verify staging/candidate-evidence/candidate-manifest.json \
+            --repo "$REPO" --bundle "$BUNDLE" --source-digest "$CANDIDATE_SHA" \
+            --source-ref refs/heads/main --signer-workflow "$REPO/.github/workflows/candidate-build.yml" \
+            --signer-digest "$CANDIDATE_SHA"
+          jq -r '.artifacts[] | .target as $target | .files[] | [$target, .name] | @tsv' \
+            staging/candidate-evidence/candidate-manifest.json | while IFS=$'\t' read -r TARGET_ID FILE_NAME; do
+              gh attestation verify "staging/candidate-assets/${TARGET_ID}/${FILE_NAME}" \
+                --repo "$REPO" --bundle "$BUNDLE" --source-digest "$CANDIDATE_SHA" \
+                --source-ref refs/heads/main --signer-workflow "$REPO/.github/workflows/candidate-build.yml" \
+                --signer-digest "$CANDIDATE_SHA"
+            done
+
+      - name: 丢弃临时签名并逐字节形成正式本体
+        run: |
+          node scripts/release-promotion.mjs materialize-release \
+            --manifest staging/candidate-evidence/candidate-manifest.json \
+            --candidate-assets-directory staging/candidate-assets \
+            --release-assets-directory staging/release-assets \
+            --output staging/candidate-byte-reuse.json
+          cp staging/candidate-evidence/candidate-manifest.json staging/release-assets/candidate-manifest.json
+          cp staging/candidate-evidence/candidate-build-provenance.json staging/release-assets/candidate-build-provenance.json
+
+      - name: 上传已验证的正式本体暂存区
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-staging-${{ needs.prepare-release.outputs.release_sha }}-${{ github.run_attempt }}
+          path: staging/
+          if-no-files-found: error
+          retention-days: 1
+
+  production-release:
+    name: 生产重签并生成正式证据
+    needs: [prepare-release, stage-candidate]
+    runs-on: ubuntu-22.04
     environment: release
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target_id: macos-arm64
-            runner: macos-latest
-            rust_target: aarch64-apple-darwin
-            bundles: app,dmg
-          - target_id: macos-x64
-            runner: macos-latest
-            rust_target: x86_64-apple-darwin
-            bundles: app,dmg
-          - target_id: windows-x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            bundles: nsis,msi
-          - target_id: linux-x64
-            runner: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb,rpm
-    steps:
-      - name: 检出精确 release commit
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
-
-      - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: 配置 Rust 工具链
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: 恢复 Rust 依赖缓存
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: src-tauri
-          save-if: false
-
-      - name: 安装 Linux 打包依赖
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            rpm
-
-      - name: 安装前端依赖
-        run: npm ci
-
-      - name: 再次验证生产 Updater 信任根
-        run: npm run updater:check:production
-
-      - name: 构建独立 CLI
-        shell: bash
-        run: >-
-          cargo build --release --locked
-          --manifest-path src-tauri/Cargo.toml
-          --bin skill-expert-cli
-          --target "${{ matrix.rust_target }}"
-
-      - name: 使用生产 Updater 密钥构建完整桌面包
-        shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: "-"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RUST_TARGET: ${{ matrix.rust_target }}
-          BUNDLES: ${{ matrix.bundles }}
-        run: |
-          set -euo pipefail
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
-            echo "release Environment 缺少生产 Updater 签名 Secret" >&2
-            exit 1
-          fi
-          npm run tauri -- build --ci --target "$RUST_TARGET" --bundles "$BUNDLES"
-
-      - name: 验证 macOS ad-hoc 可执行面
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
-        run: |
-          set -euo pipefail
-          BUNDLE_DIR="$BUILD_ROOT/bundle/macos"
-          APP_PATH="$BUNDLE_DIR/Skill Expert.app"
-          CLI_PATH="$BUILD_ROOT/skill-expert-cli"
-          codesign --force --sign - "$CLI_PATH"
-          ARCHIVE="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
-          if [ -z "$ARCHIVE" ]; then
-            echo "未生成 macOS Updater archive" >&2
-            exit 1
-          fi
-          node scripts/verify-macos-adhoc.mjs \
-            --app "$APP_PATH" \
-            --archive "$ARCHIVE" \
-            --cli "$CLI_PATH"
-
-      - name: 整理稳定正式资产名
-        shell: bash
-        env:
-          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
-          TARGET_ID: ${{ matrix.target_id }}
-          VERSION: ${{ needs.prepare-release.outputs.version }}
-        run: |
-          set -euo pipefail
-          node scripts/candidate-assets.mjs stage \
-            --version "$VERSION" \
-            --target "$TARGET_ID" \
-            --build-root "$BUILD_ROOT" \
-            --directory "release-assets/$TARGET_ID"
-          node scripts/candidate-assets.mjs verify \
-            --version "$VERSION" \
-            --target "$TARGET_ID" \
-            --directory "release-assets/$TARGET_ID"
-
-      - name: 用稳定文件名重新签署 Updater 资产
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TARGET_ID: ${{ matrix.target_id }}
-          VERSION: ${{ needs.prepare-release.outputs.version }}
-        run: >-
-          node scripts/sign-release-updater.mjs
-          --version "$VERSION"
-          --target "$TARGET_ID"
-          --directory "release-assets/$TARGET_ID"
-
-      - name: 上传到同一 Draft Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" \
-            --repo "$REPO" \
-            "release-assets/${{ matrix.target_id }}/"*
-
-  release-metadata:
-    name: 生成 Updater 元数据与校验和
-    needs: [prepare-release, build-release]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ needs.prepare-release.outputs.version }}
-      tag: ${{ needs.prepare-release.outputs.tag }}
-      release_sha: ${{ needs.prepare-release.outputs.release_sha }}
-    steps:
-      - name: 检出发布工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
-
-      - name: 下载 Draft 中的真实平台资产
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash scripts/download-draft-release-assets.sh release-assets
-
-      - name: 生成四平台 latest.json 与 SHA256SUMS
-        shell: bash
-        env:
-          VERSION: ${{ needs.prepare-release.outputs.version }}
-        run: |
-          set -euo pipefail
-          RELEASE_DATE="$(grep -m1 "^## \[${VERSION}\] - " CHANGELOG.md | sed -E "s/^## \[${VERSION}\] - ([0-9-]+).*/\1/")"
-          node scripts/release-assets.mjs metadata \
-            --version "$VERSION" \
-            --directory release-assets \
-            --pub-date "${RELEASE_DATE}T00:00:00Z"
-          node scripts/release-assets.mjs checksums \
-            --version "$VERSION" \
-            --directory release-assets
-
-      - name: 上传元数据与完整性清单
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.prepare-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" \
-            --repo "$REPO" \
-            release-assets/latest.json \
-            release-assets/SHA256SUMS
-
-  release-provenance:
-    name: 生成 GitHub build provenance
-    needs: release-metadata
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+      actions: read
       id-token: write
       attestations: write
       artifact-metadata: write
     outputs:
-      version: ${{ needs.release-metadata.outputs.version }}
-      tag: ${{ needs.release-metadata.outputs.tag }}
-      release_sha: ${{ needs.release-metadata.outputs.release_sha }}
+      version: ${{ needs.prepare-release.outputs.version }}
+      tag: ${{ needs.prepare-release.outputs.tag }}
+      release_sha: ${{ needs.prepare-release.outputs.release_sha }}
+      candidate_sha: ${{ needs.prepare-release.outputs.candidate_sha }}
     steps:
-      - name: 检出发布工具
+      - name: 检出正式生成工具
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          ref: ${{ needs.release-metadata.outputs.release_sha }}
-
-      - name: 下载 Draft 中待证明的真实资产
-        shell: bash
+          ref: ${{ needs.prepare-release.outputs.release_sha }}
+      - name: 配置 Node.js
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: 安装生产重签工具依赖
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
+        run: npm ci
+      - name: 按精确 ID 下载正式本体暂存区
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-metadata.outputs.tag }}
+          ARTIFACT_ID: ${{ needs.stage-candidate.outputs.staging_artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.stage-candidate.outputs.staging_artifact_digest }}
         run: |
           set -euo pipefail
-          bash scripts/download-draft-release-assets.sh release-assets
+          ARCHIVE="$RUNNER_TEMP/release-staging.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" > "$ARCHIVE"
+          [ "sha256:$(sha256sum "$ARCHIVE" | awk '{print $1}')" = "$ARTIFACT_DIGEST" ] || { echo "正式本体暂存 artifact 摘要不一致" >&2; exit 1; }
+          unzip -q "$ARCHIVE" -d staging
 
-      - name: 为 Draft 实际字节生成来源证明
+      - name: 使用生产信任根重新签署稳定 Updater 文件
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm run updater:check:production
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+            echo "release Environment 缺少生产 Updater 签名 Secret" >&2
+            exit 1
+          fi
+          for TARGET_ID in macos-arm64 macos-x64 windows-x64 linux-x64; do
+            node scripts/sign-release-updater.mjs --version "$VERSION" --target "$TARGET_ID" --directory staging/release-assets
+          done
+
+      - name: 生成晋级绑定、Updater 元数据与校验和
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
+          CANDIDATE_SHA: ${{ needs.prepare-release.outputs.candidate_sha }}
+          CANDIDATE_TREE: ${{ needs.prepare-release.outputs.candidate_tree }}
+        run: |
+          set -euo pipefail
+          RELEASE_TREE="$(git rev-parse "${RELEASE_SHA}^{tree}")"
+          node scripts/release-promotion.mjs create-promotion-binding \
+            --reuse-report staging/candidate-byte-reuse.json --version "$VERSION" --tag "$TAG" \
+            --release-sha "$RELEASE_SHA" --candidate-sha "$CANDIDATE_SHA" \
+            --release-tree "$RELEASE_TREE" --candidate-tree "$CANDIDATE_TREE" \
+            --output staging/release-assets/promotion-binding.json
+          RELEASE_DATE="$(grep -m1 "^## \[${VERSION}\] - " CHANGELOG.md | sed -E "s/^## \[${VERSION}\] - ([0-9-]+).*/\1/")"
+          node scripts/release-assets.mjs metadata --version "$VERSION" --directory staging/release-assets --pub-date "${RELEASE_DATE}T00:00:00Z"
+          node scripts/release-assets.mjs checksums --version "$VERSION" --directory staging/release-assets
+
+      - name: 为正式生成文件创建独立 provenance
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
         id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: release-assets/*
-
-      - name: 上传来源证明到同一 Draft
-        shell: bash
+          subject-path: |
+            staging/release-assets/*.sig
+            staging/release-assets/latest.json
+            staging/release-assets/SHA256SUMS
+            staging/release-assets/promotion-binding.json
+          show-summary: false
+      - name: 上传完整正式资产到同一 Draft
+        if: needs.prepare-release.outputs.reuse_draft_assets != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-metadata.outputs.tag }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: |
           set -euo pipefail
-          cp "$BUNDLE_PATH" release-assets/build-provenance.json
-          gh release upload "$TAG" \
-            --repo "$REPO" \
-            release-assets/build-provenance.json
+          cp "$BUNDLE_PATH" staging/release-assets/release-provenance.json
+          node scripts/release-assets.mjs verify --version "$VERSION" --directory staging/release-assets
+          gh release upload "$TAG" --repo "$REPO" staging/release-assets/*
+      - name: 复用同一次 workflow 已验证的完整 Draft 资产
+        if: needs.prepare-release.outputs.reuse_draft_assets == 'true'
+        run: echo "既有 Draft 已包含精确完整资产；不重新签名、不覆盖，直接进入下载回验。"
 
   verify-release:
-    name: 下载回验全部正式资产
-    needs: release-provenance
-    runs-on: ubuntu-latest
+    name: 下载回验完整性与双层 provenance
+    needs: production-release
+    runs-on: ubuntu-22.04
     permissions:
-      contents: write
+      contents: read
+      attestations: read
     outputs:
-      tag: ${{ needs.release-provenance.outputs.tag }}
+      tag: ${{ needs.production-release.outputs.tag }}
     steps:
       - name: 检出发布验证工具
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          ref: ${{ needs.release-provenance.outputs.release_sha }}
-
+          ref: ${{ needs.production-release.outputs.release_sha }}
       - name: 下载 Draft 的最终真实资产
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-provenance.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash scripts/download-draft-release-assets.sh release-assets
-
-      - name: 验证精确清单、哈希与 Updater 密码学签名
-        shell: bash
+          TAG: ${{ needs.production-release.outputs.tag }}
+        run: bash scripts/download-draft-release-assets.sh release-assets
+      - name: 验证精确清单、哈希、Updater 与晋级绑定
         env:
-          VERSION: ${{ needs.release-provenance.outputs.version }}
+          VERSION: ${{ needs.production-release.outputs.version }}
+          RELEASE_SHA: ${{ needs.production-release.outputs.release_sha }}
+          CANDIDATE_SHA: ${{ needs.production-release.outputs.candidate_sha }}
         run: |
           set -euo pipefail
-          node scripts/release-assets.mjs verify \
-            --version "$VERSION" \
-            --directory release-assets
+          node scripts/release-assets.mjs verify --version "$VERSION" --directory release-assets
           (cd release-assets && sha256sum --check SHA256SUMS)
-          node scripts/verify-updater-metadata.mjs \
-            --file release-assets/latest.json \
-            --version "$VERSION" \
-            --asset-directory release-assets
-
-      - name: 验证每个正式字节的 build provenance
-        shell: bash
+          node scripts/verify-updater-metadata.mjs --file release-assets/latest.json --version "$VERSION" --asset-directory release-assets
+          TREE="$(git rev-parse "${RELEASE_SHA}^{tree}")"
+          node scripts/release-promotion.mjs verify-promotion-binding \
+            --binding release-assets/promotion-binding.json --release-assets-directory release-assets \
+            --version "$VERSION" --release-sha "$RELEASE_SHA" --candidate-sha "$CANDIDATE_SHA" --tree "$TREE"
+      - name: 验证候选构建与正式生成的来源证明互不混淆
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          RELEASE_SHA: ${{ needs.release-provenance.outputs.release_sha }}
+          RELEASE_SHA: ${{ needs.production-release.outputs.release_sha }}
+          CANDIDATE_SHA: ${{ needs.production-release.outputs.candidate_sha }}
         run: |
           set -euo pipefail
-          cd release-assets
-          {
-            awk '{print $2}' SHA256SUMS
-            echo SHA256SUMS
-          } | while IFS= read -r ASSET_NAME; do
-            gh attestation verify "$ASSET_NAME" \
-              --repo "$REPO" \
-              --bundle build-provenance.json \
-              --source-digest "$RELEASE_SHA" \
-              --source-ref refs/heads/release \
-              --signer-workflow "$REPO/.github/workflows/release.yml"
+          CANDIDATE_BUNDLE=release-assets/candidate-build-provenance.json
+          RELEASE_BUNDLE=release-assets/release-provenance.json
+          gh attestation verify release-assets/candidate-manifest.json --repo "$REPO" --bundle "$CANDIDATE_BUNDLE" \
+            --source-digest "$CANDIDATE_SHA" --source-ref refs/heads/main \
+            --signer-workflow "$REPO/.github/workflows/candidate-build.yml" --signer-digest "$CANDIDATE_SHA"
+          jq -r '.reusedFiles[].name' release-assets/promotion-binding.json | while IFS= read -r ASSET_NAME; do
+            gh attestation verify "release-assets/${ASSET_NAME}" --repo "$REPO" --bundle "$CANDIDATE_BUNDLE" \
+              --source-digest "$CANDIDATE_SHA" --source-ref refs/heads/main \
+              --signer-workflow "$REPO/.github/workflows/candidate-build.yml" --signer-digest "$CANDIDATE_SHA"
+          done
+          { find release-assets -maxdepth 1 -type f -name '*.sig' -exec basename {} \;; printf '%s\n' latest.json SHA256SUMS promotion-binding.json; } | while IFS= read -r ASSET_NAME; do
+            gh attestation verify "release-assets/${ASSET_NAME}" --repo "$REPO" --bundle "$RELEASE_BUNDLE" \
+              --source-digest "$RELEASE_SHA" --source-ref refs/heads/release \
+              --signer-workflow "$REPO/.github/workflows/release.yml" --signer-digest "$RELEASE_SHA"
           done
 
   verify-macos:
     name: 下载回验 macOS ad-hoc 签名
-    needs: release-provenance
+    needs: production-release
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -557,34 +547,25 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          ref: ${{ needs.release-provenance.outputs.release_sha }}
-
+          ref: ${{ needs.production-release.outputs.release_sha }}
       - name: 下载 Draft 的最终真实资产
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-provenance.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash scripts/download-draft-release-assets.sh release-assets
-
+          TAG: ${{ needs.production-release.outputs.tag }}
+        run: bash scripts/download-draft-release-assets.sh release-assets
       - name: 验证 DMG、Updater archive 与 CLI 的 ad-hoc 签名
         env:
-          VERSION: ${{ needs.release-provenance.outputs.version }}
+          VERSION: ${{ needs.production-release.outputs.version }}
           TARGET_ID: ${{ matrix.target_id }}
-        run: >-
-          node scripts/verify-macos-release.mjs
-          --version "$VERSION"
-          --directory release-assets
-          --target "$TARGET_ID"
+        run: node scripts/verify-macos-release.mjs --version "$VERSION" --directory release-assets --target "$TARGET_ID"
 
   verify-native:
     name: 下载回验原生版本（${{ matrix.target_id }}）
-    needs: release-provenance
+    needs: production-release
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -598,59 +579,38 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-          ref: ${{ needs.release-provenance.outputs.release_sha }}
-
+          ref: ${{ needs.production-release.outputs.release_sha }}
       - name: 下载 Draft 的最终真实资产
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-provenance.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bash scripts/download-draft-release-assets.sh release-assets
-
+          TAG: ${{ needs.production-release.outputs.tag }}
+        run: bash scripts/download-draft-release-assets.sh release-assets
       - name: 安装 Linux 包检查工具
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm libarchive-tools binutils
-
+        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools binutils
       - name: 回验 Linux CLI 与三种桌面包版本
         if: runner.os == 'Linux'
         env:
-          VERSION: ${{ needs.release-provenance.outputs.version }}
-        run: >-
-          node scripts/verify-linux-release.mjs
-          --version "$VERSION"
-          --directory release-assets
-
+          VERSION: ${{ needs.production-release.outputs.version }}
+        run: node scripts/verify-linux-release.mjs --version "$VERSION" --directory release-assets
       - name: 回验 Windows CLI、NSIS 与 MSI 版本
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          VERSION: ${{ needs.release-provenance.outputs.version }}
-        run: >-
-          ./scripts/verify-windows-release.ps1
-          -Version "$env:VERSION"
-          -Directory release-assets
+          VERSION: ${{ needs.production-release.outputs.version }}
+        run: ./scripts/verify-windows-release.ps1 -Version "$env:VERSION" -Directory release-assets
 
   publish-release:
     name: 原子公开 Latest
     needs: [verify-release, verify-macos, verify-native]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - name: 仅公开已通过全部门禁的 Draft
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ needs.verify-release.outputs.tag }}
-        run: |
-          set -euo pipefail
-          gh release edit "$TAG" \
-            --repo "$REPO" \
-            --draft=false \
-            --latest
+        run: gh release edit "$TAG" --repo "$REPO" --draft=false --latest

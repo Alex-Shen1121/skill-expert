@@ -6,14 +6,17 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
+const legacyWorkflowPath = path.join(repositoryRoot, '.github/workflows/release-legacy.yml');
+const legacyAssetsScriptPath = path.join(repositoryRoot, 'scripts/legacy-release-assets.mjs');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
-const draftDownloadScriptPath = path.join(
-  repositoryRoot,
-  'scripts/download-draft-release-assets.sh',
-);
+const draftDownloadScriptPath = path.join(repositoryRoot, 'scripts/download-draft-release-assets.sh');
 
 function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
+}
+
+function legacyWorkflow() {
+  return fs.readFileSync(legacyWorkflowPath, 'utf8');
 }
 
 function job(content, name) {
@@ -34,159 +37,187 @@ test('正式发布只响应 release push 且所有发布串行排队不取消', 
   assert.match(content, /^concurrency:\n  group: release-production\n  cancel-in-progress: false$/m);
   assert.match(
     job(content, 'prepare-release'),
-    /if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/release'/,
+    /if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/release' && vars\.RELEASE_PIPELINE_MODE == 'candidate-reuse'/,
   );
 });
 
-test('前置门禁绑定唯一 main 到 release 合并并创建不可变 annotated tag 与 Draft', () => {
+test('真实演练前由显式变量隔离新旧正式发布路径', () => {
+  const current = workflow();
+  const legacy = legacyWorkflow();
+
+  assert.match(current, /vars\.RELEASE_PIPELINE_MODE == 'candidate-reuse'/);
+  assert.match(legacy, /^name:\s*正式发布 Skill Expert（旧路径）$/m);
+  assert.match(legacy, /vars\.RELEASE_PIPELINE_MODE != 'candidate-reuse'/);
+  assert.match(legacy, /cargo build --release --locked/);
+  assert.match(legacy, /npm run tauri -- build --ci/);
+  assert.match(legacy, /scripts\/legacy-release-assets\.mjs/);
+  assert.match(
+    legacy,
+    /--signer-workflow "\$REPO\/\.github\/workflows\/release-legacy\.yml"/,
+  );
+  assert.doesNotMatch(
+    legacy,
+    /--signer-workflow "\$REPO\/\.github\/workflows\/release\.yml"/,
+  );
+  assert.equal(fs.existsSync(legacyAssetsScriptPath), true);
+  assert.match(current, /^concurrency:\n  group: release-production$/m);
+  assert.match(legacy, /^concurrency:\n  group: release-production$/m);
+});
+
+test('tag 之前重新验证唯一 Release PR、merge tree、候选 run、artifact、清单和 provenance', () => {
   const prepare = job(workflow(), 'prepare-release');
+  const tagPosition = prepare.indexOf('- name: 创建不可变 annotated tag');
 
   assert.match(prepare, /contents:\s*write/);
+  assert.match(prepare, /actions:\s*read/);
   assert.match(prepare, /pull-requests:\s*read/);
+  assert.match(prepare, /attestations:\s*read/);
   assert.match(prepare, /repos\/\$\{REPO\}\/commits\/\$\{RELEASE_SHA\}\/pulls/);
   assert.match(prepare, /\.head\.ref == "main"/);
   assert.match(prepare, /\.base\.ref == "release"/);
-  assert.match(prepare, /\.merge_commit_sha == \$release_sha/);
   assert.match(prepare, /release-merge\.mjs verify/);
-  assert.match(prepare, /github\.run_attempt/);
-  assert.match(prepare, /--allow-existing-tag/);
+  assert.match(prepare, /release-promotion\.mjs read-selector/);
+  assert.match(prepare, /actions\/runs\/\$\{CANDIDATE_RUN_ID\}\/attempts\/\$\{CANDIDATE_RUN_ATTEMPT\}\/jobs/);
+  assert.match(prepare, /actions\/artifacts\/\$\{EVIDENCE_ARTIFACT_ID\}\/zip/);
+  assert.match(prepare, /gh attestation verify/);
+  assert.match(prepare, /release-promotion\.mjs[^]*?verify-candidate/);
+  assert.match(prepare, /--approved-release-sha "\$RELEASE_SHA"/);
+  assert.match(prepare, /--previous-release-sha "\$PREVIOUS_RELEASE_SHA"/);
+  assert.ok(prepare.indexOf('verify-candidate') < tagPosition, '候选证据预检必须发生在创建 tag 前');
   assert.match(prepare, /repos\/\$\{REPO\}\/git\/tags/);
   assert.match(prepare, /repos\/\$\{REPO\}\/git\/refs/);
-  assert.match(prepare, /tag_exists/);
-  assert.match(prepare, /draft_exists/);
   assert.match(prepare, /gh release create "\$TAG"[^]*?--draft[^]*?--verify-tag/);
   assert.doesNotMatch(prepare, /--force|--clobber/);
 });
 
-test('四目标正式构建只读取 release Environment 的 Updater Secret 并保持 macOS ad-hoc', () => {
-  const build = job(workflow(), 'build-release');
-  const targets = [...build.matchAll(/^\s+- target_id:\s*([^\s]+)\s*$/gm)]
-    .map((match) => match[1])
-    .sort();
+test('正式发布只搬运候选字节并在单一受限 job 生产重签，不再重新编译', () => {
+  const content = workflow();
+  const stage = job(content, 'stage-candidate');
+  const production = job(content, 'production-release');
 
-  assert.deepEqual(targets, ['linux-x64', 'macos-arm64', 'macos-x64', 'windows-x64']);
-  assert.match(build, /^\s+environment:\s*release\s*$/m);
-  assert.match(build, /TAURI_SIGNING_PRIVATE_KEY:\s*\$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
+  assert.doesNotMatch(
+    content,
+    /cargo\s+(?:build|install)|tauri(?:\s+--)?\s*build|npm run tauri[^\n]*build|rust-toolchain|rust-cache/,
+  );
+  assert.match(stage, /actions:\s*read/);
+  assert.match(stage, /actions\/artifacts\/\$\{ARTIFACT_ID\}\/zip/);
+  assert.match(stage, /release-promotion\.mjs materialize-release/);
+  assert.match(stage, /candidate-manifest\.json/);
+  assert.match(stage, /candidate-build-provenance\.json/);
+  assert.doesNotMatch(stage, /environment:\s*release|TAURI_SIGNING_PRIVATE_KEY|secrets\./);
+
+  assert.match(production, /^\s+environment:\s*release\s*$/m);
+  assert.match(production, /TAURI_SIGNING_PRIVATE_KEY:\s*\$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
   assert.match(
-    build,
+    production,
     /TAURI_SIGNING_PRIVATE_KEY_PASSWORD:\s*\$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}/,
   );
-  assert.match(build, /APPLE_SIGNING_IDENTITY:\s*"-"/);
-  assert.match(build, /verify-macos-adhoc\.mjs/);
-  assert.match(build, /sign-release-updater\.mjs/);
-  assert.match(build, /gh release upload "\$TAG"/);
-  assert.doesNotMatch(build, /--clobber/);
-  assert.doesNotMatch(
-    build,
-    /APPLE_CERTIFICATE|APPLE_API_|APPLE_ID|APPLE_PASSWORD|APPLE_TEAM_ID|Developer ID|notari[sz]|spctl/i,
-  );
+  assert.equal((content.match(/^\s+environment:\s*release\s*$/gm) ?? []).length, 1);
+  assert.match(production, /sign-release-updater\.mjs/);
+  assert.match(production, /release-promotion\.mjs create-promotion-binding/);
+  assert.match(production, /promotion-binding\.json/);
+  assert.match(production, /release-provenance\.json/);
 });
 
-test('元数据、校验和与 provenance 都进入同一 Draft 且只有 provenance job 获得 OIDC', () => {
-  const content = workflow();
-  const metadata = job(content, 'release-metadata');
-  const provenance = job(content, 'release-provenance');
+test('候选搬运使用清单中的精确 ID 与 digest，验证每个候选字节后丢弃临时签名', () => {
+  const stage = job(workflow(), 'stage-candidate');
 
-  assert.match(metadata, /needs:\s*\[prepare-release, build-release\]/);
-  assert.match(metadata, /release-assets\.mjs metadata/);
-  assert.match(metadata, /release-assets\.mjs checksums/);
-  assert.match(metadata, /gh release upload "\$TAG"[^]*?latest\.json[^]*?SHA256SUMS/);
-
-  assert.match(provenance, /needs:\s*release-metadata/);
-  assert.match(provenance, /id-token:\s*write/);
-  assert.match(provenance, /attestations:\s*write/);
-  assert.match(provenance, /artifact-metadata:\s*write/);
-  assert.match(provenance, /uses:\s*actions\/attest@[0-9a-f]{40}/);
-  assert.match(provenance, /bundle-path/);
-  assert.match(provenance, /build-provenance\.json/);
-  assert.match(provenance, /gh release upload "\$TAG"/);
-
-  for (const name of ['prepare-release', 'build-release', 'release-metadata', 'verify-release', 'verify-macos', 'verify-native', 'publish-release']) {
-    assert.doesNotMatch(job(content, name), /id-token:\s*write|attestations:\s*write/);
-  }
+  assert.match(stage, /jq -c '\.artifacts\[\]'/);
+  assert.match(stage, /ARTIFACT_ID="\$\(jq -r '\.id'/);
+  assert.match(stage, /ARTIFACT_DIGEST="\$\(jq -r '\.digest'/);
+  assert.match(stage, /\.expired == false/);
+  assert.match(stage, /sha256sum "\$ARCHIVE"/);
+  assert.match(stage, /candidate-build-provenance\.json/);
+  assert.match(stage, /--source-digest "\$CANDIDATE_SHA"/);
+  assert.match(stage, /--source-ref refs\/heads\/main/);
+  assert.match(stage, /candidate-byte-reuse\.json/);
+  assert.doesNotMatch(stage, /sign-release-updater\.mjs|latest\.json|SHA256SUMS/);
 });
 
-test('汇总门禁从 Draft 下载精确资产并验证哈希、Updater、provenance 与 macOS 签名', () => {
+test('正式生成 provenance 只覆盖生产签名、元数据、校验和与晋级证明', () => {
+  const production = job(workflow(), 'production-release');
+  const attestation = production.match(
+    /- name: 为正式生成文件创建独立 provenance[\s\S]*?(?=\n\s+- name:)/,
+  )?.[0] ?? '';
+
+  assert.match(production, /release-assets\.mjs metadata/);
+  assert.match(production, /release-assets\.mjs checksums/);
+  assert.match(attestation, /uses:\s*actions\/attest@[0-9a-f]{40}/);
+  assert.match(attestation, /release-assets\/\*\.sig/);
+  assert.match(attestation, /latest\.json/);
+  assert.match(attestation, /SHA256SUMS/);
+  assert.match(attestation, /promotion-binding\.json/);
+  assert.doesNotMatch(attestation, /\.dmg|\.msi|\.deb|\.rpm|\.AppImage|app\.tar\.gz|skill-expert-cli/);
+});
+
+test('最终门禁从 Draft 回验候选哈希、生产 Updater、晋级绑定、双层 provenance 与原生包', () => {
   const content = workflow();
   const verify = job(content, 'verify-release');
   const verifyMacos = job(content, 'verify-macos');
   const verifyNative = job(content, 'verify-native');
-  const draftDownloadScript = fs.readFileSync(draftDownloadScriptPath, 'utf8');
+  const draftDownload = fs.readFileSync(draftDownloadScriptPath, 'utf8');
 
-  assert.match(verify, /needs:\s*release-provenance/);
-  assert.match(verify, /download-draft-release-assets\.sh/);
-  assert.match(draftDownloadScript, /releases\/assets\/\$ASSET_ID/);
+  assert.match(draftDownload, /releases\/assets\/\$ASSET_ID/);
   assert.match(verify, /release-assets\.mjs verify/);
   assert.match(verify, /sha256sum --check SHA256SUMS/);
   assert.match(verify, /verify-updater-metadata\.mjs/);
-  assert.match(verify, /gh attestation verify/);
-  assert.match(verify, /--bundle[^]*?build-provenance\.json/);
-  assert.match(verify, /--source-digest "\$RELEASE_SHA"/);
+  assert.match(verify, /verify-promotion-binding/);
+  assert.match(verify, /candidate-build-provenance\.json/);
+  assert.match(verify, /release-provenance\.json/);
+  assert.match(verify, /--source-digest "\$CANDIDATE_SHA"[^]*?refs\/heads\/main/);
+  assert.match(verify, /--source-digest "\$RELEASE_SHA"[^]*?refs\/heads\/release/);
 
-  assert.match(verifyMacos, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(verifyMacos, /runner:\s*macos-latest/);
   assert.match(verifyMacos, /runner:\s*macos-15-intel/);
-  assert.match(verifyMacos, /--target "\$TARGET_ID"/);
-  assert.match(verifyMacos, /needs:\s*release-provenance/);
   assert.match(verifyMacos, /verify-macos-release\.mjs/);
   assert.doesNotMatch(verifyMacos, /notari[sz]|spctl/i);
-
   assert.match(verifyNative, /windows-latest/);
   assert.match(verifyNative, /ubuntu-22\.04/);
   assert.match(verifyNative, /verify-windows-release\.ps1/);
   assert.match(verifyNative, /verify-linux-release\.mjs/);
-  assert.match(verifyNative, /apt-get install -y[^\n]*libarchive-tools/);
-  assert.match(verifyNative, /download-draft-release-assets\.sh/);
+  assert.match(verifyNative, /libarchive-tools/);
 });
 
-test('所有 Draft 资产下载 job 都复用同一下载脚本', () => {
+test('所有 Draft 读取 job 复用同一下载脚本且不修改 Release', () => {
   const content = workflow();
-  const downloadCalls = [...content.matchAll(
-    /bash scripts\/download-draft-release-assets\.sh release-assets/g,
-  )];
-
-  assert.equal(downloadCalls.length, 5, '必须让全部五个 Draft 下载 job 复用共享脚本');
-  assert.doesNotMatch(content, /while IFS=\$'\\t' read -r ASSET_ID ASSET_NAME/);
-});
-
-test('读取不可见 Draft 的回验 job 拥有所需权限且不修改 Release', () => {
-  const content = workflow();
-
+  assert.equal(
+    (content.match(/bash scripts\/download-draft-release-assets\.sh release-assets/g) ?? []).length,
+    3,
+  );
   for (const name of ['verify-release', 'verify-macos', 'verify-native']) {
-    const verificationJob = job(content, name);
-    assert.match(
-      verificationJob,
-      /^    permissions:\n      contents: write$/m,
-      `${name} 必须具备可见 Draft Release 的权限`,
-    );
-    assert.doesNotMatch(
-      verificationJob,
-      /gh release (?:create|edit|upload|delete)/,
-      `${name} 只允许读取 Draft 资产`,
-    );
+    const verification = job(content, name);
+    assert.match(verification, /permissions:\n\s+contents: read/);
+    assert.doesNotMatch(verification, /gh release (?:create|edit|upload|delete)/);
   }
 });
 
-test('只有全部汇总门禁通过才公开并标记 Latest', () => {
-  const publish = job(workflow(), 'publish-release');
+test('只有通用、macOS、Windows 和 Linux 门禁全部通过才公开 Latest', () => {
+  const content = workflow();
+  const publish = job(content, 'publish-release');
 
   assert.match(publish, /needs:\s*\[verify-release, verify-macos, verify-native\]/);
   assert.match(publish, /gh release edit "\$TAG"[^]*?--draft=false[^]*?--latest/);
-  assert.doesNotMatch(workflow(), /gh release delete|git tag -[fd]|git push[^\n]*--delete/);
+  assert.doesNotMatch(content, /gh release delete|git tag -[fd]|git push[^\n]*--delete/);
 });
 
-test('同一工作流重跑只恢复带相同 run id 的已验证 annotated tag 与唯一 Draft', () => {
-  const prepare = job(workflow(), 'prepare-release');
+test('同一 workflow 重跑只恢复匹配 run id 的 annotated tag 与唯一 Draft', () => {
+  const content = workflow();
+  const prepare = job(content, 'prepare-release');
+  const production = job(content, 'production-release');
   const tagStep = prepare.match(
     /- name: 创建不可变 annotated tag[\s\S]*?(?=\n\s+- name:)/,
   )?.[0] ?? '';
 
+  assert.match(prepare, /RUN_ATTEMPT/);
+  assert.match(prepare, /--recovery-run-id "\$RUN_ID"/);
   assert.match(prepare, /TAG_EXISTS/);
   assert.match(prepare, /DRAFT_COUNT/);
-  assert.match(prepare, /RUN_ID:\s*\$\{\{ github\.run_id \}\}/);
-  assert.match(prepare, /--recovery-run-id "\$RUN_ID"/);
-  assert.match(tagStep, /RUN_ID:\s*\$\{\{ github\.run_id \}\}/);
+  assert.match(prepare, /release-assets\.mjs draft-state/);
+  assert.match(prepare, /reuse_draft_assets/);
   assert.match(tagStep, /workflow-run-id: \$\{RUN_ID\}/);
+  assert.match(production, /reuse_draft_assets != 'true'/);
+  assert.match(production, /既有 Draft 已包含精确完整资产/);
+  assert.doesNotMatch(production, /--clobber/);
   assert.doesNotMatch(prepare, /target_commitish/);
 });
 
@@ -206,17 +237,5 @@ test('正式发布第三方 Action 全部固定 SHA 并由普通 CI 执行契约
     'node --test scripts/release-merge.test.mjs scripts/release-assets.test.mjs scripts/release-binary-version.test.mjs scripts/sign-release-updater.test.mjs scripts/download-draft-release-assets.test.mjs scripts/release-orchestration-workflow.test.mjs scripts/verify-linux-release.test.mjs scripts/verify-macos-release.test.mjs scripts/formal-release-docs.test.mjs',
   );
   assert.match(testWorkflow, /run:\s*npm run test:formal-release/);
-  assert.match(
-    testWorkflow,
-    /if:\s*runner\.os == 'macOS'[^]*?node --test scripts\/verify-macos-release\.test\.mjs/,
-  );
-  assert.match(
-    testWorkflow,
-    /if:\s*runner\.os == 'Windows'[^]*?verify-windows-release\.ps1/,
-  );
-  assert.match(
-    testWorkflow,
-    /if:\s*runner\.os == 'Windows'[^]*?npm ci[^]*?node --test scripts\/sign-release-updater\.test\.mjs/,
-  );
-  assert.doesNotMatch(content, /[“”]/, 'workflow shell 脚本不得包含 ShellCheck 误判为引号的弯引号');
+  assert.doesNotMatch(content, /[“”]/, 'workflow Shell 不得包含会被误判为引号的弯引号');
 });

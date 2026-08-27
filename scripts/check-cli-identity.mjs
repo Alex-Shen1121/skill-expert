@@ -84,7 +84,6 @@ const supportedEntrypoints = [
   'README.md',
   'README.zh-CN.md',
   'skills/manage-skills/SKILL.md',
-  '.github/workflows/release.yml',
 ];
 
 for (const relativePath of supportedEntrypoints) {
@@ -102,6 +101,18 @@ for (const relativePath of supportedEntrypoints) {
 }
 
 const releaseWorkflow = read('.github/workflows/release.yml');
+const releaseVerifiers = [
+  'scripts/verify-macos-release.mjs',
+  'scripts/verify-linux-release.mjs',
+  'scripts/verify-windows-release.ps1',
+];
+for (const verifier of releaseVerifiers) {
+  expect(
+    `release verifier ${verifier}`,
+    releaseWorkflow.includes(path.basename(verifier)) && read(verifier).includes(expectedCommand),
+    `release workflow must call ${verifier} and verify ${expectedCommand}`,
+  );
+}
 expect(
   'release product identity',
   releaseWorkflow.includes(expectedProduct) && !releaseWorkflow.includes(legacyProduct),
@@ -109,8 +120,8 @@ expect(
 );
 expect(
   'macOS bundle path',
-  releaseWorkflow.includes('$BUNDLE_DIR/Skill Expert.app'),
-  'release workflow must verify the Skill Expert.app bundle',
+  read('scripts/verify-macos-release.mjs').includes("'Skill Expert.app'"),
+  'release verifier must require the Skill Expert.app bundle',
 );
 
 for (const relativePath of ['README.md', 'README.zh-CN.md', 'skills/manage-skills/SKILL.md']) {

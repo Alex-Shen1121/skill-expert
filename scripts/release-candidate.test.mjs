@@ -200,7 +200,7 @@ test('verifies an exact current main candidate through the public guard CLI', (t
     candidateSha,
     baseSha,
     commitRange: `${baseSha}..${candidateSha}`,
-    tagAbsence: 'refs/tags/v1.0.1 is absent locally (no origin configured)',
+    tagAbsence: 'refs/tags/v1.0.1 在本地不存在（未配置 origin）',
   });
 });
 
@@ -216,7 +216,7 @@ test('接受 release 保留上次晋级 merge commit 后的下一次 main 候选
     candidateSha,
     baseSha,
     commitRange: `${baseSha}..${candidateSha}`,
-    tagAbsence: 'refs/tags/v1.0.1 is absent locally (no origin configured)',
+    tagAbsence: 'refs/tags/v1.0.1 在本地不存在（未配置 origin）',
   });
 });
 
@@ -504,7 +504,7 @@ test('正式发布候选必须严格进入 release 的下一补丁版本，不�
   );
 });
 
-test('renders the complete bilingual release promotion approval contract', (t) => {
+test('生成完整的双语发布晋级批准契约', (t) => {
   const { repository, baseSha, candidateSha } = createCandidateRepository(t);
   publishFixtureToOrigin(t, repository);
   const outputPath = path.join(repository, 'release-pr.md');
@@ -524,18 +524,18 @@ test('renders the complete bilingual release promotion approval contract', (t) =
   const body = readFileSync(outputPath, 'utf8');
   assert.match(body, /Skill Expert v1\.0\.1/);
   assert.match(body, new RegExp(`Candidate SHA[^\n]+${candidateSha}`));
-  assert.match(body, new RegExp(`Commit range[^\n]+${baseSha}\.\.${candidateSha}`));
+  assert.match(body, new RegExp(`提交范围[^\n]+${baseSha}\.\.${candidateSha}`));
   assert.match(body, /English release note/);
   assert.match(body, /中文发布说明/);
   assert.match(body, /macOS arm64[^]*macOS x64[^]*Windows x64[^]*Linux x64/);
-  assert.match(body, /ad-hoc signed/i);
-  assert.match(body, /not notarized/i);
-  assert.match(body, /Gatekeeper[^\n]+Open Anyway/i);
-  assert.match(body, /Ordinary main CI[^\n]+passed/i);
-  assert.match(body, /Four-target candidate packaging[^\n]+passed/i);
-  assert.match(body, /Version consistency[^\n]+passed/i);
-  assert.match(body, /refs\/tags\/v1\.0\.1 is absent locally and on origin/);
-  assert.match(body, /Merge means publication approval \/ 合并即批准正式发布/);
-  assert.match(body, /Merge commit required \/ 必须使用 merge commit/);
-  assert.match(body, /Normal feature pull requests may still use squash/);
+  assert.match(body, /ad-hoc 签名/);
+  assert.match(body, /未经 Apple 公证/);
+  assert.match(body, /Gatekeeper[^\n]+仍要打开/);
+  assert.match(body, /日常 main CI[^\n]+已通过/);
+  assert.match(body, /四平台候选打包[^\n]+已通过/);
+  assert.match(body, /版本一致性[^\n]+已通过/);
+  assert.match(body, /refs\/tags\/v1\.0\.1 在本地和 origin 均不存在/);
+  assert.match(body, /合并即批准正式发布/);
+  assert.match(body, /必须使用 merge commit/);
+  assert.match(body, /普通功能 PR 仍可使用 squash/);
 });

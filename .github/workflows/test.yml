@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, edited]
 
 permissions:
@@ -58,10 +59,10 @@ jobs:
       - name: Test release preparation contract
         run: npm run test:release
 
-      - name: Test candidate packaging contract
+      - name: 测试候选打包契约
         run: npm run test:candidate
 
-      - name: Test release promotion contract
+      - name: 测试发布晋级契约
         run: npm run test:promotion
 
       - name: 测试正式发布编排契约
@@ -83,10 +84,6 @@ jobs:
 
       - name: 检查 Updater 信任根
         run: npm run updater:check
-
-      - name: 发布提升必须使用生产 Updater 信任根
-        if: github.event_name == 'pull_request' && github.head_ref == 'main' && github.base_ref == 'release'
-        run: npm run updater:check:production
 
       - name: Check version consistency
         run: npm run version:check
@@ -235,48 +232,6 @@ jobs:
         continue-on-error: true
         run: taskkill /f /im vctip.exe
 
-  release-promotion-shape:
-    if: github.event_name == 'pull_request' && github.base_ref == 'release'
-    runs-on: ubuntu-22.04
-    name: Release promotion source
-
-    steps:
-      - name: Reject a non-main or cross-repository promotion
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          EXPECTED_REPOSITORY: ${{ github.repository }}
-        run: |
-          if [ "$HEAD_REF" != "main" ] || \
-             [ "$BASE_REF" != "release" ] || \
-             [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
-            echo "Release promotion must use this repository's main branch as head and release as base" >&2
-            exit 1
-          fi
-
-      - name: 检出精确发布候选
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: 获取发布晋级引用
-        run: |
-          git fetch --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main \
-            +refs/heads/release:refs/remotes/origin/release
-
-      - name: 校验发布晋级版本与身份
-        env:
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          node scripts/release-candidate.mjs verify
-          --candidate-sha "$CANDIDATE_SHA"
-          --head main
-          --base release
-
   main-version-policy:
     needs: [frontend, workflow-lint, rust-quality, rust-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -318,23 +273,23 @@ jobs:
     needs: main-version-policy
     if: needs.main-version-policy.outputs.release_candidate == 'true'
     runs-on: ubuntu-22.04
-    name: Release candidate guard
+    name: 发布候选门禁
 
     steps:
-      - name: Checkout exact main candidate
+      - name: 检出精确 main 候选
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Fetch promotion refs
+      - name: 获取晋级引用
         run: |
           git fetch --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main \
             +refs/heads/release:refs/remotes/origin/release
 
-      - name: Verify exact release candidate
+      - name: 验证精确发布候选
         env:
           CANDIDATE_SHA: ${{ github.sha }}
         run: >-
@@ -345,46 +300,77 @@ jobs:
 
   candidate-package:
     needs: candidate-guard
-    name: Four-target release candidate
+    name: 四平台发布候选
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/candidate-build.yml
     with:
       candidate_sha: ${{ github.sha }}
+      targets_json: >-
+        [{"target_id":"macos-arm64","runner":"macos-latest","rust_target":"aarch64-apple-darwin","bundles":"app,dmg"},{"target_id":"macos-x64","runner":"macos-latest","rust_target":"x86_64-apple-darwin","bundles":"app,dmg"},{"target_id":"windows-x64","runner":"windows-latest","rust_target":"x86_64-pc-windows-msvc","bundles":"nsis,msi"},{"target_id":"linux-x64","runner":"ubuntu-22.04","rust_target":"x86_64-unknown-linux-gnu","bundles":"appimage,deb,rpm"}]
 
   candidate-pr:
     needs: candidate-package
     runs-on: ubuntu-22.04
-    name: Create or refresh release promotion
+    name: 创建或刷新发布晋级
     permissions:
       contents: read
+      actions: read
       pull-requests: write
 
     steps:
-      # GitHub jobs have isolated filesystems. Repeat the exact checkout and
-      # fetch here so a main push during packaging invalidates the old candidate.
-      - name: Checkout packaged candidate
+      # GitHub job 的文件系统互相隔离。这里重复执行精确检出与拉取，确保打包期间
+      # main 新增提交后旧候选立即失效。
+      - name: 检出已打包候选
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Refresh promotion refs
+      - name: 刷新晋级引用
         run: |
           git fetch --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main \
             +refs/heads/release:refs/remotes/origin/release
 
-      - name: Create or update the exact release promotion
+      - name: 创建或更新精确发布晋级
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVIDENCE_ARTIFACT_ID: ${{ needs.candidate-package.outputs.evidence_artifact_id }}
+          EVIDENCE_ARTIFACT_NAME: ${{ needs.candidate-package.outputs.evidence_artifact_name }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.candidate-package.outputs.evidence_artifact_digest }}
+          MANIFEST_SHA256: ${{ needs.candidate-package.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
+          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
+          ACTUAL_DIGEST="sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')"
+          if [ "$ACTUAL_DIGEST" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
+            echo "候选证据 artifact 下载摘要不一致" >&2
+            exit 1
+          fi
+          mkdir candidate-evidence
+          unzip -q "$EVIDENCE_ARCHIVE" -d candidate-evidence
+
           PROMOTION_BODY="$RUNNER_TEMP/release-promotion.md"
-          node scripts/release-candidate.mjs render-pr-body \
+          node scripts/release-promotion.mjs render-pr-body \
+            --repository "$REPO" \
             --candidate-sha "$CANDIDATE_SHA" \
             --head main \
             --base release \
+            --manifest candidate-evidence/candidate-manifest.json \
+            --evidence-artifact-id "$EVIDENCE_ARTIFACT_ID" \
+            --evidence-artifact-name "$EVIDENCE_ARTIFACT_NAME" \
+            --evidence-artifact-digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --manifest-sha256 "$MANIFEST_SHA256" \
             --output "$PROMOTION_BODY"
 
           PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
@@ -395,12 +381,12 @@ jobs:
 
           PR_COUNT="$(jq 'length' <<<"$VALID_PROMOTIONS")"
           if [ "$PR_COUNT" -gt 1 ]; then
-            echo "Expected at most one open release promotion pull request, found $PR_COUNT" >&2
+            echo "打开的发布晋级 PR 最多只能有一个，实际为 $PR_COUNT 个" >&2
             exit 1
           fi
 
           VERSION="$(node -p "require('./package.json').version")"
-          TITLE="Release promotion: Skill Expert v${VERSION}"
+          TITLE="发布晋级：Skill Expert v${VERSION}"
           if [ "$PR_COUNT" -eq 1 ]; then
             PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PROMOTIONS")"
             gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$PROMOTION_BODY"

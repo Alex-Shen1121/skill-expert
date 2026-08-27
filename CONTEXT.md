@@ -57,6 +57,28 @@ _避免使用_：补丁版本、正式候选
 由 `release-prep/vx.y.z` 发布准备 PR 生成的稳定 `x.y.z` 版本。它必须是当前 `release` 的下一补丁版本，合入 `main` 后才允许构建一次四平台候选。
 _避免使用_：开发序号、任意较新版本
 
+## 候选资产晋级语言
+
+**候选清单**：
+`candidate-manifest.json`。绑定正式候选的仓库、版本、candidate SHA/tree、workflow revision、run ID/attempt、四平台 job/artifact 身份及逐文件大小和 SHA-256。
+_避免使用_：最新 artifact、PR 正文结论
+
+**候选构建来源证明**：
+`candidate-build-provenance.json`。证明安装包、Updater 包本体和 CLI 来自实际执行构建的 `main` candidate SHA 与候选 workflow。
+_避免使用_：release 构建证明、正式重签证明
+
+**晋级绑定证明**：
+`promotion-binding.json`。记录 release SHA、candidate SHA、相同 Git tree、版本/tag、精确 run attempt、artifact ID/digest、候选清单摘要和逐字节复用的本体哈希。
+_避免使用_：重新构建报告、PR 选择器
+
+**正式来源证明**：
+`release-provenance.json`。只证明生产 `.sig`、`latest.json`、`SHA256SUMS` 和晋级绑定证明由 release workflow 在 release SHA 上生成。
+_避免使用_：候选安装包来源证明、四平台 build provenance
+
+**手工测试包**：
+由独立手工入口生成、带 `manual-test-package` 与 `promotable: false` 标记的测试资产；默认只构建 macOS arm64，无论平台数量都不可晋级。
+_避免使用_：正式候选、可发布包
+
 ## Compatibility-only legacy markers
 
 The serialized backup protocol retains `.skills-manager` metadata paths,

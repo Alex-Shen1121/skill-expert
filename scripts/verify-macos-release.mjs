@@ -10,6 +10,7 @@ import { verifyCliVersion } from './release-binary-version.mjs';
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const targets = ['macos-arm64', 'macos-x64'];
+const expectedAppName = 'Skill Expert.app';
 
 function run(command, args) {
   return spawnSync(command, args, { encoding: 'utf8' });
@@ -40,9 +41,9 @@ function parseArguments(argv) {
 function onlyTopLevelApp(directory, label) {
   const apps = fs
     .readdirSync(directory, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'));
+    .filter((entry) => entry.isDirectory() && entry.name === expectedAppName);
   if (apps.length !== 1) {
-    throw new Error(`${label} 必须包含唯一的顶层 .app，实际为 ${apps.length} 个`);
+    throw new Error(`${label} 必须包含唯一的顶层 ${expectedAppName}，实际为 ${apps.length} 个`);
   }
   return path.join(directory, apps[0].name);
 }
