@@ -530,12 +530,69 @@ export function ProjectDetail() {
     }
   };
 
+  // A variant carries local work when its OWN status is project_newer or
+  // diverged — only such a variant should ever be *pushed* to center as winner.
+  const isLocallyEdited = (v: ProjectSkill) =>
+    v.sync_status === "project_newer" || v.sync_status === "diverged";
+
+  // A variant is safe to *overwrite* from center only when it is provably at or
+  // behind center (in_sync / center_newer), i.e. holds nothing the pull would
+  // discard. Everything else may carry unique local work: an edited copy
+  // (project_newer / diverged) OR a project_only copy that exists solely in the
+  // project and was never pushed to center. The frontend has no hash to prove
+  // such a copy is redundant, so it must NOT be auto-overwritten.
+  const isSafeToRealign = (v: ProjectSkill) =>
+    v.sync_status === "in_sync" || v.sync_status === "center_newer";
+
+  // Push the winner (a variant with local edits, else the group-status variant)
+  // to center, then realign only the siblings that are safe to overwrite. Any
+  // sibling that might hold unique local work — edited or project_only — is left
+  // flagged and reported via `skipped`, never silently clobbered. Because we
+  // only ever pull over copies already known to be at/behind center, this never
+  // depends on the pull-side "refuse a newer copy" guard (which can't fire once
+  // the just-pushed center is newest by mtime).
+  //
+  // Realigning the safe siblings still lands a multi-agent group back in_sync
+  // (otherwise the row flips to "center_newer" off the stale-but-clean siblings
+  // right after the user updated *to* center).
+  const pushSkillToCenterAndAlign = async (
+    skill: ProjectSkillGroup
+  ): Promise<{ alignFailed: number; skipped: number }> => {
+    if (!id) return { alignFailed: 0, skipped: 0 };
+    const winner =
+      skill.variants.find(isLocallyEdited) ??
+      skill.variants.find((v) => v.sync_status === skill.status) ??
+      skill.primaryVariant;
+    await api.updateProjectSkillToCenter(id, winner.relative_path, winner.agent);
+
+    const others = skill.variants.filter((v) => v !== winner);
+    const alignable = others.filter(isSafeToRealign);
+    const skipped = others.length - alignable.length;
+    const results = await Promise.allSettled(
+      alignable.map((v) =>
+        api.updateProjectSkillFromCenter(id, v.relative_path, v.agent)
+      )
+    );
+    const alignFailed = results.filter((r) => r.status === "rejected").length;
+    return { alignFailed, skipped };
+  };
+
   const handleUpdateCenter = async (skill: ProjectSkillGroup) => {
     if (!id) return;
     setUpdatingCenterSkill(getSkillKey(skill));
     try {
-      await api.updateProjectSkillToCenter(id, skill.primaryVariant.relative_path, skill.primaryVariant.agent);
-      toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+      const { alignFailed, skipped } = await pushSkillToCenterAndAlign(skill);
+      if (skipped > 0) {
+        toast.warning(
+          t("project.updateCenterSkippedEdited", { name: skill.name, count: skipped })
+        );
+      } else if (alignFailed > 0) {
+        toast.warning(
+          t("project.updateCenterAlignFailed", { name: skill.name, count: alignFailed })
+        );
+      } else {
+        toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+      }
       await Promise.all([refreshManagedSkills(), refreshPresets(), loadSkills()]);
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, t("common.error")));
@@ -706,6 +763,7 @@ export function ProjectDetail() {
     try {
       let updated = 0;
       let failed = 0;
+      let skipped = 0;
       for (const skill of selectedSkills) {
         const canUpdateCenter =
           skill.status === "project_only" ||
@@ -713,14 +771,22 @@ export function ProjectDetail() {
           skill.status === "diverged";
         if (!canUpdateCenter) continue;
         try {
-          await api.updateProjectSkillToCenter(id, skill.primaryVariant.relative_path, skill.primaryVariant.agent);
-          updated++;
+          const { alignFailed, skipped: skippedForSkill } = await pushSkillToCenterAndAlign(skill);
+          skipped += skippedForSkill;
+          // The push landed but some sibling failed to realign → the group is
+          // not fully in sync, so count it as failed rather than reporting a
+          // clean success.
+          if (alignFailed > 0) failed++;
+          else updated++;
         } catch {
           failed++;
         }
       }
       if (updated > 0) {
         toast.success(t("project.batchUpdatedCenter", { count: updated }));
+      }
+      if (skipped > 0) {
+        toast.warning(t("project.batchUpdateCenterSkipped", { count: skipped }));
       }
       if (failed > 0) {
         toast.error(t("project.batchUpdateCenterFailed", { count: failed }));
