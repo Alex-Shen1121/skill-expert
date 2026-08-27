@@ -118,22 +118,8 @@ function resolveConflictsToMain(conflicts) {
   }
 }
 
-function releasePromotion(mainSha, options) {
-  const candidateSha = options.release_candidate_sha ?? null;
-  if (candidateSha === null) return { waiting: false, candidateSha: null };
-  if (!/^[0-9a-f]{40}$/.test(candidateSha)) {
-    fail('release candidate SHA must be a full lowercase 40-character commit SHA');
-  }
-  if (candidateSha !== mainSha) {
-    fail(`open release promotion candidate ${candidateSha} does not match current main ${mainSha}`);
-  }
-  return { waiting: true, candidateSha };
-}
-
 function renderPullRequest(outcome) {
-  const waitingNotice = outcome.releasePromotion.waiting
-    ? `> [!CAUTION]\n> **WAITING FOR RELEASE PROMOTION.** Candidate SHA \`${outcome.releasePromotion.candidateSha}\` is under review. This upstream tracking pull request must not be merged into \`main\` until that release promotion is complete.`
-    : '> [!IMPORTANT]\n> This pull request requires explicit maintainer review.';
+  const waitingNotice = '> [!IMPORTANT]\n> This pull request requires explicit maintainer review.';
   const conflictNotice =
     outcome.conflicts.length > 0
       ? `## Conflicts requiring manual reconciliation\n\n${outcome.conflicts.map((item) => `- \`${item}\``).join('\n')}\n\nThe review branch keeps the current Skill Expert version of each conflicted path. Incorporate the upstream intent manually, then remove each path from the review report before merging.`
@@ -143,7 +129,7 @@ function renderPullRequest(outcome) {
       ? outcome.protectedChanges.map((item) => `- \`${item}\``).join('\n')
       : '- No protected path differed.';
 
-  return `# Reviewed upstream tracking\n\n${waitingNotice}\n\nThis automation **never merges upstream changes automatically**. It prepares only the fixed \`upstream-tracking/main\` branch and a pull request into \`main\`.\n\n## Trusted source\n\n- Repository: \`xingkongliang/skills-manager\`\n- Branch: \`main\`\n- Upstream SHA: \`${outcome.upstream.sha}\`\n- Skill Expert main SHA: \`${outcome.mainSha}\`\n\n${conflictNotice}\n\n## Skill Expert decisions retained\n\nProduct identity, updater trust and feed configuration, independent version history, and \`main → release\` governance files are restored byte-for-byte from Skill Expert \`main\` before this review commit is created. The following upstream-touched protected paths were intentionally retained:\n\n${protectedNotice}\n\nOrdinary CI must still pass before a maintainer may merge the reviewed result.\n`;
+  return `# Reviewed upstream tracking\n\n${waitingNotice}\n\nThis automation **never merges upstream changes automatically**. It prepares only the fixed \`upstream-tracking/main\` branch and a pull request into \`main\`.\n\n## Trusted source\n\n- Repository: \`xingkongliang/skills-manager\`\n- Branch: \`main\`\n- Upstream SHA: \`${outcome.upstream.sha}\`\n- Skill Expert main SHA: \`${outcome.mainSha}\`\n\n${conflictNotice}\n\n## Skill Expert decisions retained\n\nProduct identity, updater trust and feed configuration, independent version history, and main-based release governance files are restored byte-for-byte from Skill Expert \`main\` before this review commit is created. The following upstream-touched protected paths were intentionally retained:\n\n${protectedNotice}\n\nOrdinary CI must still pass before a maintainer may merge the reviewed result.\n`;
 }
 
 function validateReview(review) {
@@ -177,9 +163,7 @@ function recordsReviewedUpstream(ref, upstreamSha) {
 }
 
 function pullRequestTitle(outcome) {
-  return `${outcome.releasePromotion.waiting ? '[WAITING FOR RELEASE] ' : ''}${
-    outcome.conflicts.length > 0 ? '[CONFLICTS] ' : ''
-  }Upstream tracking: ${outcome.upstream.sha.slice(0, 12)}`;
+  return `${outcome.conflicts.length > 0 ? '[CONFLICTS] ' : ''}Upstream tracking: ${outcome.upstream.sha.slice(0, 12)}`;
 }
 
 function verifyReview(options) {
@@ -214,8 +198,6 @@ function verifyReview(options) {
 function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
   const clean = git(['status', '--porcelain']).stdout.trim();
   if (clean) fail('working tree must be clean before preparing upstream tracking');
-  const promotion = releasePromotion(mainSha, options);
-
   git(['switch', '--force-create', SYNC_BRANCH, MAIN_REF]);
   const merge = git(
     ['merge', '--no-ff', '--no-commit', '-m', `Track upstream ${upstreamSha}`, UPSTREAM_REF],
@@ -266,7 +248,6 @@ function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
     },
     conflicts: reviewConflicts,
     protectedChanges,
-    releasePromotion: promotion,
   };
   outcome.prTitle = pullRequestTitle(outcome);
   if (options.body) fs.writeFileSync(options.body, renderPullRequest(outcome));
@@ -278,7 +259,7 @@ function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
 }
 
 function prepare(options) {
-  const allowedOptions = new Set(['body', 'release_candidate_sha', 'result']);
+  const allowedOptions = new Set(['body', 'result']);
   const unsupported = Object.keys(options).find((option) => !allowedOptions.has(option));
   if (unsupported) {
     fail(`unsupported prepare option: --${unsupported.replaceAll('_', '-')}`);
@@ -300,9 +281,7 @@ function prepare(options) {
   const trackedOnReview =
     !trackedOnMain && previousSyncSha !== null && isAncestor(upstreamSha, previousSyncSha);
   if (trackedOnMain || trackedOnReview) {
-    const releaseState = releasePromotion(mainSha, options);
     const outcome = {
-      releasePromotion: releaseState,
       status: 'no-change',
       mainSha,
       upstream: {

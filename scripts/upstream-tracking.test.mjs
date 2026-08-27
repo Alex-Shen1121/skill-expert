@@ -276,35 +276,21 @@ test('keeps a conflicting upstream change reviewable and reports the exact paths
   assert.equal(git(checkout, 'status', '--porcelain'), '');
 });
 
-test('marks review waiting without changing an open release promotion candidate SHA', (t) => {
+test('拒绝已经退出的 release 候选参数', (t) => {
   const { root, upstreamWork, checkout } = createFixture(t);
   write(upstreamWork, 'src/new-feature.txt', 'new upstream behavior\n');
   git(upstreamWork, 'add', 'src/new-feature.txt');
   git(upstreamWork, 'commit', '-m', 'add upstream feature during release review');
   git(upstreamWork, 'push', 'origin', 'main');
-  const candidateSha = git(checkout, 'rev-parse', 'refs/heads/main');
   const resultPath = path.join(root, 'result.json');
-  const bodyPath = path.join(root, 'upstream-pr.md');
 
   const result = runTracking(checkout, resultPath, [
     '--release-candidate-sha',
-    candidateSha,
-    '--body',
-    bodyPath,
+    git(checkout, 'rev-parse', 'refs/heads/main'),
   ]);
 
-  assert.equal(result.status, 0, result.stderr);
-  const outcome = JSON.parse(readFileSync(resultPath, 'utf8'));
-  assert.deepEqual(outcome.releasePromotion, {
-    waiting: true,
-    candidateSha,
-  });
-  assert.equal(git(checkout, 'rev-parse', 'refs/heads/main'), candidateSha);
-  const body = readFileSync(bodyPath, 'utf8');
-  assert.match(body, /WAITING FOR RELEASE PROMOTION/);
-  assert.match(body, new RegExp(`Candidate SHA[^\n]+${candidateSha}`));
-  assert.match(body, /must not be merged into `main` until that release promotion is complete/);
-  assert.match(body, /never merges upstream changes automatically/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsupported prepare option: --release-candidate-sha/);
 });
 
 test('does not rewrite an existing review branch when upstream has no newer commit', (t) => {

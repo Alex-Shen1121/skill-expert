@@ -32,37 +32,14 @@ jobs:
           git config user.name 'skill-expert-upstream-tracker[bot]'
           git config user.email 'skill-expert-upstream-tracker[bot]@users.noreply.github.com'
 
-      - name: Detect an exact open release promotion
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          RELEASE_PRS="$(gh pr list --state open --base release --head main \
-            --json number,headRefName,baseRefName,headRefOid,isCrossRepository)"
-          VALID_RELEASES="$(jq '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not))]' <<<"$RELEASE_PRS")"
-          RELEASE_COUNT="$(jq 'length' <<<"$VALID_RELEASES")"
-          if [ "$RELEASE_COUNT" -gt 1 ]; then
-            echo "Expected at most one open main to release promotion, found $RELEASE_COUNT" >&2
-            exit 1
-          fi
-          echo "candidate_sha=$(jq -r '.[0].headRefOid // empty' <<<"$VALID_RELEASES")" >> "$GITHUB_OUTPUT"
-
       - name: Prepare fixed upstream review branch
         id: prepare
-        env:
-          RELEASE_CANDIDATE_SHA: ${{ steps.release.outputs.candidate_sha }}
         run: |
           set -euo pipefail
           echo 'Trusted upstream: xingkongliang/skills-manager (main) → upstream-tracking/main' >> "$GITHUB_STEP_SUMMARY"
-          RELEASE_ARGS=()
-          if [ -n "$RELEASE_CANDIDATE_SHA" ]; then
-            RELEASE_ARGS=(--release-candidate-sha "$RELEASE_CANDIDATE_SHA")
-          fi
           node scripts/upstream-tracking.mjs prepare \
             --result "$RESULT_PATH" \
-            --body "$BODY_PATH" \
-            "${RELEASE_ARGS[@]}"
+            --body "$BODY_PATH"
           echo "status=$(jq -r '.status' "$RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "review_required=$(jq -r 'has("syncSha")' "$RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
@@ -98,7 +75,7 @@ jobs:
               '.[0] | (.title != $title or .body != $body)' <<<"$VALID_PRS" >/dev/null; then
               gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$BODY_PATH"
             fi
-            if jq -e '.releasePromotion.waiting or (.conflicts | length > 0)' "$RESULT_PATH" >/dev/null && \
+            if jq -e '(.conflicts | length > 0)' "$RESULT_PATH" >/dev/null && \
                [ "$(jq -r '.[0].isDraft' <<<"$VALID_PRS")" = 'false' ]; then
               gh pr ready "$PR_NUMBER" --undo
             fi

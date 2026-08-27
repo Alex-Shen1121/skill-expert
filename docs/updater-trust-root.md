@@ -8,16 +8,16 @@ Skill Expert 独立持有自己的 Tauri Updater 信任根。仓库只在
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
 不得创建仓库级 Secret 副本，也不得把 Secret 值粘贴到 Issue、拉取请求、工作流输入、
-Shell 历史或日志中。受控的正式发布编排已经取代旧的标签和手动工作流；其中只有
-`build-release` 正式构建绑定 `release` Environment 并读取生产 Secret。候选构建在每个
+Shell 历史或日志中。只有明确授权后手动触发的 `.github/workflows/release.yml` 才会让
+`build-release` 正式构建绑定 `release` Environment 并读取生产 Secret。手工测试包在每个
 运行器内生成临时 Updater 密钥，不能访问生产 Environment。完整发布顺序与故障处理参见
 [正式发布指南](formal-release.md)。
 
 这是 Skill Expert 维护者执行的一次性产品配置，不是终端用户设置，也不是每次发布都要
 重复的步骤。配置前，仓库使用一个有明确记录的“尚未配置”开发公钥，其私钥部分已经丢
 弃。普通拉取请求和 `main` 检查只接受该占位公钥或独立生产公钥，同时仍拒绝归档的上游
-公钥和更新源。`main -> release` 拉取请求会运行 `npm run updater:check:production`；该
-命令拒绝尚未配置状态，因此占位公钥不可能进入正式发布。
+公钥和更新源。正式发布工作流会运行 `npm run updater:check:production`；该命令拒绝尚未
+配置状态，因此占位公钥不可能进入正式发布。
 
 实现配置命令的代码可以在占位状态下合入 `main`，但首次正式发布和 Issue #11 的生产验
 收仍必须等待一次真实配置完成。
@@ -70,8 +70,8 @@ npm run updater:provision -- \
    件权限均为 `600`。
 3. 只把生成的 `.pub` 值写入 `plugins.updater.pubkey`，更新源保持唯一值
    `https://github.com/Alex-Shen1121/skill-expert/releases/latest/download/latest.json`。
-4. 创建 GitHub `release` Environment。经审查的 `main -> release` 合并就是人工发布批
-   准，不再增加第二位审查者。
+4. 创建 GitHub `release` Environment。用户在当前请求中明确要求发布就是人工发布批准，
+   发布准备 PR 合入 `main` 后不再增加第二位审查者。
 5. 通过 `gh secret set --env release` 分别上传 `TAURI_SIGNING_PRIVATE_KEY` 和
    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，然后只读取 Secret 名称确认二者存在；GitHub
    不会返回 Secret 值。

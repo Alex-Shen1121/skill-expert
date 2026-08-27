@@ -111,75 +111,45 @@ test('patch promotes both Unreleased sections under the same UTC version heading
   );
 });
 
-test('development 从正式版本生成首个开发序号，并保持变更日志正式版本不变', (t) => {
+test('拒绝 development 版本类型且不修改仓库', (t) => {
   const root = fixture(t);
 
   const result = runPrepare(root, 'development');
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /已准备开发序号版本 1\.2\.3-1/);
-  assert.doesNotMatch(result.stdout, /CHANGELOG/);
-  const packageJson = JSON.parse(read(root, 'package.json'));
-  const packageLock = JSON.parse(read(root, 'package-lock.json'));
-  const cargoTomlVersion = read(root, 'src-tauri/Cargo.toml').match(/^version = "([^"]+)"$/m)?.[1];
-  const cargoLockVersion = read(root, 'src-tauri/Cargo.lock').match(
-    /\[\[package\]\]\nname = "skill-expert"\nversion = "([^"]+)"/,
-  )?.[1];
-  const tauriVersion = JSON.parse(read(root, 'src-tauri/tauri.conf.json')).version;
-  const uiVersions = ['en', 'zh', 'zh-TW'].map((locale) =>
-    JSON.parse(read(root, `src/i18n/${locale}.json`)).settings.version,
-  );
-
-  assert.deepEqual(
-    [
-      packageJson.version,
-      packageLock.version,
-      packageLock.packages[''].version,
-      cargoTomlVersion,
-      cargoLockVersion,
-      tauriVersion,
-      ...uiVersions,
-    ],
-    Array(9).fill('1.2.3-1').map((version, index) =>
-      index >= 6 ? `Skill Expert ${version}` : version,
-    ),
-  );
-  assert.match(read(root, 'CHANGELOG.md'), /^## \[1\.2\.3\]/m);
-  assert.match(read(root, 'CHANGELOG-zh.md'), /^## \[1\.2\.3\]/m);
-  assert.doesNotMatch(read(root, 'CHANGELOG.md'), /^## \[1\.2\.3-1\]/m);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /版本参数只能是 patch 或明确的 x\.y\.z/);
+  assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
-test('development 从已有开发版本严格递增一个序号', (t) => {
-  const root = fixture(t, { currentVersion: '1.2.3-9' });
-
-  const result = runPrepare(root, 'development');
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(read(root, 'package.json')).version, '1.2.3-10');
-  assert.equal(
-    JSON.parse(read(root, 'src/i18n/zh.json')).settings.version,
-    'Skill Expert 1.2.3-10',
-  );
-});
-
-test('patch 从开发序号准备下一正式补丁版本', (t) => {
+test('拒绝从开发序号版本准备正式版本', (t) => {
   const root = fixture(t, { currentVersion: '1.2.3-9' });
 
   const result = runPrepare(root, 'patch');
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(read(root, 'package.json')).version, '1.2.4');
-  assert.match(read(root, 'CHANGELOG.md'), /^## \[1\.2\.4\]/m);
-  assert.match(read(root, 'CHANGELOG-zh.md'), /^## \[1\.2\.4\]/m);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /版本必须是 x\.y\.z/);
+  assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
-test('rejects an explicit version without changing the repository', (t) => {
+test('明确版本可以跨越补丁号并同步全部版本契约', (t) => {
   const root = fixture(t);
 
-  const result = runPrepare(root, '1.2.4');
+  const result = runPrepare(root, '1.3.0');
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(read(root, 'package.json')).version, '1.3.0');
+  assert.equal(JSON.parse(read(root, 'src-tauri/tauri.conf.json')).version, '1.3.0');
+  assert.match(read(root, 'CHANGELOG.md'), /^## \[1\.3\.0\]/m);
+  assert.match(read(root, 'CHANGELOG-zh.md'), /^## \[1\.3\.0\]/m);
+});
+
+test('拒绝不高于当前版本的明确版本且不修改仓库', (t) => {
+  const root = fixture(t);
+
+  const result = runPrepare(root, '1.2.3');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /版本类型只能是 development 或 patch/);
+  assert.match(result.stderr, /目标版本 1\.2\.3 必须高于当前版本 1\.2\.3/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
@@ -195,7 +165,7 @@ test('rejects unknown flags and extra positional arguments without changing the 
     assert.notEqual(result.status, 0, invalidArgs.join(' '));
     assert.match(
       result.stderr,
-      /参数必须符合：development\|patch \[--dry-run\]/,
+      /参数必须符合：patch\|x\.y\.z \[--dry-run\]/,
     );
     assert.equal(git(root, 'status', '--porcelain'), '');
   }
@@ -284,7 +254,7 @@ test('拒绝 minor 与 major，正式版本只能递增补丁号', (t) => {
     const result = runPrepare(root, releaseType);
 
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /版本类型只能是 development 或 patch/);
+    assert.match(result.stderr, /版本参数只能是 patch 或明确的 x\.y\.z/);
     assert.equal(git(root, 'status', '--porcelain'), '');
   }
 });

@@ -25,12 +25,12 @@ test('Updater 信任指南记录 Secret 边界、恢复和两阶段轮换', () =
   assert.match(guide, /阶段 1[\s\S]*旧私钥[\s\S]*新公钥/);
   assert.match(guide, /阶段 2[\s\S]*新私钥/);
   assert.match(guide, /手动重新安装/);
-  assert.match(guide, /候选[\s\S]*临时/);
+  assert.match(guide, /手工测试包[\s\S]*临时/);
   assert.match(guide, /一次性产品配置/);
   assert.match(guide, /不是终端用户设置/);
   assert.match(guide, /npm run updater:provision/);
   assert.match(guide, /尚未配置[\s\S]*开发/);
-  assert.match(guide, /main[\s\S]*release[\s\S]*生产/);
+  assert.match(guide, /main[\s\S]*正式发布工作流[\s\S]*生产/);
   assert.match(guide, /路径[\s\S]*不得提交/);
   assert.doesNotMatch(guide, /disable Gatekeeper/i);
 });

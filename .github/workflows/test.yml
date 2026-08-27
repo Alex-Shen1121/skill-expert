@@ -16,100 +16,48 @@ jobs:
     name: Frontend and version contract
 
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: 安装依赖
         run: npm ci
 
-      - name: Test version contract
+      - name: 测试稳定版本契约
         run: npm run test:version
 
-      - name: 获取 main PR 版本策略所需引用
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
-        run: >-
-          git fetch --no-tags origin
-          +refs/heads/release:refs/remotes/origin/release
-
-      - name: 卡控 main PR 版本通道
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+      - name: 验证 main PR 版本边界
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.head_ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          EXPECTED_REPOSITORY: ${{ github.repository }}
         run: >-
-          node scripts/version-policy.mjs verify-main-pr
+          node scripts/stable-version-policy.mjs verify-main-pr
           --base-sha "$BASE_SHA"
           --head-sha "$HEAD_SHA"
           --head-ref "$HEAD_REF"
-          --head-repository "$HEAD_REPOSITORY"
-          --expected-repository "$EXPECTED_REPOSITORY"
-          --release-ref origin/release
 
-      - name: Test release preparation contract
-        run: npm run test:release
-
-      - name: 测试候选打包契约
-        run: npm run test:candidate
-
-      - name: 测试发布晋级契约
-        run: npm run test:promotion
-
-      - name: 测试正式发布编排契约
-        run: npm run test:formal-release
-
-      - name: Test upstream tracking contract
-        run: npm run test:upstream-tracking
-
-      - name: 测试工作树基线公开契约
-        run: npm run test:worktree-baseline
-
-      - name: Reject unresolved upstream review conflicts
-        env:
-          REVIEW_REPORT_REQUIRED: ${{ github.event_name == 'pull_request' && github.head_ref == 'upstream-tracking/main' }}
-        run: node scripts/upstream-tracking.mjs verify-review --required "$REVIEW_REPORT_REQUIRED"
-
-      - name: 测试 Updater 信任契约
-        run: npm run test:updater
-
-      - name: 检查 Updater 信任根
-        run: npm run updater:check
-
-      - name: Check version consistency
+      - name: 检查稳定版本一致性
         run: npm run version:check
 
-      - name: Check desktop identity
-        run: npm run desktop:identity:check
-
-      - name: Check CLI identity
-        run: npm run cli:identity:check
-
-      - name: Test repository identity contract
-        run: npm run test:repository-identity
-
-      - name: Test frontend behavior
+      - name: 测试前端行为
         run: npm run test:frontend
 
-      - name: Check repository identity
-        run: npm run repository:identity:check
-
-      - name: Lint
+      - name: 检查代码规范
         run: npm run lint
 
-      - name: Typecheck
+      - name: 检查类型
         run: npm run typecheck
 
-      - name: Build production frontend
+      - name: 构建生产前端
         run: npm run build
 
   workflow-lint:
@@ -117,13 +65,13 @@ jobs:
     name: GitHub Actions syntax
 
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install actionlint
+      - name: 安装 actionlint
         run: GOBIN="$RUNNER_TEMP/actionlint-bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
-      - name: Validate workflows
+      - name: 验证工作流语法
         run: '"$RUNNER_TEMP/actionlint-bin/actionlint"'
 
       - name: 检查 Action 固定引用与 Node 24 运行时
@@ -134,23 +82,23 @@ jobs:
     name: Rust quality and Linux check
 
     steps:
-      - name: Checkout repository
+      - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Rust toolchain
+      - name: 配置 Rust 工具链
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust dependencies
+      - name: 缓存 Rust 依赖
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
 
-      - name: Check formatting
+      - name: 检查 Rust 格式
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-      - name: Install Linux system dependencies
+      - name: 安装 Linux 系统依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -159,244 +107,8 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - name: Run Clippy
+      - name: 运行 Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Check Linux build
+      - name: 检查 Linux 构建
         run: cargo check --manifest-path src-tauri/Cargo.toml
-
-  rust-tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # macOS covers the unix code paths; Windows covers the
-          # cfg(windows) paths (symlink/junction sync, removal).
-          - platform: macos-latest
-            label: macOS
-          - platform: windows-latest
-            label: Windows
-
-    runs-on: ${{ matrix.platform }}
-    name: Rust tests (${{ matrix.label }})
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - name: Cache Rust dependencies
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: src-tauri
-
-      - name: 配置仓库契约测试所需的 Node.js
-        if: runner.os == 'macOS' || runner.os == 'Windows'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-
-      - name: 测试工作树基线公开契约
-        run: npm run test:worktree-baseline
-
-      - name: 测试 macOS 正式下载回验器
-        if: runner.os == 'macOS'
-        run: node --test scripts/verify-macos-release.test.mjs
-
-      - name: 安装 Windows Updater 重签测试依赖
-        if: runner.os == 'Windows'
-        run: npm ci
-
-      - name: 测试 Windows Updater 稳定名重签
-        if: runner.os == 'Windows'
-        run: node --test scripts/sign-release-updater.test.mjs
-
-      - name: 检查 Windows 正式回验脚本语法
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          [scriptblock]::Create(
-            (Get-Content -Raw -LiteralPath scripts/verify-windows-release.ps1)
-          ) | Out-Null
-
-      # cargo test needs no frontend build: tauri's generate_context only
-      # reads the config, and beforeBuildCommand applies to `tauri build`.
-      - name: Run tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      # vctip.exe (VC++ telemetry) lingers after cl.exe and locks files in
-      # target/, which intermittently breaks the post-job cache save and
-      # marks a green run red (see the save-if note in release.yml). Kill
-      # it before the cache save runs so this job can keep saving caches.
-      - name: Kill VC telemetry before cache save
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: taskkill /f /im vctip.exe
-
-  main-version-policy:
-    needs: [frontend, workflow-lint, rust-quality, rust-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-22.04
-    name: main 版本通道
-    outputs:
-      release_candidate: ${{ steps.policy.outputs.release_candidate }}
-
-    steps:
-      - name: 检出精确 main 提交
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: 获取 release 版本
-        run: >-
-          git fetch --no-tags origin
-          +refs/heads/release:refs/remotes/origin/release
-
-      - name: 校验 main 版本转换
-        id: policy
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          REPORT="$(node scripts/version-policy.mjs verify-main-push \
-            --before-sha "$BEFORE_SHA" \
-            --head-sha "$HEAD_SHA" \
-            --release-ref origin/release \
-            --json)"
-          printf '%s\n' "$REPORT"
-          RELEASE_CANDIDATE="$(jq -r '.releaseCandidate' <<<"$REPORT")"
-          echo "release_candidate=$RELEASE_CANDIDATE" >> "$GITHUB_OUTPUT"
-
-  candidate-guard:
-    needs: main-version-policy
-    if: needs.main-version-policy.outputs.release_candidate == 'true'
-    runs-on: ubuntu-22.04
-    name: 发布候选门禁
-
-    steps:
-      - name: 检出精确 main 候选
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: 获取晋级引用
-        run: |
-          git fetch --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main \
-            +refs/heads/release:refs/remotes/origin/release
-
-      - name: 验证精确发布候选
-        env:
-          CANDIDATE_SHA: ${{ github.sha }}
-        run: >-
-          node scripts/release-candidate.mjs verify
-          --candidate-sha "$CANDIDATE_SHA"
-          --head main
-          --base release
-
-  candidate-package:
-    needs: candidate-guard
-    name: 四平台发布候选
-    permissions:
-      contents: read
-      actions: read
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-    uses: ./.github/workflows/candidate-build.yml
-    with:
-      candidate_sha: ${{ github.sha }}
-      targets_json: >-
-        [{"target_id":"macos-arm64","runner":"macos-latest","rust_target":"aarch64-apple-darwin","bundles":"app,dmg"},{"target_id":"macos-x64","runner":"macos-latest","rust_target":"x86_64-apple-darwin","bundles":"app,dmg"},{"target_id":"windows-x64","runner":"windows-latest","rust_target":"x86_64-pc-windows-msvc","bundles":"nsis,msi"},{"target_id":"linux-x64","runner":"ubuntu-22.04","rust_target":"x86_64-unknown-linux-gnu","bundles":"appimage,deb,rpm"}]
-
-  candidate-pr:
-    needs: candidate-package
-    runs-on: ubuntu-22.04
-    name: 创建或刷新发布晋级
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: write
-
-    steps:
-      # GitHub job 的文件系统互相隔离。这里重复执行精确检出与拉取，确保打包期间
-      # main 新增提交后旧候选立即失效。
-      - name: 检出已打包候选
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: 刷新晋级引用
-        run: |
-          git fetch --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main \
-            +refs/heads/release:refs/remotes/origin/release
-
-      - name: 创建或更新精确发布晋级
-        env:
-          CANDIDATE_SHA: ${{ github.sha }}
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          EVIDENCE_ARTIFACT_ID: ${{ needs.candidate-package.outputs.evidence_artifact_id }}
-          EVIDENCE_ARTIFACT_NAME: ${{ needs.candidate-package.outputs.evidence_artifact_name }}
-          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.candidate-package.outputs.evidence_artifact_digest }}
-          MANIFEST_SHA256: ${{ needs.candidate-package.outputs.manifest_sha256 }}
-        run: |
-          set -euo pipefail
-          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
-          gh api -H "Accept: application/vnd.github+json" \
-            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
-          ACTUAL_DIGEST="sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')"
-          if [ "$ACTUAL_DIGEST" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
-            echo "候选证据 artifact 下载摘要不一致" >&2
-            exit 1
-          fi
-          mkdir candidate-evidence
-          unzip -q "$EVIDENCE_ARCHIVE" -d candidate-evidence
-
-          PROMOTION_BODY="$RUNNER_TEMP/release-promotion.md"
-          node scripts/release-promotion.mjs render-pr-body \
-            --repository "$REPO" \
-            --candidate-sha "$CANDIDATE_SHA" \
-            --head main \
-            --base release \
-            --manifest candidate-evidence/candidate-manifest.json \
-            --evidence-artifact-id "$EVIDENCE_ARTIFACT_ID" \
-            --evidence-artifact-name "$EVIDENCE_ARTIFACT_NAME" \
-            --evidence-artifact-digest "$EVIDENCE_ARTIFACT_DIGEST" \
-            --manifest-sha256 "$MANIFEST_SHA256" \
-            --output "$PROMOTION_BODY"
-
-          PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
-            --json number,headRefName,baseRefName,isCrossRepository,headRefOid)"
-          VALID_PROMOTIONS="$(jq --arg candidate_sha "$CANDIDATE_SHA" \
-            '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not) and .headRefOid == $candidate_sha)]' \
-            <<<"$PROMOTION_PRS")"
-
-          PR_COUNT="$(jq 'length' <<<"$VALID_PROMOTIONS")"
-          if [ "$PR_COUNT" -gt 1 ]; then
-            echo "打开的发布晋级 PR 最多只能有一个，实际为 $PR_COUNT 个" >&2
-            exit 1
-          fi
-
-          VERSION="$(node -p "require('./package.json').version")"
-          TITLE="发布晋级：Skill Expert v${VERSION}"
-          if [ "$PR_COUNT" -eq 1 ]; then
-            PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PROMOTIONS")"
-            gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$PROMOTION_BODY"
-          else
-            gh pr create \
-              --base release \
-              --head main \
-              --title "$TITLE" \
-              --body-file "$PROMOTION_BODY"
-          fi

@@ -47,14 +47,12 @@ test('无变化时零写入，有变化时安全刷新唯一分支和 main PR', 
   assert.doesNotMatch(content, /gh pr merge|--auto|enablePullRequestAutoMerge/);
 });
 
-test('存在精确的 main 到 release 晋级时，上游评审保持等待和草稿状态', () => {
+test('上游评审不再查询或依赖 release 分支状态', () => {
   const content = workflow();
 
-  assert.match(content, /gh pr list --state open --base release --head main/);
-  assert.match(content, /--json [^\n]*headRefOid[^\n]*isCrossRepository/);
-  assert.match(content, /\.headRefName == "main" and \.baseRefName == "release"/);
-  assert.match(content, /--release-candidate-sha "\$RELEASE_CANDIDATE_SHA"/);
-  assert.match(content, /jq -e '\.releasePromotion\.waiting or \(\.conflicts \| length > 0\)'/);
+  assert.doesNotMatch(content, /--base release|--head main|release-candidate-sha/);
+  assert.doesNotMatch(content, /releasePromotion|RELEASE_CANDIDATE_SHA/);
+  assert.match(content, /jq -e '\(\.conflicts \| length > 0\)'/);
   assert.match(content, /gh pr ready "\$PR_NUMBER" --undo/);
   assert.doesNotMatch(content, /HEAD:refs\/heads\/(?:main|release)/);
 });
@@ -70,7 +68,7 @@ test('工作流权限仅允许读取代码并写入自己的分支和 PR', () =>
   assert.doesNotMatch(content, /issues: write|actions: write|checks: write|id-token: write|packages: write/);
 });
 
-test('package 和日常 CI 暴露上游跟踪契约测试套件', () => {
+test('package 保留上游跟踪契约套件但轻量 PR 不运行它', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
   const testWorkflow = fs.readFileSync(
     path.join(repositoryRoot, '.github/workflows/test.yml'),
@@ -81,13 +79,6 @@ test('package 和日常 CI 暴露上游跟踪契约测试套件', () => {
     packageJson.scripts['test:upstream-tracking'],
     'node --test scripts/upstream-tracking.test.mjs scripts/upstream-tracking-workflow.test.mjs',
   );
-  assert.match(testWorkflow, /run: npm run test:upstream-tracking/);
-  assert.match(
-    testWorkflow,
-    /REVIEW_REPORT_REQUIRED:\s*\$\{\{ github\.event_name == 'pull_request' && github\.head_ref == 'upstream-tracking\/main' \}\}/,
-  );
-  assert.match(
-    testWorkflow,
-    /node scripts\/upstream-tracking\.mjs verify-review --required "\$REVIEW_REPORT_REQUIRED"/,
-  );
+  assert.doesNotMatch(testWorkflow, /run: npm run test:upstream-tracking/);
+  assert.doesNotMatch(testWorkflow, /REVIEW_REPORT_REQUIRED|verify-review/);
 });

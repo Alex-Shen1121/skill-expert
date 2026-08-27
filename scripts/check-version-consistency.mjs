@@ -61,12 +61,10 @@ export function checkVersionConsistency(root = process.cwd()) {
     return {
       version,
       mismatches: [
-        `package.json：版本必须是 x.y.z 或开发序号 x.y.z-N，实际为 ${version ?? '缺失'}`,
+        `package.json：版本必须是 x.y.z，实际为 ${version ?? '缺失'}`,
       ],
     };
   }
-  const stableVersion = parsedVersion.stable;
-
   const packageLock = readJson(root, 'package-lock.json');
   compare(mismatches, 'package-lock.json root version', packageLock.version, version);
   compare(mismatches, 'package-lock.json workspace version', packageLock.packages?.['']?.version, version);
@@ -105,7 +103,7 @@ export function checkVersionConsistency(root = process.cwd()) {
       mismatches,
       `${changelog} latest release`,
       firstChangelogVersion(readText(root, changelog)),
-      stableVersion,
+      parsedVersion.stable,
     );
   }
 

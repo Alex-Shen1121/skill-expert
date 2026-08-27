@@ -9,13 +9,15 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- Simplify maintenance around a single `main` release source and explicit release authorization.
 
 ### User-facing
--
+- No application behavior changes; ordinary development now keeps the latest stable version until a release is explicitly requested.
 
 ### Developer & Governance
--
+- Keep all development behind `codex/*` pull requests while reducing required checks to workflow syntax, frontend contracts, and Linux Rust quality.
+- Remove development-suffix versions and the `main → release` promotion chain; formal releases now build, sign, verify, and publish once from an exact `main` SHA.
+- Preserve on-demand test packages as isolated `promotable: false` artifacts.
 
 ## [1.0.3] - 2026-08-26
 

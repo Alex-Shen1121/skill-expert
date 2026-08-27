@@ -1,61 +1,38 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const guidePath = path.join(repositoryRoot, 'docs/formal-release.md');
+const guide = readFileSync(path.join(repositoryRoot, 'docs/formal-release.md'), 'utf8');
 
-test('正式发布指南记录唯一批准入口、完整门禁和不可变故障策略', () => {
-  const guide = fs.readFileSync(guidePath, 'utf8');
+test('正式发布指南记录明确授权、发布 PR 和精确 main SHA', () => {
+  assert.match(guide, /明确说“发布新版本”或“发布 `vX\.Y\.Z`”/);
+  assert.match(guide, /codex\/release-vX\.Y\.Z/);
+  assert.match(guide, /npm run release:prepare -- patch/);
+  assert.match(guide, /npm run release:prepare -- X\.Y\.Z/);
+  assert.match(guide, /release_sha/);
+  assert.match(guide, /40 位 SHA/);
+  assert.match(guide, /不读取或修改历史 `release` 分支/);
+});
 
-  assert.match(guide, /main[\s\S]*release[\s\S]*合并即批准正式发布/);
-  assert.match(guide, /发布晋级来源[\s\S]*发布晋级契约/);
-  assert.match(guide, /Release PR[\s\S]*不重新运行[\s\S]*完整[^\n]+CI/);
-  assert.match(guide, /release[\s\S]*push[\s\S]*同一次 workflow/);
-  assert.match(guide, /annotated[\s\S]*tag[\s\S]*绝不覆盖/);
-  assert.match(guide, /workflow run ID/);
-  assert.match(guide, /release Environment[\s\S]*TAURI_SIGNING_PRIVATE_KEY/);
-  assert.match(guide, /唯一[^\n]+生产重签[^\n]+release Environment/);
-  assert.match(guide, /不运行[^\n]+cargo build[^\n]+tauri build/);
-  assert.match(guide, /逐字节复用/);
-  assert.match(guide, /candidate-manifest\.json/);
-  assert.match(guide, /candidate-build-provenance\.json/);
-  assert.match(guide, /promotion-binding\.json/);
-  assert.match(guide, /release-provenance\.json/);
-  assert.match(guide, /候选构建来源证明[^\n]+main[^\n]+candidate SHA/);
-  assert.match(guide, /正式来源证明[^\n]+release SHA/);
-  assert.match(guide, /下载回验[\s\S]*公开[\s\S]*Latest/);
+test('正式发布指南记录单次四平台构建和完整公开门禁', () => {
+  assert.match(guide, /macOS arm64、macOS x64、Windows x64 和 Linux x64/);
+  assert.match(guide, /macOS 与 Windows[^\n]+Rust 测试/);
+  assert.match(guide, /`release` Environment[\s\S]*TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(guide, /annotated `vX\.Y\.Z` tag/);
+  assert.match(guide, /Draft/);
+  assert.match(guide, /build-provenance\.json/);
+  assert.match(guide, /SHA256SUMS/);
+  assert.match(guide, /重新下载 GitHub 保存的真实字节/);
+  assert.match(guide, /公开 Draft[^\n]+Latest/);
+  assert.match(guide, /共 21 个资产/);
+});
+
+test('正式发布指南记录失败版本与 macOS 分发边界', () => {
+  assert.match(guide, /tag 创建前失败[^\n]+同一版本/);
+  assert.match(guide, /tag 或 Draft 一旦创建[^\n]+不得[^\n]+复用版本/);
+  assert.match(guide, /Updater 不自动降级/);
   assert.match(guide, /ad-hoc[\s\S]*仍要打开/);
-  assert.match(guide, /失败[\s\S]*Draft[\s\S]*不移动 tag[\s\S]*新 patch/);
-  assert.match(guide, /不自动降级/);
-});
-
-test('正式发布指南把真实 Updater 配置和仓库治理列为首发前置条件', () => {
-  const guide = fs.readFileSync(guidePath, 'utf8');
-
-  assert.match(guide, /Issue #11[\s\S]*Updater/);
-  assert.match(guide, /Issue #13[\s\S]*分支[\s\S]*tag[\s\S]*Environment/);
-  assert.match(guide, /npm run updater:provision/);
-  assert.match(guide, /不会[\s\S]*自动生成生产密钥/);
-});
-
-test('正式发布指南记录精确候选选择和 Ruleset 高层检查', () => {
-  const guide = fs.readFileSync(guidePath, 'utf8');
-
-  assert.match(guide, /run ID[^\n]+run attempt[^\n]+artifact ID[^\n]+digest/);
-  assert.match(guide, /PR 正文[^\n]+不是信任根/);
-  assert.match(guide, /开发集成分支[^\n]+五个完整日常 CI/);
-  assert.match(guide, /发布分支[\s\S]{0,120}发布晋级来源[\s\S]{0,80}发布晋级契约/);
-  assert.match(guide, /过期[^\n]+不可晋级/);
-});
-
-test('正式发布指南记录真实演练开关与旧路径退出条件', () => {
-  const guide = fs.readFileSync(guidePath, 'utf8');
-
-  assert.match(guide, /RELEASE_PIPELINE_MODE/);
-  assert.match(guide, /candidate-reuse/);
-  assert.match(guide, /Ruleset 回读[^\n]+真实测试版本演练/);
-  assert.match(guide, /删除旧 workflow、旧资产契约脚本和该开关/);
 });
