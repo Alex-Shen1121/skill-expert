@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, edited]
 
 permissions:
@@ -83,10 +84,6 @@ jobs:
 
       - name: 检查 Updater 信任根
         run: npm run updater:check
-
-      - name: 发布提升必须使用生产 Updater 信任根
-        if: github.event_name == 'pull_request' && github.head_ref == 'main' && github.base_ref == 'release'
-        run: npm run updater:check:production
 
       - name: Check version consistency
         run: npm run version:check
@@ -235,48 +232,6 @@ jobs:
         continue-on-error: true
         run: taskkill /f /im vctip.exe
 
-  release-promotion-shape:
-    if: github.event_name == 'pull_request' && github.base_ref == 'release'
-    runs-on: ubuntu-22.04
-    name: Release promotion source
-
-    steps:
-      - name: Reject a non-main or cross-repository promotion
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          EXPECTED_REPOSITORY: ${{ github.repository }}
-        run: |
-          if [ "$HEAD_REF" != "main" ] || \
-             [ "$BASE_REF" != "release" ] || \
-             [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
-            echo "Release promotion must use this repository's main branch as head and release as base" >&2
-            exit 1
-          fi
-
-      - name: 检出精确发布候选
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: 获取发布晋级引用
-        run: |
-          git fetch --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main \
-            +refs/heads/release:refs/remotes/origin/release
-
-      - name: 校验发布晋级版本与身份
-        env:
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          node scripts/release-candidate.mjs verify
-          --candidate-sha "$CANDIDATE_SHA"
-          --head main
-          --base release
-
   main-version-policy:
     needs: [frontend, workflow-lint, rust-quality, rust-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -346,9 +301,17 @@ jobs:
   candidate-package:
     needs: candidate-guard
     name: Four-target release candidate
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/candidate-build.yml
     with:
       candidate_sha: ${{ github.sha }}
+      targets_json: >-
+        [{"target_id":"macos-arm64","runner":"macos-latest","rust_target":"aarch64-apple-darwin","bundles":"app,dmg"},{"target_id":"macos-x64","runner":"macos-latest","rust_target":"x86_64-apple-darwin","bundles":"app,dmg"},{"target_id":"windows-x64","runner":"windows-latest","rust_target":"x86_64-pc-windows-msvc","bundles":"nsis,msi"},{"target_id":"linux-x64","runner":"ubuntu-22.04","rust_target":"x86_64-unknown-linux-gnu","bundles":"appimage,deb,rpm"}]
 
   candidate-pr:
     needs: candidate-package
@@ -356,6 +319,7 @@ jobs:
     name: Create or refresh release promotion
     permissions:
       contents: read
+      actions: read
       pull-requests: write
 
     steps:
@@ -378,13 +342,35 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVIDENCE_ARTIFACT_ID: ${{ needs.candidate-package.outputs.evidence_artifact_id }}
+          EVIDENCE_ARTIFACT_NAME: ${{ needs.candidate-package.outputs.evidence_artifact_name }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.candidate-package.outputs.evidence_artifact_digest }}
+          MANIFEST_SHA256: ${{ needs.candidate-package.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
+          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
+          ACTUAL_DIGEST="sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')"
+          if [ "$ACTUAL_DIGEST" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
+            echo "候选证据 artifact 下载摘要不一致" >&2
+            exit 1
+          fi
+          mkdir candidate-evidence
+          unzip -q "$EVIDENCE_ARCHIVE" -d candidate-evidence
+
           PROMOTION_BODY="$RUNNER_TEMP/release-promotion.md"
-          node scripts/release-candidate.mjs render-pr-body \
+          node scripts/release-promotion.mjs render-pr-body \
+            --repository "$REPO" \
             --candidate-sha "$CANDIDATE_SHA" \
             --head main \
             --base release \
+            --manifest candidate-evidence/candidate-manifest.json \
+            --evidence-artifact-id "$EVIDENCE_ARTIFACT_ID" \
+            --evidence-artifact-name "$EVIDENCE_ARTIFACT_NAME" \
+            --evidence-artifact-digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --manifest-sha256 "$MANIFEST_SHA256" \
             --output "$PROMOTION_BODY"
 
           PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
@@ -400,7 +386,7 @@ jobs:
           fi
 
           VERSION="$(node -p "require('./package.json').version")"
-          TITLE="Release promotion: Skill Expert v${VERSION}"
+          TITLE="发布晋级：Skill Expert v${VERSION}"
           if [ "$PR_COUNT" -eq 1 ]; then
             PR_NUMBER="$(jq -r '.[0].number' <<<"$VALID_PROMOTIONS")"
             gh pr edit "$PR_NUMBER" --title "$TITLE" --body-file "$PROMOTION_BODY"

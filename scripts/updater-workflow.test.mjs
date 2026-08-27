@@ -8,14 +8,14 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const releaseWorkflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
 
-test('只有正式构建通过 release Environment 读取生产 Updater Secret', () => {
+test('只有生产重签阶段通过 release Environment 读取生产 Updater Secret', () => {
   const workflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
 
   assert.equal((workflow.match(/^\s+environment:\s*release\s*$/gm) ?? []).length, 1);
-  assert.equal((workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY\s*\}\}/g) ?? []).length, 2);
+  assert.equal((workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY\s*\}\}/g) ?? []).length, 1);
   assert.equal(
     (workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD\s*\}\}/g) ?? []).length,
-    2,
+    1,
   );
   assert.match(workflow, /run: npm run updater:check:production/);
 });
@@ -44,8 +44,9 @@ test('软件包脚本和拉取请求 CI 暴露 Updater 信任契约', () => {
   );
   assert.match(testWorkflow, /run: npm run test:updater/);
   assert.match(testWorkflow, /run: npm run updater:check/);
+  assert.doesNotMatch(testWorkflow, /run: npm run updater:check:production/);
   assert.match(
-    testWorkflow,
-    /if: github\.event_name == 'pull_request' && github\.head_ref == 'main' && github\.base_ref == 'release'[\s\S]*run: npm run updater:check:production/,
+    fs.readFileSync(releaseWorkflowPath, 'utf8'),
+    /production-release:[\s\S]*?environment:\s*release[\s\S]*?npm run updater:check:production/,
   );
 });

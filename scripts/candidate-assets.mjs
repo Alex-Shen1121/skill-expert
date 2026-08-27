@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[1-9]\d*)?$/;
 
 const targetContracts = {
   'macos-arm64': {
@@ -49,7 +49,7 @@ function parseArguments(argv) {
     const flag = rest[index];
     const value = rest[index + 1];
     if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`expected --name value arguments, found ${flag ?? 'nothing'}`);
+      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
     }
     options[flag.slice(2)] = value;
   }
@@ -58,11 +58,11 @@ function parseArguments(argv) {
 
 function contractFor(version, target) {
   if (!VERSION_PATTERN.test(version ?? '')) {
-    throw new Error(`version must be a stable x.y.z value, found ${version ?? 'missing'}`);
+    throw new Error(`版本必须是 x.y.z 或 x.y.z-N，实际为 ${version ?? '缺失'}`);
   }
   const contract = targetContracts[target];
   if (!contract) {
-    throw new Error(`unsupported candidate target: ${target ?? 'missing'}`);
+    throw new Error(`不支持的候选目标：${target ?? '缺失'}`);
   }
   return contract;
 }
@@ -84,7 +84,7 @@ function findUniqueArtifact(buildRoot, relativeDirectory, suffix) {
     .map((entry) => path.join(directory, entry.name));
   if (matches.length !== 1) {
     throw new Error(
-      `expected exactly one ${suffix} artifact in ${directory}, found ${matches.length}`,
+      `${directory} 中必须恰好有一个 ${suffix} 资产，实际为 ${matches.length} 个`,
     );
   }
   return matches[0];
@@ -95,7 +95,7 @@ export function stageCandidateAssets(buildRoot, directory, version, target) {
   fs.mkdirSync(directory, { recursive: true });
   const existing = fs.readdirSync(directory);
   if (existing.length > 0) {
-    throw new Error(`candidate staging directory must be empty: ${directory}`);
+    throw new Error(`候选暂存目录必须为空：${directory}`);
   }
 
   const desktopPrefix = `skill-expert-v${version}-${target}`;
@@ -105,7 +105,7 @@ export function stageCandidateAssets(buildRoot, directory, version, target) {
   ]);
   const cliName = `skill-expert-cli${contract.cliSuffix}`;
   const cliPath = path.join(buildRoot, cliName);
-  if (!fs.statSync(cliPath).isFile()) throw new Error(`CLI artifact is not a file: ${cliPath}`);
+  if (!fs.statSync(cliPath).isFile()) throw new Error(`CLI 资产不是文件：${cliPath}`);
   copies.push([
     cliPath,
     path.join(directory, `skill-expert-cli-v${version}-${target}${contract.cliSuffix}`),
@@ -128,15 +128,15 @@ export function verifyCandidateAssets(directory, version, target) {
 
   for (const filename of expected) {
     if (actualSet.has(filename) && !fs.statSync(path.join(directory, filename)).isFile()) {
-      unexpected.push(`${filename} (not a file)`);
+      unexpected.push(`${filename}（不是文件）`);
     }
   }
 
   if (missing.length > 0 || unexpected.length > 0) {
     const details = [];
-    if (missing.length > 0) details.push(`missing: ${missing.join(', ')}`);
-    if (unexpected.length > 0) details.push(`unexpected: ${unexpected.join(', ')}`);
-    throw new Error(`candidate asset inventory mismatch for ${target}: ${details.join('; ')}`);
+    if (missing.length > 0) details.push(`缺少：${missing.join('、')}`);
+    if (unexpected.length > 0) details.push(`意外：${unexpected.join('、')}`);
+    throw new Error(`${target} 候选资产清单不匹配：${details.join('；')}`);
   }
 
   return expected;
@@ -149,16 +149,16 @@ function main() {
     return;
   }
   if (command === 'verify') {
-    if (!options.directory) throw new Error('verify requires --directory');
+    if (!options.directory) throw new Error('verify 需要 --directory');
     const inventory = verifyCandidateAssets(options.directory, options.version, options.target);
     console.log(
-      `exact candidate asset inventory verified for ${options.target} (${inventory.length} files).`,
+      `${options.target} 候选资产精确清单验证通过（${inventory.length} 个文件）。`,
     );
     return;
   }
   if (command === 'stage') {
     if (!options['build-root'] || !options.directory) {
-      throw new Error('stage requires --build-root and --directory');
+      throw new Error('stage 需要 --build-root 和 --directory');
     }
     const inventory = stageCandidateAssets(
       options['build-root'],
@@ -166,11 +166,11 @@ function main() {
       options.version,
       options.target,
     );
-    console.log(`staged exact candidate asset inventory for ${options.target} (${inventory.length} files).`);
+    console.log(`已暂存 ${options.target} 候选资产精确清单（${inventory.length} 个文件）。`);
     return;
   }
   throw new Error(
-    `usage: candidate-assets.mjs <expected|verify|stage> --version x.y.z --target <target>`,
+    '用法：candidate-assets.mjs <expected|verify|stage> --version x.y.z[-N] --target <target>',
   );
 }
 

@@ -7,13 +7,33 @@ on:
         description: Exact 40-character commit SHA to package
         required: true
         type: string
-  workflow_dispatch:
-    inputs:
-      candidate_sha:
-        description: Exact 40-character commit SHA to package
+      purpose:
+        description: Formal candidate or isolated manual test package
+        required: false
+        default: formal-release-candidate
+        type: string
+      targets_json:
+        description: Exact matrix include JSON
         required: true
         type: string
-
+      artifact_prefix:
+        description: Artifact name prefix
+        required: false
+        default: skill-expert-candidate
+        type: string
+    outputs:
+      evidence_artifact_id:
+        description: Exact immutable candidate evidence artifact ID
+        value: ${{ jobs.candidate-evidence.outputs.artifact_id }}
+      evidence_artifact_name:
+        description: Exact candidate evidence artifact name
+        value: ${{ jobs.candidate-evidence.outputs.artifact_name }}
+      evidence_artifact_digest:
+        description: SHA-256 digest reported by upload-artifact
+        value: ${{ jobs.candidate-evidence.outputs.artifact_digest }}
+      manifest_sha256:
+        description: SHA-256 of candidate-manifest.json
+        value: ${{ jobs.candidate-evidence.outputs.manifest_sha256 }}
 permissions:
   contents: read
 
@@ -25,23 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target_id: macos-arm64
-            runner: macos-latest
-            rust_target: aarch64-apple-darwin
-            bundles: app,dmg
-          - target_id: macos-x64
-            runner: macos-latest
-            rust_target: x86_64-apple-darwin
-            bundles: app,dmg
-          - target_id: windows-x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            bundles: nsis,msi
-          - target_id: linux-x64
-            runner: ubuntu-22.04
-            rust_target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb,rpm
+        include: ${{ fromJSON(inputs.targets_json) }}
 
     steps:
       - name: Checkout exact candidate
@@ -55,6 +59,7 @@ jobs:
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.candidate_sha }}
+          PURPOSE: ${{ inputs.purpose }}
         run: |
           set -euo pipefail
           if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -66,7 +71,8 @@ jobs:
             echo "Candidate checkout mismatch: expected $EXPECTED_SHA, found $ACTUAL_SHA" >&2
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$EXPECTED_SHA" origin/main; then
+          if [ "$PURPOSE" = "formal-release-candidate" ] && \
+             ! git merge-base --is-ancestor "$EXPECTED_SHA" origin/main; then
             echo "candidate_sha must belong to the development integration branch origin/main" >&2
             exit 1
           fi
@@ -165,12 +171,14 @@ jobs:
           CANDIDATE_PUBLIC_KEY_PATH: ${{ runner.temp }}/candidate-updater.key.pub
           TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ runner.temp }}/candidate-updater.key
           TARGET_ID: ${{ matrix.target_id }}
+          PURPOSE: ${{ inputs.purpose }}
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           node scripts/candidate-assets.mjs stage \
             --version "$VERSION" \
             --target "$TARGET_ID" \
+            --purpose "$PURPOSE" \
             --build-root "$BUILD_ROOT" \
             --directory "candidate-assets/$TARGET_ID"
           node scripts/sign-release-updater.mjs \
@@ -181,10 +189,11 @@ jobs:
           node scripts/candidate-assets.mjs verify \
             --version "$VERSION" \
             --target "$TARGET_ID" \
+            --purpose "$PURPOSE" \
             --directory "candidate-assets/$TARGET_ID"
 
       - name: 原生回验 Linux 候选安装包
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.purpose == 'formal-release-candidate'
         shell: bash
         env:
           TARGET_ID: ${{ matrix.target_id }}
@@ -196,16 +205,154 @@ jobs:
             --directory "candidate-assets/$TARGET_ID"
 
       - name: 原生回验 Windows 候选安装包
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && inputs.purpose == 'formal-release-candidate'
         shell: pwsh
         run: |
           $Version = node -p "require('./package.json').version"
           ./scripts/verify-windows-release.ps1 -Version $Version -Directory "candidate-assets/${{ matrix.target_id }}"
 
+      - name: 写入手动测试包不可晋级标记
+        if: inputs.purpose == 'manual-test-package'
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          cat > "candidate-assets/${TARGET_ID}/TEST-PACKAGE.json" <<EOF
+          {
+            "schemaVersion": 1,
+            "purpose": "manual-test-package",
+            "candidateSha": "${CANDIDATE_SHA}",
+            "target": "${TARGET_ID}",
+            "promotable": false
+          }
+          EOF
+
       - name: Upload candidate directory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: skill-expert-candidate-${{ inputs.candidate_sha }}-${{ matrix.target_id }}
+          name: ${{ inputs.artifact_prefix }}-${{ inputs.candidate_sha }}-${{ github.run_attempt }}-${{ matrix.target_id }}
           path: candidate-assets/${{ matrix.target_id }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  candidate-evidence:
+    name: Candidate evidence
+    needs: build-candidate
+    if: inputs.purpose == 'formal-release-candidate'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_name: ${{ steps.manifest.outputs.artifact_name }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      manifest_sha256: ${{ steps.manifest.outputs.manifest_sha256 }}
+    steps:
+      - name: Checkout exact candidate evidence tools
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Download the four exact candidate artifacts by ID
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/candidate-run.json"
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            > "$RUNNER_TEMP/candidate-jobs.json"
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/candidate-artifacts.json"
+
+          for TARGET_ID in macos-arm64 macos-x64 windows-x64 linux-x64; do
+            ARTIFACT_NAME="skill-expert-candidate-${CANDIDATE_SHA}-${GITHUB_RUN_ATTEMPT}-${TARGET_ID}"
+            MATCHES="$(jq --arg name "$ARTIFACT_NAME" \
+              '[.artifacts[] | select(.name == $name and .expired == false)]' \
+              "$RUNNER_TEMP/candidate-artifacts.json")"
+            if [ "$(jq 'length' <<<"$MATCHES")" != "1" ]; then
+              echo "${TARGET_ID} 必须存在唯一且未过期的候选 artifact" >&2
+              exit 1
+            fi
+            ARTIFACT_ID="$(jq -r '.[0].id' <<<"$MATCHES")"
+            ARTIFACT_DIGEST="$(jq -r '.[0].digest' <<<"$MATCHES")"
+            ARCHIVE="$RUNNER_TEMP/${ARTIFACT_ID}.zip"
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" > "$ARCHIVE"
+            ACTUAL_DIGEST="sha256:$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+            if [ "$ACTUAL_DIGEST" != "$ARTIFACT_DIGEST" ]; then
+              echo "候选 artifact ${ARTIFACT_ID} 下载摘要不一致" >&2
+              exit 1
+            fi
+            mkdir -p "candidate-assets/${TARGET_ID}"
+            unzip -q "$ARCHIVE" -d "candidate-assets/${TARGET_ID}"
+          done
+
+      - name: Generate immutable candidate manifest
+        id: manifest
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          mkdir candidate-evidence
+          VERSION="$(node -p "require('./package.json').version")"
+          CANDIDATE_TREE="$(git rev-parse "${CANDIDATE_SHA}^{tree}")"
+          WORKFLOW_PATH="$(jq -r '.path' "$RUNNER_TEMP/candidate-run.json")"
+          node scripts/release-promotion.mjs create-manifest \
+            --repository "$REPO" \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --candidate-tree "$CANDIDATE_TREE" \
+            --source-ref refs/heads/main \
+            --workflow-path "$WORKFLOW_PATH" \
+            --builder-workflow-path .github/workflows/candidate-build.yml \
+            --workflow-revision "$CANDIDATE_SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" \
+            --run-response "$RUNNER_TEMP/candidate-run.json" \
+            --jobs-response "$RUNNER_TEMP/candidate-jobs.json" \
+            --artifacts-response "$RUNNER_TEMP/candidate-artifacts.json" \
+            --assets-directory candidate-assets \
+            --output candidate-evidence/candidate-manifest.json
+          MANIFEST_SHA256="$(sha256sum candidate-evidence/candidate-manifest.json | awk '{print $1}')"
+          ARTIFACT_NAME="skill-expert-candidate-evidence-${CANDIDATE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          echo "manifest_sha256=$MANIFEST_SHA256" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Attest candidate bytes and immutable manifest
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            candidate-assets/**/*
+            candidate-evidence/candidate-manifest.json
+          show-summary: false
+
+      - name: Retain candidate build provenance bundle
+        shell: bash
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" candidate-evidence/candidate-build-provenance.json
+
+      - name: Upload immutable candidate evidence
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.manifest.outputs.artifact_name }}
+          path: candidate-evidence/
           if-no-files-found: error
           retention-days: 7

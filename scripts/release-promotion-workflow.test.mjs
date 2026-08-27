@@ -6,9 +6,14 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
+const promotionWorkflowPath = path.join(repositoryRoot, '.github/workflows/release-promotion.yml');
 
 function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
+}
+
+function promotionWorkflow() {
+  return fs.readFileSync(promotionWorkflowPath, 'utf8');
 }
 
 function job(content, name) {
@@ -90,7 +95,7 @@ test('a packaged current candidate creates or updates exactly one release promot
   assert.match(promotion, /pull-requests:\s*write/);
   assert.match(promotion, /ref:\s*\$\{\{ github\.sha \}\}/);
   assert.match(promotion, /CANDIDATE_SHA:\s*\$\{\{ github\.sha \}\}/);
-  assert.match(promotion, /release-candidate\.mjs render-pr-body/);
+  assert.match(promotion, /release-promotion\.mjs render-pr-body/);
   assert.match(promotion, /--candidate-sha "\$CANDIDATE_SHA"/);
   assert.match(promotion, /--head main/);
   assert.match(promotion, /--base release/);
@@ -115,7 +120,7 @@ test('CI exposes the promotion contract suite before candidate packaging', () =>
 
   assert.equal(
     packageJson.scripts['test:promotion'],
-    'node --test scripts/release-candidate.test.mjs scripts/release-promotion-workflow.test.mjs',
+    'node --test scripts/release-candidate.test.mjs scripts/release-promotion-contract.test.mjs scripts/release-promotion-workflow.test.mjs',
   );
   assert.match(frontend, /run:\s*npm run test:promotion/);
 });
@@ -132,17 +137,16 @@ test('promotion keeps third-party actions pinned and grants write permission onl
   assert.match(content, /^permissions:\n  contents: read$/m);
   assert.doesNotMatch(content, /contents:\s*write/);
   assert.doesNotMatch(content, /\$\{\{\s*secrets\./);
-  assert.match(job(content, 'candidate-pr'), /permissions:\n\s+contents: read\n\s+pull-requests: write/);
+  assert.match(
+    job(content, 'candidate-pr'),
+    /permissions:\n\s+contents: read\n\s+actions: read\n\s+pull-requests: write/,
+  );
   assert.doesNotMatch(job(content, 'candidate-guard'), /pull-requests:\s*write/);
 });
 
 test('a manually opened non-main or cross-repository promotion fails on its own PR run', () => {
-  const shape = job(workflow(), 'release-promotion-shape');
+  const shape = job(promotionWorkflow(), 'promotion-source');
 
-  assert.match(
-    shape,
-    /if:\s*github\.event_name == 'pull_request' && github\.base_ref == 'release'/,
-  );
   assert.match(shape, /HEAD_REF:\s*\$\{\{ github\.head_ref \}\}/);
   assert.match(shape, /BASE_REF:\s*\$\{\{ github\.base_ref \}\}/);
   assert.match(
@@ -156,12 +160,12 @@ test('a manually opened non-main or cross-repository promotion fails on its own 
 });
 
 test('main 到 release 的 PR 再次校验精确 SHA 与下一正式补丁版本', () => {
-  const shape = job(workflow(), 'release-promotion-shape');
+  const shape = job(promotionWorkflow(), 'promotion-contract');
 
   assert.match(shape, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(shape, /fetch-depth:\s*0/);
   assert.match(shape, /CANDIDATE_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(shape, /release-candidate\.mjs verify/);
+  assert.match(shape, /release-promotion\.mjs verify-candidate/);
   assert.match(shape, /--candidate-sha "\$CANDIDATE_SHA"/);
   assert.match(shape, /--head main/);
   assert.match(shape, /--base release/);
@@ -191,10 +195,51 @@ test('a rejected outsider promotion cannot block selection of the exact valid pr
 });
 
 test('retargeting an existing pull request to release reruns the shape guard', () => {
-  const content = workflow();
+  const content = promotionWorkflow();
 
   assert.match(
     content,
-    /^  pull_request:\n    types: \[opened, synchronize, reopened, edited\]$/m,
+    /^  pull_request:\n    branches: \[release\]\n    types: \[opened, synchronize, reopened, edited\]$/m,
   );
+});
+
+test('Release PR 只运行稳定命名的高层来源与晋级契约检查', () => {
+  const daily = workflow();
+  const promotion = promotionWorkflow();
+
+  assert.match(daily, /^  pull_request:\n    branches: \[main\]\n/m);
+  assert.match(promotion, /^name:\s*发布晋级门禁$/m);
+  assert.match(promotion, /^  pull_request:\n    branches: \[release\]\n/m);
+  assert.match(promotion, /types:\s*\[opened, synchronize, reopened, edited\]/);
+  assert.match(promotion, /^  promotion-source:\n[^]*?name:\s*发布晋级来源/m);
+  assert.match(promotion, /^  promotion-contract:\n[^]*?name:\s*发布晋级契约/m);
+  assert.match(promotion, /needs:\s*promotion-source/);
+  assert.match(promotion, /actions:\s*read/);
+  assert.match(promotion, /attestations:\s*read/);
+  assert.match(promotion, /release-promotion\.mjs read-selector/);
+  assert.match(promotion, /actions\/runs\/\$\{RUN_ID\}\/attempts\/\$\{RUN_ATTEMPT\}\/jobs/);
+  assert.match(promotion, /actions\/artifacts\/\$\{EVIDENCE_ARTIFACT_ID\}\/zip/);
+  assert.match(promotion, /gh attestation verify/);
+  assert.match(promotion, /--source-digest "\$CANDIDATE_SHA"/);
+  assert.match(promotion, /--source-ref refs\/heads\/main/);
+  assert.match(promotion, /release-promotion\.mjs verify-candidate/);
+  assert.doesNotMatch(promotion, /npm ci|cargo |tauri -- build|secrets\.|environment:\s*release/);
+});
+
+test('候选 PR 创建任务固定写入证据 artifact 与候选清单选择器', () => {
+  const daily = workflow();
+  const candidatePackage = job(daily, 'candidate-package');
+  const candidatePr = job(daily, 'candidate-pr');
+
+  assert.match(candidatePackage, /id-token:\s*write/);
+  assert.match(candidatePackage, /attestations:\s*write/);
+  assert.match(candidatePackage, /artifact-metadata:\s*write/);
+  assert.match(candidatePr, /actions:\s*read/);
+  assert.match(candidatePr, /needs\.candidate-package\.outputs\.evidence_artifact_id/);
+  assert.match(candidatePr, /needs\.candidate-package\.outputs\.evidence_artifact_digest/);
+  assert.match(candidatePr, /needs\.candidate-package\.outputs\.manifest_sha256/);
+  assert.match(candidatePr, /actions\/artifacts\/\$\{EVIDENCE_ARTIFACT_ID\}\/zip/);
+  assert.match(candidatePr, /release-promotion\.mjs render-pr-body/);
+  assert.match(candidatePr, /--evidence-artifact-id "\$EVIDENCE_ARTIFACT_ID"/);
+  assert.match(candidatePr, /--manifest-sha256 "\$MANIFEST_SHA256"/);
 });

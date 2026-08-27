@@ -1,0 +1,147 @@
+name: 发布晋级门禁
+
+on:
+  pull_request:
+    branches: [release]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  promotion-source:
+    name: 发布晋级来源
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 只接受当前仓库 main 到 release
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$HEAD_REF" != "main" ] || \
+             [ "$BASE_REF" != "release" ] || \
+             [ "$HEAD_REPOSITORY" != "$EXPECTED_REPOSITORY" ]; then
+            echo "发布晋级必须使用当前仓库的 main 分支合入 release" >&2
+            exit 1
+          fi
+
+  promotion-contract:
+    name: 发布晋级契约
+    needs: promotion-source
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      attestations: read
+    steps:
+      - name: 检出精确发布候选
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: 获取发布晋级引用
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: 读取 Release PR 的精确候选选择器
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/release-pr.md"
+          node scripts/release-promotion.mjs read-selector \
+            --pr-body "$RUNNER_TEMP/release-pr.md" \
+            > "$RUNNER_TEMP/candidate-selector.json"
+
+      - name: 按精确 ID 下载候选证据并读取 GitHub 事实
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          RUN_ID="$(jq -r '.runId' "$RUNNER_TEMP/candidate-selector.json")"
+          RUN_ATTEMPT="$(jq -r '.runAttempt' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_ID="$(jq -r '.evidenceArtifactId' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_NAME="$(jq -r '.evidenceArtifactName' "$RUNNER_TEMP/candidate-selector.json")"
+          EVIDENCE_ARTIFACT_DIGEST="$(jq -r '.evidenceArtifactDigest' "$RUNNER_TEMP/candidate-selector.json")"
+
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/candidate-run.json"
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100" \
+            > "$RUNNER_TEMP/candidate-jobs.json"
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/candidate-artifacts.json"
+          MATCHES="$(jq \
+            --argjson id "$EVIDENCE_ARTIFACT_ID" \
+            --argjson run_id "$RUN_ID" \
+            --arg name "$EVIDENCE_ARTIFACT_NAME" \
+            --arg digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --arg sha "$CANDIDATE_SHA" \
+            '[.artifacts[] | select(
+              .id == $id and
+              .name == $name and
+              .digest == $digest and
+              .expired == false and
+              .workflow_run.id == $run_id and
+              .workflow_run.head_sha == $sha
+            )]' "$RUNNER_TEMP/candidate-artifacts.json")"
+          if [ "$(jq 'length' <<<"$MATCHES")" != "1" ]; then
+            echo "Release PR 选择的候选证据 artifact 不存在、已过期或身份不匹配" >&2
+            exit 1
+          fi
+
+          EVIDENCE_ARCHIVE="$RUNNER_TEMP/candidate-evidence.zip"
+          gh api -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/actions/artifacts/${EVIDENCE_ARTIFACT_ID}/zip" > "$EVIDENCE_ARCHIVE"
+          ACTUAL_DIGEST="sha256:$(sha256sum "$EVIDENCE_ARCHIVE" | awk '{print $1}')"
+          if [ "$ACTUAL_DIGEST" != "$EVIDENCE_ARTIFACT_DIGEST" ]; then
+            echo "候选证据 artifact 下载摘要不一致" >&2
+            exit 1
+          fi
+          mkdir candidate-evidence
+          unzip -q "$EVIDENCE_ARCHIVE" -d candidate-evidence
+
+      - name: 验证候选清单的 build provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          gh attestation verify candidate-evidence/candidate-manifest.json \
+            --repo "$REPO" \
+            --bundle candidate-evidence/candidate-build-provenance.json \
+            --source-digest "$CANDIDATE_SHA" \
+            --source-ref refs/heads/main \
+            --signer-workflow "$REPO/.github/workflows/candidate-build.yml" \
+            --signer-digest "$CANDIDATE_SHA" \
+            --format json > "$RUNNER_TEMP/candidate-provenance-report.json"
+
+      - name: 执行高层发布晋级契约
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node scripts/release-promotion.mjs verify-candidate
+          --repository "$REPO"
+          --candidate-sha "$CANDIDATE_SHA"
+          --head main
+          --base release
+          --pr-body "$RUNNER_TEMP/release-pr.md"
+          --run-response "$RUNNER_TEMP/candidate-run.json"
+          --jobs-response "$RUNNER_TEMP/candidate-jobs.json"
+          --artifacts-response "$RUNNER_TEMP/candidate-artifacts.json"
+          --evidence-directory candidate-evidence
+          --provenance-report "$RUNNER_TEMP/candidate-provenance-report.json"
