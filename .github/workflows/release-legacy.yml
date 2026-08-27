@@ -29,14 +29,14 @@ jobs:
       draft_exists: ${{ steps.contract.outputs.draft_exists }}
     steps:
       - name: 检出精确 release HEAD
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -232,14 +232,14 @@ jobs:
             bundles: appimage,deb,rpm
     steps:
       - name: 检出精确 release commit
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
           ref: ${{ needs.prepare-release.outputs.release_sha }}
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
@@ -372,7 +372,7 @@ jobs:
       release_sha: ${{ needs.prepare-release.outputs.release_sha }}
     steps:
       - name: 检出发布工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.prepare-release.outputs.release_sha }}
@@ -430,7 +430,7 @@ jobs:
       release_sha: ${{ needs.release-metadata.outputs.release_sha }}
     steps:
       - name: 检出发布工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.release-metadata.outputs.release_sha }}
@@ -475,7 +475,7 @@ jobs:
       tag: ${{ needs.release-provenance.outputs.tag }}
     steps:
       - name: 检出发布验证工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.release-provenance.outputs.release_sha }}
@@ -542,7 +542,7 @@ jobs:
             runner: macos-15-intel
     steps:
       - name: 检出 macOS 回验工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.release-provenance.outputs.release_sha }}
@@ -583,7 +583,7 @@ jobs:
             runner: windows-latest
     steps:
       - name: 检出原生版本回验工具
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.release-provenance.outputs.release_sha }}
