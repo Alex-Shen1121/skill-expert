@@ -8,19 +8,25 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const releaseWorkflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
 
-test('只有生产重签阶段通过 release Environment 读取生产 Updater Secret', () => {
+function job(workflow, jobId) {
+  const match = workflow.match(new RegExp(`^  ${jobId}:\\n([\\s\\S]*?)(?=^  [a-z][a-z0-9-]+:|\\Z)`, 'm'));
+  assert.ok(match, `缺少 job：${jobId}`);
+  return match[0];
+}
+
+test('只有正式四平台构建通过 release Environment 读取生产 Updater Secret', () => {
   const workflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
+  const productionBuild = job(workflow, 'build-release');
+  const workflowWithoutProductionBuild = workflow.replace(productionBuild, '');
 
   assert.equal((workflow.match(/^\s+environment:\s*release\s*$/gm) ?? []).length, 1);
-  assert.equal((workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY\s*\}\}/g) ?? []).length, 1);
-  assert.equal(
-    (workflow.match(/secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD\s*\}\}/g) ?? []).length,
-    1,
-  );
-  assert.match(workflow, /run: npm run updater:check:production/);
+  assert.match(productionBuild, /secrets\.TAURI_SIGNING_PRIVATE_KEY\s*\}\}/);
+  assert.match(productionBuild, /secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD\s*\}\}/);
+  assert.match(productionBuild, /run: npm run updater:check:production/);
+  assert.doesNotMatch(workflowWithoutProductionBuild, /secrets\.TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\s*\}\}/);
 });
 
-test('软件包脚本和拉取请求 CI 暴露 Updater 信任契约', () => {
+test('软件包脚本保留 Updater 契约但轻量 PR 不运行它', () => {
   const packageJson = JSON.parse(
     fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'),
   );
@@ -42,11 +48,11 @@ test('软件包脚本和拉取请求 CI 暴露 Updater 信任契约', () => {
     packageJson.scripts['updater:provision'],
     'node scripts/provision-updater.mjs',
   );
-  assert.match(testWorkflow, /run: npm run test:updater/);
-  assert.match(testWorkflow, /run: npm run updater:check/);
+  assert.doesNotMatch(testWorkflow, /run: npm run test:updater/);
+  assert.doesNotMatch(testWorkflow, /run: npm run updater:check/);
   assert.doesNotMatch(testWorkflow, /run: npm run updater:check:production/);
   assert.match(
     fs.readFileSync(releaseWorkflowPath, 'utf8'),
-    /production-release:[\s\S]*?environment:\s*release[\s\S]*?npm run updater:check:production/,
+    /build-release:[\s\S]*?environment:\s*release[\s\S]*?npm run updater:check:production/,
   );
 });

@@ -4,18 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { expectedCandidateAssets } from './candidate-assets.mjs';
+import { parseCommandOptions } from './command-options.mjs';
+import { expectedPackageAssets } from './package-assets.mjs';
+import { parseProductVersion } from './product-version.mjs';
 
-const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const targets = ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'];
-const generatedAssets = [
-  'SHA256SUMS',
-  'candidate-build-provenance.json',
-  'candidate-manifest.json',
-  'latest.json',
-  'promotion-binding.json',
-  'release-provenance.json',
-];
+const generatedAssets = ['SHA256SUMS', 'build-provenance.json', 'latest.json'];
 const updaterPlatforms = {
   'darwin-aarch64': {
     artifact: (version) => `skill-expert-v${version}-macos-arm64.app.tar.gz`,
@@ -32,7 +26,7 @@ const updaterPlatforms = {
 };
 
 function requireVersion(version) {
-  if (!STABLE_VERSION.test(version ?? '')) {
+  if (!parseProductVersion(version)) {
     throw new Error(`版本必须是稳定的 x.y.z，实际为 ${version ?? '缺失'}`);
   }
 }
@@ -52,33 +46,8 @@ function requireRegularFile(directory, filename) {
 
 export function expectedReleaseAssets(version, { includeGenerated = true } = {}) {
   requireVersion(version);
-  const platformAssets = targets.flatMap((target) => expectedCandidateAssets(version, target));
+  const platformAssets = targets.flatMap((target) => expectedPackageAssets(version, target));
   return [...platformAssets, ...(includeGenerated ? generatedAssets : [])].sort();
-}
-
-export function classifyDraftInventory(existingNames, version) {
-  requireVersion(version);
-  if (!Array.isArray(existingNames) || existingNames.some((name) => typeof name !== 'string')) {
-    throw new Error('既有 Draft 资产名称必须是字符串数组');
-  }
-  if (existingNames.length === 0) return { state: 'empty', count: 0 };
-
-  const expected = expectedReleaseAssets(version);
-  const expectedSet = new Set(expected);
-  const actualSet = new Set(existingNames);
-  const missing = expected.filter((name) => !actualSet.has(name));
-  const unexpected = [...actualSet].filter((name) => !expectedSet.has(name)).sort();
-  const duplicates = [...actualSet]
-    .filter((name) => existingNames.filter((candidate) => candidate === name).length > 1)
-    .sort();
-  if (missing.length > 0 || unexpected.length > 0 || duplicates.length > 0) {
-    const details = [];
-    if (missing.length > 0) details.push(`缺少：${missing.join('、')}`);
-    if (unexpected.length > 0) details.push(`意外：${unexpected.join('、')}`);
-    if (duplicates.length > 0) details.push(`重复：${duplicates.join('、')}`);
-    throw new Error(`既有 Draft 是不完整资产集，禁止覆盖或混合恢复：${details.join('；')}`);
-  }
-  return { state: 'complete', count: expected.length };
 }
 
 export function createUpdaterMetadata(directory, version, pubDate) {
@@ -118,10 +87,7 @@ export function createReleaseChecksums(directory, version) {
   requireDirectory(directory);
   const files = [
     ...expectedReleaseAssets(version, { includeGenerated: false }),
-    'candidate-build-provenance.json',
-    'candidate-manifest.json',
     'latest.json',
-    'promotion-binding.json',
   ].sort();
   const lines = files.map((filename) => {
     const digest = crypto
@@ -157,38 +123,11 @@ export function verifyReleaseInventory(directory, version) {
   return expected;
 }
 
-function parseArguments(argv) {
-  const [command, ...rest] = argv;
-  const options = { json: false };
-  for (let index = 0; index < rest.length; index += 1) {
-    const flag = rest[index];
-    if (flag === '--json') {
-      options.json = true;
-      continue;
-    }
-    const value = rest[index + 1];
-    if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
-    }
-    options[flag.slice(2)] = value;
-    index += 1;
-  }
-  return { command, options };
-}
-
 function main() {
   try {
-    const { command, options } = parseArguments(process.argv.slice(2));
+    const { command, options } = parseCommandOptions(process.argv.slice(2));
     if (command === 'expected') {
       console.log(expectedReleaseAssets(options.version).join('\n'));
-      return;
-    }
-    if (command === 'draft-state') {
-      if (!options['assets-response']) throw new Error('缺少 --assets-response');
-      const response = JSON.parse(fs.readFileSync(options['assets-response'], 'utf8'));
-      const assets = Array.isArray(response.assets) ? response.assets : [];
-      const result = classifyDraftInventory(assets.map(({ name }) => name), options.version);
-      console.log(options.json ? JSON.stringify(result) : result.state);
       return;
     }
     if (command === 'metadata') {
@@ -211,7 +150,7 @@ function main() {
       return;
     }
     throw new Error(
-      '用法：release-assets.mjs <expected|draft-state|metadata|checksums|verify> --version x.y.z [参数]',
+      '用法：release-assets.mjs <expected|metadata|checksums|verify> --version x.y.z --directory 路径',
     );
   } catch (error) {
     console.error(`正式发布资产处理失败：${error.message}`);

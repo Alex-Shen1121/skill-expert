@@ -1,6 +1,7 @@
 ---
-status: accepted
+status: superseded
 supersedes: 0002-promote-main-to-release.md
+superseded_by: 0005-release-from-main-on-explicit-request.md
 ---
 
 # 单次构建候选资产并可信晋级

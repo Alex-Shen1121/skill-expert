@@ -5,7 +5,6 @@ import { spawnSync } from 'node:child_process';
 
 import { checkVersionConsistency } from './check-version-consistency.mjs';
 import {
-  nextDevelopmentVersion,
   nextPatchVersion,
   parseProductVersion,
 } from './product-version.mjs';
@@ -17,17 +16,17 @@ const releaseArg = args[0];
 const dryRun = args[1] === '--dry-run';
 
 if (!releaseArg) {
-  console.error('用法：npm run release:prepare -- <development|patch> [--dry-run]');
+  console.error('用法：npm run release:prepare -- <patch|x.y.z> [--dry-run]');
   process.exit(1);
 }
 
 if (args.length > 2 || (args.length === 2 && !dryRun) || releaseArg.startsWith('--')) {
-  console.error('参数必须符合：development|patch [--dry-run]');
+  console.error('参数必须符合：patch|x.y.z [--dry-run]');
   process.exit(1);
 }
 
-if (!['development', 'patch'].includes(releaseArg)) {
-  console.error('版本类型只能是 development 或 patch。');
+if (releaseArg !== 'patch' && !parseProductVersion(releaseArg)) {
+  console.error('版本参数只能是 patch 或明确的 x.y.z。');
   process.exit(1);
 }
 
@@ -55,14 +54,17 @@ function writeJson(filePath, value) {
 function bumpVersion(current, releaseType) {
   const parsed = parseProductVersion(current);
   if (!parsed) {
-    throw new Error(`当前软件包版本必须是 x.y.z 或开发序号 x.y.z-N，实际为 ${current}`);
+    throw new Error(`当前软件包版本必须是稳定版本 x.y.z，实际为 ${current}`);
   }
 
-  if (releaseType === 'development') {
-    return nextDevelopmentVersion(parsed);
+  if (releaseType === 'patch') {
+    return nextPatchVersion(parsed);
   }
 
-  return nextPatchVersion(parsed);
+  if (compareSemver(releaseType, current) <= 0) {
+    throw new Error(`目标版本 ${releaseType} 必须高于当前版本 ${current}`);
+  }
+  return releaseType;
 }
 
 function compareSemver(left, right) {
@@ -166,46 +168,43 @@ function main() {
 
   const currentVersion = pkg.version;
   const nextVersion = bumpVersion(currentVersion, releaseArg);
-  const isDevelopment = releaseArg === 'development';
-  if (!isDevelopment) {
-    const tagName = `v${nextVersion}`;
-    const tagCheck = spawnSync('git', ['tag', '--list'], { cwd: root, encoding: 'utf8' });
-    if (tagCheck.status !== 0) {
-      throw new Error(`无法检查本地 Git 标签：${tagCheck.stderr.trim()}`);
-    }
-    const tagNames = new Set(tagCheck.stdout.split(/\r?\n/).filter(Boolean));
-    const originCheck = spawnSync('git', ['remote', 'get-url', 'origin'], {
+  const tagName = `v${nextVersion}`;
+  const tagCheck = spawnSync('git', ['tag', '--list'], { cwd: root, encoding: 'utf8' });
+  if (tagCheck.status !== 0) {
+    throw new Error(`无法检查本地 Git 标签：${tagCheck.stderr.trim()}`);
+  }
+  const tagNames = new Set(tagCheck.stdout.split(/\r?\n/).filter(Boolean));
+  const originCheck = spawnSync('git', ['remote', 'get-url', 'origin'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  if (originCheck.status === 0) {
+    const remoteTagCheck = spawnSync('git', ['ls-remote', '--tags', '--refs', 'origin'], {
       cwd: root,
       encoding: 'utf8',
+      timeout: 30_000,
     });
-    if (originCheck.status === 0) {
-      const remoteTagCheck = spawnSync('git', ['ls-remote', '--tags', '--refs', 'origin'], {
-        cwd: root,
-        encoding: 'utf8',
-        timeout: 30_000,
-      });
-      if (remoteTagCheck.status !== 0) {
-        throw new Error(`无法检查 origin 标签：${remoteTagCheck.stderr.trim()}`);
-      }
-      for (const line of remoteTagCheck.stdout.split(/\r?\n/)) {
-        const tag = line.match(/\srefs\/tags\/(v\d+\.\d+\.\d+)$/)?.[1];
-        if (tag) tagNames.add(tag);
-      }
+    if (remoteTagCheck.status !== 0) {
+      throw new Error(`无法检查 origin 标签：${remoteTagCheck.stderr.trim()}`);
     }
-    const stableTags = [...tagNames]
-      .map((tag) => ({ tag, version: tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1] }))
-      .filter(({ version }) => version);
-    if (stableTags.some(({ tag }) => tag === tagName)) {
-      throw new Error(`标签 ${tagName} 已存在`);
+    for (const line of remoteTagCheck.stdout.split(/\r?\n/)) {
+      const tag = line.match(/\srefs\/tags\/(v\d+\.\d+\.\d+)$/)?.[1];
+      if (tag) tagNames.add(tag);
     }
-    const latestTag = stableTags.sort(
-      (left, right) => compareSemver(right.version, left.version),
-    )[0];
-    if (latestTag && compareSemver(nextVersion, latestTag.version) <= 0) {
-      throw new Error(
-        `目标版本 ${nextVersion} 必须高于已有标签 ${latestTag.tag}`,
-      );
-    }
+  }
+  const stableTags = [...tagNames]
+    .map((tag) => ({ tag, version: tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1] }))
+    .filter(({ version }) => version);
+  if (stableTags.some(({ tag }) => tag === tagName)) {
+    throw new Error(`标签 ${tagName} 已存在`);
+  }
+  const latestTag = stableTags.sort(
+    (left, right) => compareSemver(right.version, left.version),
+  )[0];
+  if (latestTag && compareSemver(nextVersion, latestTag.version) <= 0) {
+    throw new Error(
+      `目标版本 ${nextVersion} 必须高于已有标签 ${latestTag.tag}`,
+    );
   }
 
   pkg.version = nextVersion;
@@ -217,10 +216,8 @@ function main() {
   updateSettingsVersion(en, nextVersion, 'src/i18n/en.json');
   updateSettingsVersion(zh, nextVersion, 'src/i18n/zh.json');
   updateSettingsVersion(zhTw, nextVersion, 'src/i18n/zh-TW.json');
-  const nextChangelog = isDevelopment ? changelog : promoteUnreleased(changelog, nextVersion);
-  const nextChangelogZh = isDevelopment
-    ? changelogZh
-    : promoteUnreleased(changelogZh, nextVersion, { zh: true });
+  const nextChangelog = promoteUnreleased(changelog, nextVersion);
+  const nextChangelogZh = promoteUnreleased(changelogZh, nextVersion, { zh: true });
 
   if (dryRun) {
     console.log(`[dry-run] ${currentVersion} -> ${nextVersion}`);
@@ -235,21 +232,13 @@ function main() {
   writeJson(enI18nPath, en);
   writeJson(zhI18nPath, zh);
   writeJson(zhTwI18nPath, zhTw);
-  if (!isDevelopment) {
-    fs.writeFileSync(changelogPath, nextChangelog);
-    fs.writeFileSync(changelogZhPath, nextChangelogZh);
-  }
+  fs.writeFileSync(changelogPath, nextChangelog);
+  fs.writeFileSync(changelogZhPath, nextChangelogZh);
 
-  console.log(
-    isDevelopment
-      ? `已准备开发序号版本 ${nextVersion}`
-      : `已准备正式版本 ${nextVersion}`,
-  );
+  console.log(`已准备正式版本 ${nextVersion}`);
   console.log('Updated:');
-  if (!isDevelopment) {
-    console.log('- CHANGELOG.md');
-    console.log('- CHANGELOG-zh.md');
-  }
+  console.log('- CHANGELOG.md');
+  console.log('- CHANGELOG-zh.md');
   console.log('- package.json');
   console.log('- package-lock.json');
   console.log('- src-tauri/tauri.conf.json');

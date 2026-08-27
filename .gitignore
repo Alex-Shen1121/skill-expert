@@ -37,7 +37,7 @@ __pycache__/
 docs
 !docs/
 docs/*
-!docs/candidate-builds.md
+!docs/test-packages.md
 !docs/formal-release.md
 !docs/updater-trust-root.md
 !docs/worktree-baseline.md

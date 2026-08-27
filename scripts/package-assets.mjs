@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[1-9]\d*)?$/;
+import { parseCommandOptions } from './command-options.mjs';
+import { parseProductVersion } from './product-version.mjs';
 
 const targetContracts = {
   'macos-arm64': {
@@ -42,32 +43,18 @@ const targetContracts = {
   },
 };
 
-function parseArguments(argv) {
-  const [command, ...rest] = argv;
-  const options = {};
-  for (let index = 0; index < rest.length; index += 2) {
-    const flag = rest[index];
-    const value = rest[index + 1];
-    if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(`应使用 --name value 参数，实际为 ${flag ?? '空值'}`);
-    }
-    options[flag.slice(2)] = value;
-  }
-  return { command, options };
-}
-
 function contractFor(version, target) {
-  if (!VERSION_PATTERN.test(version ?? '')) {
-    throw new Error(`版本必须是 x.y.z 或 x.y.z-N，实际为 ${version ?? '缺失'}`);
+  if (!parseProductVersion(version)) {
+    throw new Error(`版本必须是 x.y.z，实际为 ${version ?? '缺失'}`);
   }
   const contract = targetContracts[target];
   if (!contract) {
-    throw new Error(`不支持的候选目标：${target ?? '缺失'}`);
+    throw new Error(`不支持的打包目标：${target ?? '缺失'}`);
   }
   return contract;
 }
 
-export function expectedCandidateAssets(version, target) {
+export function expectedPackageAssets(version, target) {
   const contract = contractFor(version, target);
   const desktopPrefix = `skill-expert-v${version}-${target}`;
   return [
@@ -90,12 +77,12 @@ function findUniqueArtifact(buildRoot, relativeDirectory, suffix) {
   return matches[0];
 }
 
-export function stageCandidateAssets(buildRoot, directory, version, target) {
+export function stagePackageAssets(buildRoot, directory, version, target) {
   const contract = contractFor(version, target);
   fs.mkdirSync(directory, { recursive: true });
   const existing = fs.readdirSync(directory);
   if (existing.length > 0) {
-    throw new Error(`候选暂存目录必须为空：${directory}`);
+    throw new Error(`打包暂存目录必须为空：${directory}`);
   }
 
   const desktopPrefix = `skill-expert-v${version}-${target}`;
@@ -115,11 +102,11 @@ export function stageCandidateAssets(buildRoot, directory, version, target) {
     fs.copyFileSync(source, destination);
     fs.chmodSync(destination, fs.statSync(source).mode);
   }
-  return verifyCandidateAssets(directory, version, target);
+  return verifyPackageAssets(directory, version, target);
 }
 
-export function verifyCandidateAssets(directory, version, target) {
-  const expected = expectedCandidateAssets(version, target);
+export function verifyPackageAssets(directory, version, target) {
+  const expected = expectedPackageAssets(version, target);
   const actual = fs.readdirSync(directory).sort();
   const expectedSet = new Set(expected);
   const actualSet = new Set(actual);
@@ -136,23 +123,23 @@ export function verifyCandidateAssets(directory, version, target) {
     const details = [];
     if (missing.length > 0) details.push(`缺少：${missing.join('、')}`);
     if (unexpected.length > 0) details.push(`意外：${unexpected.join('、')}`);
-    throw new Error(`${target} 候选资产清单不匹配：${details.join('；')}`);
+    throw new Error(`${target} 打包资产清单不匹配：${details.join('；')}`);
   }
 
   return expected;
 }
 
 function main() {
-  const { command, options } = parseArguments(process.argv.slice(2));
+  const { command, options } = parseCommandOptions(process.argv.slice(2));
   if (command === 'expected') {
-    console.log(expectedCandidateAssets(options.version, options.target).join('\n'));
+    console.log(expectedPackageAssets(options.version, options.target).join('\n'));
     return;
   }
   if (command === 'verify') {
     if (!options.directory) throw new Error('verify 需要 --directory');
-    const inventory = verifyCandidateAssets(options.directory, options.version, options.target);
+    const inventory = verifyPackageAssets(options.directory, options.version, options.target);
     console.log(
-      `${options.target} 候选资产精确清单验证通过（${inventory.length} 个文件）。`,
+      `${options.target} 打包资产精确清单验证通过（${inventory.length} 个文件）。`,
     );
     return;
   }
@@ -160,17 +147,17 @@ function main() {
     if (!options['build-root'] || !options.directory) {
       throw new Error('stage 需要 --build-root 和 --directory');
     }
-    const inventory = stageCandidateAssets(
+    const inventory = stagePackageAssets(
       options['build-root'],
       options.directory,
       options.version,
       options.target,
     );
-    console.log(`已暂存 ${options.target} 候选资产精确清单（${inventory.length} 个文件）。`);
+    console.log(`已暂存 ${options.target} 打包资产精确清单（${inventory.length} 个文件）。`);
     return;
   }
   throw new Error(
-    '用法：candidate-assets.mjs <expected|verify|stage> --version x.y.z[-N] --target <target>',
+    '用法：package-assets.mjs <expected|verify|stage> --version x.y.z --target <target>',
   );
 }
 

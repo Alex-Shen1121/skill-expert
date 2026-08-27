@@ -53,21 +53,21 @@ test('accepts a complete, consistent version contract', (t) => {
   assert.match(result.stdout, /Version consistency check passed for 1\.2\.3\./);
 });
 
-test('接受开发序号版本，并要求变更日志继续指向对应正式版本', (t) => {
+test('拒绝开发序号版本，源码版本只能使用稳定版本号', (t) => {
   const result = runVersionCheck(
     fixture(t, { version: '1.2.3-1', changelogVersion: '1.2.3' }),
   );
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Version consistency check passed for 1\.2\.3-1\./);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /版本必须是 x\.y\.z/);
 });
 
-test('拒绝正式段或开发序号中的前导零', (t) => {
-  for (const version of ['01.2.3', '1.02.3', '1.2.03', '1.2.3-01', '1.2.3-0']) {
+test('拒绝正式版本中的前导零和所有预发布后缀', (t) => {
+  for (const version of ['01.2.3', '1.02.3', '1.2.03', '1.2.3-01', '1.2.3-0', '1.2.3-beta.1']) {
     const result = runVersionCheck(fixture(t, { version }));
 
     assert.notEqual(result.status, 0, version);
-    assert.match(result.stderr, /版本必须是 x\.y\.z 或开发序号 x\.y\.z-N/);
+    assert.match(result.stderr, /版本必须是 x\.y\.z/);
   }
 });
 

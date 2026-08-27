@@ -1,0 +1,204 @@
+name: 构建不可晋级测试包
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: 要打包的精确 40 位提交 SHA
+        required: true
+        type: string
+      targets_json:
+        description: 精确的矩阵 include JSON
+        required: true
+        type: string
+      artifact_prefix:
+        description: Artifact 名称前缀
+        required: false
+        default: skill-expert-manual-test
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-package:
+    name: 不可晋级测试包（${{ matrix.target_id }}）
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.targets_json) }}
+
+    steps:
+      - name: 检出精确测试提交
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: 验证精确测试提交
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_sha 必须是完整的小写 40 位提交 SHA" >&2
+            exit 1
+          fi
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "测试提交检出不一致：预期 $EXPECTED_SHA，实际 $ACTUAL_SHA" >&2
+            exit 1
+          fi
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 配置 Rust 工具链
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: 缓存 Rust 依赖
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri
+          save-if: false
+
+      - name: 安装 Linux 打包工具
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            binutils \
+            libarchive-tools \
+            rpm
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 生成临时测试 Updater 密钥
+        shell: bash
+        env:
+          TEST_KEY_PATH: ${{ runner.temp }}/test-updater.key
+        run: |
+          set -euo pipefail
+          TEST_KEY_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$TEST_KEY_PASSWORD"
+          npm run --silent tauri -- signer generate --ci --force \
+            --password "$TEST_KEY_PASSWORD" \
+            --write-keys "$TEST_KEY_PATH"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TEST_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: 构建独立 CLI
+        shell: bash
+        run: >-
+          cargo build --release --locked
+          --manifest-path src-tauri/Cargo.toml
+          --bin skill-expert-cli
+          --target "${{ matrix.rust_target }}"
+
+      - name: 构建桌面测试包
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}/test-updater.key
+          RUST_TARGET: ${{ matrix.rust_target }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: npm run tauri -- build --ci --target "$RUST_TARGET" --bundles "$BUNDLES"
+
+      - name: 对 macOS 可执行面执行 ad-hoc 签名与回验
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
+        run: |
+          set -euo pipefail
+          APP_PATH="$BUILD_ROOT/bundle/macos/Skill Expert.app"
+          CLI_PATH="$BUILD_ROOT/skill-expert-cli"
+          codesign --force --sign - "$CLI_PATH"
+          ARCHIVE="$(find "$BUILD_ROOT/bundle/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
+          if [ -z "$ARCHIVE" ]; then
+            echo "未生成 macOS Updater archive" >&2
+            exit 1
+          fi
+          node scripts/verify-macos-adhoc.mjs \
+            --app "$APP_PATH" \
+            --archive "$ARCHIVE" \
+            --cli "$CLI_PATH"
+
+      - name: 整理稳定测试资产名
+        shell: bash
+        env:
+          BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
+          TEST_PUBLIC_KEY_PATH: ${{ runner.temp }}/test-updater.key.pub
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/package-assets.mjs stage \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --build-root "$BUILD_ROOT" \
+            --directory "test-package-assets/$TARGET_ID"
+          node scripts/sign-release-updater.mjs \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --directory "test-package-assets/$TARGET_ID" \
+            --public-key "$TEST_PUBLIC_KEY_PATH"
+          node scripts/package-assets.mjs verify \
+            --version "$VERSION" \
+            --target "$TARGET_ID" \
+            --directory "test-package-assets/$TARGET_ID"
+
+      - name: 回验 Linux 测试安装包
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/verify-linux-release.mjs \
+            --version "$VERSION" \
+            --directory "test-package-assets/$TARGET_ID"
+
+      - name: 回验 Windows 测试安装包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Version = node -p "require('./package.json').version"
+          ./scripts/verify-windows-release.ps1 -Version $Version -Directory "test-package-assets/${{ matrix.target_id }}"
+
+      - name: 写入不可晋级标记
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_ID: ${{ matrix.target_id }}
+        run: |
+          cat > "test-package-assets/${TARGET_ID}/TEST-PACKAGE.json" <<EOF
+          {
+            "schemaVersion": 1,
+            "purpose": "manual-test-package",
+            "sourceSha": "${SOURCE_SHA}",
+            "target": "${TARGET_ID}",
+            "promotable": false
+          }
+          EOF
+
+      - name: 上传不可晋级测试包
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_prefix }}-${{ inputs.source_sha }}-${{ github.run_attempt }}-${{ matrix.target_id }}
+          path: test-package-assets/${{ matrix.target_id }}/
+          if-no-files-found: error
+          retention-days: 7

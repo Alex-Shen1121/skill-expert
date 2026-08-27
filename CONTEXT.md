@@ -27,57 +27,51 @@ A user-approved one-time copy of upstream product data into Skill Expert, not a
 shared live data store between the products.
 _Avoid_: Migration, shared library
 
-**Development integration branch**:
-The `main` branch into which every product change, hotfix, version change, and
-reviewed upstream change is first integrated.
-_Avoid_: Production branch
+**主分支**：
+唯一接收产品变更和正式版本提交的 `main` 分支；所有开发变更都通过 `codex/*` PR 合入，上游评审分支是唯一自动化例外。
+_避免使用_：生产分支、发布分支
 
-**Release branch**:
-The long-lived `release` branch containing only candidates promoted from the
-development integration branch.
-_Avoid_: Deployment branch
+**开发分支**：
+从最新 `origin/main` 建立、通过轻量检查后以 PR 合入主分支的 `codex/*` 分支。
+_避免使用_：直接提交分支
 
-**Release candidate**:
-An exact commit on the development integration branch whose version, changelog,
-tests, and packages have passed the release gates.
-_Avoid_: Latest main
+**上游评审分支**：
+自动化生成上游变更审阅 PR 的固定 `upstream-tracking/main` 分支；它不是开发分支，也不会自动合入主分支。
+_避免使用_：开发分支、自动同步分支
 
-**Release promotion**:
-The merge-commit pull request that advances a release candidate from `main` to
-`release`; merging it is the approval to publish that candidate.
-_Avoid_: Release merge, tag push
+**发布授权**：
+用户在当前请求中明确提出“发布新版本”或指定 `vX.Y.Z`；普通更新和测试打包均不构成发布授权。
+_避免使用_：版本变化、main push
+
+**发布准备 PR**：
+只负责稳定版本号与双语更新日志归档的 `codex/release-vX.Y.Z → main` PR。
+_避免使用_：Release PR、晋级 PR
+
+**历史 release 分支**：
+暂时保留但不再被代码、工作流、版本策略或正式发布依赖的旧 `release` 分支。
+_避免使用_：发布源、生产分支
 
 ## 版本通道语言
 
-**开发序号版本**：
-`main` 上普通功能 PR 使用的 `x.y.z-N` 版本。`N` 从 1 开始逐次递增，只表示当前正式版本之后的开发集成批次，不是可发布版本，也不进入 Updater。
-_避免使用_：补丁版本、正式候选
+**稳定源码版本**：
+源码全部版本副本共同使用的 `x.y.z`；普通 PR 保持不变，只有发布准备 PR 才更新。
+_避免使用_：开发序号、预发布版本
 
-**正式补丁版本**：
-由 `release-prep/vx.y.z` 发布准备 PR 生成的稳定 `x.y.z` 版本。它必须是当前 `release` 的下一补丁版本，合入 `main` 后才允许构建一次四平台候选。
-_避免使用_：开发序号、任意较新版本
+**正式发布提交**：
+发布准备 PR 合入后位于 `main` 的精确提交，也是正式工作流唯一允许打包和标记的源码身份。
+_避免使用_：最新 main、release HEAD
 
-## 候选资产晋级语言
+**正式发布工作流**：
+显式绑定正式发布提交、一次构建四平台生产资产并在全部回验通过后公开 Latest 的手动工作流。
+_避免使用_：候选晋级、tag push
 
-**候选清单**：
-`candidate-manifest.json`。绑定正式候选的仓库、版本、candidate SHA/tree、workflow revision、run ID/attempt、四平台 job/artifact 身份及逐文件大小和 SHA-256。
-_避免使用_：最新 artifact、PR 正文结论
-
-**候选构建来源证明**：
-`candidate-build-provenance.json`。证明安装包、Updater 包本体和 CLI 来自实际执行构建的 `main` candidate SHA 与候选 workflow。
-_避免使用_：release 构建证明、正式重签证明
-
-**晋级绑定证明**：
-`promotion-binding.json`。记录 release SHA、candidate SHA、相同 Git tree、版本/tag、精确 run attempt、artifact ID/digest、候选清单摘要和逐字节复用的本体哈希。
-_避免使用_：重新构建报告、PR 选择器
-
-**正式来源证明**：
-`release-provenance.json`。只证明生产 `.sig`、`latest.json`、`SHA256SUMS` 和晋级绑定证明由 release workflow 在 release SHA 上生成。
-_避免使用_：候选安装包来源证明、四平台 build provenance
+**正式构建来源证明**：
+`build-provenance.json`。证明公开资产来自正式发布提交和 `.github/workflows/release.yml`。
+_避免使用_：候选来源证明、晋级证明
 
 **手工测试包**：
-由独立手工入口生成、带 `manual-test-package` 与 `promotable: false` 标记的测试资产；默认只构建 macOS arm64，无论平台数量都不可晋级。
-_避免使用_：正式候选、可发布包
+由独立手工入口生成、带 `manual-test-package` 与 `promotable: false` 标记的测试资产；默认只构建 macOS arm64，无论平台数量都不能转为正式 Release。
+_避免使用_：正式版本、可发布包
 
 ## Compatibility-only legacy markers
 

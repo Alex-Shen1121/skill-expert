@@ -19,14 +19,14 @@ const fixtureFiles = [
   '.codex/environments/environment.toml',
   '.github/ISSUE_TEMPLATE/bug_report.md',
   '.github/ISSUE_TEMPLATE/config.yml',
-  '.github/workflows/candidate-build.yml',
+  '.github/workflows/test-package-build.yml',
   '.github/workflows/release.yml',
   'CONTRIBUTING.md',
   'README.md',
   'README.zh-CN.md',
   'docs/agents/issue-tracker.md',
   'package.json',
-  'scripts/candidate-assets.mjs',
+  'scripts/package-assets.mjs',
   'scripts/verify-macos-release.mjs',
   'src-tauri/Cargo.toml',
   'src-tauri/src/commands/settings.rs',
@@ -72,7 +72,7 @@ test('正式发布资产契约改变 CLI 名称时拒绝通过', (t) => {
   const fixtureRoot = createFixture(t);
   replaceInFixture(
     fixtureRoot,
-    'scripts/candidate-assets.mjs',
+    'scripts/package-assets.mjs',
     '`skill-expert-cli-v${version}-${target}${contract.cliSuffix}`',
     '`other-cli-v${version}-${target}${contract.cliSuffix}`',
   );

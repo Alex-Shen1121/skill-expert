@@ -68,9 +68,8 @@ jobs:
     needs: select-targets
     permissions:
       contents: read
-    uses: ./.github/workflows/candidate-build.yml
+    uses: ./.github/workflows/test-package-build.yml
     with:
-      candidate_sha: ${{ github.sha }}
-      purpose: manual-test-package
+      source_sha: ${{ github.sha }}
       artifact_prefix: skill-expert-manual-test
       targets_json: ${{ needs.select-targets.outputs.targets_json }}

@@ -46,9 +46,13 @@ Issue 使用五种中文状态标签，并映射到 Agent Skills 的标准角色
 
 ### 版本通道边界
 
-- 普通 PR 合入 `main` 前必须运行 `npm run version:prepare-development`，并提交全部版本契约文件。开发序号严格逐次递增，例如 `1.0.3 → 1.0.3-1 → 1.0.3-2`；重复、跳号或漏改都会阻止合并。
-- `main` Ruleset 必须保持“分支必须为最新”卡控（`strict_required_status_checks_policy=true`）。并发 PR 不能复用同一个开发序号；主线前进后，待合入 PR 必须更新分支、重新生成下一开发序号并重跑检查。
-- 开发序号只表示同一正式版本后的集成批次，保留在 `main` 并运行完整测试，不触发四平台安装包构建，也不进入 Updater。
-- 正式发布准备统一通过 `Prepare Release` 工作流发起。发布准备 PR 必须来自当前仓库，使用 `release-prep/v1.0.4` 形式的分支，把 `1.0.3-N → 1.0.4`，是普通 `main` PR 开发序号规则的唯一例外。
-- 发布准备 PR 合入后，`main` 的正式版本会触发且只触发一次四平台候选构建；候选晋级完成前停止合入新的功能 PR，避免候选 SHA 失效。
-- `main → release` 的晋级 PR 必须保持精确候选 SHA，并且版本只能是当前 `release` 的下一补丁版本；合并该 PR 即批准正式发布。
+- 所有源码版本只允许稳定的 `x.y.z`，不得使用 `x.y.z-N` 或其他预发布后缀。普通功能、修复、文档和治理 PR 不修改版本号；用户可见变更继续写入双语 `Unreleased`。
+- 所有开发都必须从最新 `origin/main` 建立 `codex/*` 分支，通过 PR 合入 `main`。自动化 `upstream-tracking/main` 只用于生成可审阅的上游跟踪 PR，不是开发分支，是命名空间的唯一例外。`main` Ruleset 必须保持“分支必须为最新”（`strict_required_status_checks_policy=true`），并且只要求 `GitHub Actions syntax`、`Frontend and version contract`、`Rust quality and Linux check` 三项轻量检查。
+- 普通 PR 与 `main` push 不运行 macOS/Windows Rust 测试，不构建 Tauri 安装包，不创建 tag 或 GitHub Release。
+- 只有用户在当前请求中明确说“发布新版本”或“发布 `vX.Y.Z`”才构成正式发布授权；“修复”“提交”“打测试包”等请求不得推断为发布授权。
+- 正式发布使用 `codex/release-vX.Y.Z` 分支和 PR。只说“发布新版本”时运行 `npm run release:prepare -- patch`；明确指定版本时运行 `npm run release:prepare -- X.Y.Z`。该命令同步全部版本文件并把双语 `Unreleased` 归档到新版本。
+- 用户的正式发布授权同时允许 Agent 创建发布 PR、等待轻量检查、合并 PR，并在合并提交的三项 `main` push 检查全部成功后，对该精确 SHA 手动触发 `.github/workflows/release.yml`；后续普通 PR 合入不改变已批准的发布 SHA，除非发生异常，不重复要求发布批准。
+- 正式发布工作流只从精确 `main` SHA 构建一次 macOS arm64、macOS x64、Windows x64 和 Linux x64 生产包，并完成生产 Updater 签名、不可变 annotated tag、Draft、来源证明、真实下载回验和原子公开 Latest。
+- 创建 tag 前失败可在修复后使用同一版本重试；一旦 tag 或 Draft 已创建，该版本不得复用，修复必须准备下一个稳定版本。
+- 长期 `release` 分支是暂时保留的历史分支，任何代码、工作流、版本判断和发布操作都不得依赖它。名为 `release` 的 GitHub Environment 不是分支，继续保存生产 Updater Secret。
+- 手工测试包只通过 `.github/workflows/manual-test-package.yml` 显式触发，并必须保持 `promotable: false`；无论选择多少平台都不能转为正式 Release。

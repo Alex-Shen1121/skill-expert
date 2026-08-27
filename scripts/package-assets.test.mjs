@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const candidateAssets = path.join(repositoryRoot, 'scripts/candidate-assets.mjs');
+const packageAssets = path.join(repositoryRoot, 'scripts/package-assets.mjs');
 const version = '1.2.3';
 
 const expectedInventory = {
@@ -39,15 +39,15 @@ const expectedInventory = {
   ],
 };
 
-function runCandidateAssets(args) {
-  return spawnSync(process.execPath, [candidateAssets, ...args], {
+function runPackageAssets(args) {
+  return spawnSync(process.execPath, [packageAssets, ...args], {
     cwd: repositoryRoot,
     encoding: 'utf8',
   });
 }
 
 function createInventoryFixture(t, target) {
-  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-candidate-assets-'));
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-package-assets-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   const assetDirectory = path.join(fixtureRoot, target);
   mkdirSync(assetDirectory);
@@ -92,18 +92,18 @@ const buildArtifacts = {
   ],
 };
 
-test('输出四个平台的精确稳定候选清单', () => {
+test('输出四个平台的精确稳定打包清单', () => {
   for (const [target, expected] of Object.entries(expectedInventory)) {
-    const result = runCandidateAssets(['expected', '--version', version, '--target', target]);
+    const result = runPackageAssets(['expected', '--version', version, '--target', target]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(result.stdout.trim().split('\n'), expected);
   }
 });
 
-test('接受只包含精确预期集合的候选资产目录', (t) => {
+test('接受只包含精确预期集合的打包资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'macos-arm64');
-  const result = runCandidateAssets([
+  const result = runPackageAssets([
     'verify',
     '--version',
     version,
@@ -114,13 +114,13 @@ test('接受只包含精确预期集合的候选资产目录', (t) => {
   ]);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /候选资产精确清单验证通过/);
+  assert.match(result.stdout, /打包资产精确清单验证通过/);
 });
 
-test('拒绝缺少预期文件的候选资产目录', (t) => {
+test('拒绝缺少预期文件的打包资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'windows-x64');
   rmSync(path.join(assetDirectory, expectedInventory['windows-x64'][0]));
-  const result = runCandidateAssets([
+  const result = runPackageAssets([
     'verify',
     '--version',
     version,
@@ -134,10 +134,10 @@ test('拒绝缺少预期文件的候选资产目录', (t) => {
   assert.match(result.stderr, /缺少：skill-expert-cli-v1\.2\.3-windows-x64\.exe/);
 });
 
-test('拒绝包含意外文件的候选资产目录', (t) => {
+test('拒绝包含意外文件的打包资产目录', (t) => {
   const assetDirectory = createInventoryFixture(t, 'linux-x64');
   writeFileSync(path.join(assetDirectory, 'debug-symbols.zip'), 'unexpected\n');
-  const result = runCandidateAssets([
+  const result = runPackageAssets([
     'verify',
     '--version',
     version,
@@ -151,16 +151,16 @@ test('拒绝包含意外文件的候选资产目录', (t) => {
   assert.match(result.stderr, /意外：debug-symbols\.zip/);
 });
 
-test('把每个 Tauri 目标暂存为精确稳定候选清单', (t) => {
-  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-candidate-stage-'));
+test('把每个 Tauri 目标暂存为精确稳定打包清单', (t) => {
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'skill-expert-package-stage-'));
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
   for (const [target, sourceArtifacts] of Object.entries(buildArtifacts)) {
     const buildRoot = path.join(fixtureRoot, 'build', target);
-    const assetDirectory = path.join(fixtureRoot, 'candidate-assets', target);
+    const assetDirectory = path.join(fixtureRoot, 'package-assets', target);
     for (const relativePath of sourceArtifacts) writeBuildArtifact(buildRoot, relativePath);
 
-    const result = runCandidateAssets([
+    const result = runPackageAssets([
       'stage',
       '--version',
       version,
@@ -180,8 +180,8 @@ test('把每个 Tauri 目标暂存为精确稳定候选清单', (t) => {
   }
 });
 
-test('手工测试包允许开发序号版本进入隔离资产命名', () => {
-  const result = runCandidateAssets([
+test('所有打包入口都拒绝开发序号版本', () => {
+  const result = runPackageAssets([
     'expected',
     '--version',
     '1.0.3-2',
@@ -189,6 +189,6 @@ test('手工测试包允许开发序号版本进入隔离资产命名', () => {
     'macos-arm64',
   ]);
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /skill-expert-v1\.0\.3-2-macos-arm64\.dmg/);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /版本必须是 x\.y\.z/);
 });
