@@ -9,52 +9,10 @@ const MAIN_REF = 'refs/remotes/origin/main';
 const SYNC_BRANCH = 'upstream-tracking/main';
 const SYNC_REMOTE_REF = `refs/remotes/origin/${SYNC_BRANCH}`;
 const REVIEW_REPORT = '.github/upstream-tracking-review.json';
-const PROTECTED_PATHS = [
-  '.codex',
-  '.github/FUNDING.yml',
-  '.github/ISSUE_TEMPLATE',
-  '.github/workflows',
-  'assets',
-  'CHANGELOG.md',
-  'CHANGELOG-zh.md',
-  'CONTEXT.md',
-  'CONTRIBUTING.md',
-  'README.md',
-  'README.zh-CN.md',
-  'docs/adr',
-  'docs/agents',
-  'docs/upstream-history',
-  'index.html',
-  'package-lock.json',
-  'package.json',
-  'scripts/candidate-assets.mjs',
-  'scripts/check-cli-identity.mjs',
-  'scripts/check-desktop-identity.mjs',
-  'scripts/check-repository-identity.mjs',
-  'scripts/check-version-consistency.mjs',
-  'scripts/prepare-release.mjs',
-  'scripts/release-candidate.mjs',
-  'scripts/run-rust-cli.mjs',
-  'scripts/verify-macos-adhoc.mjs',
-  'skills/manage-skills',
-  'src-tauri/Cargo.lock',
-  'src-tauri/Cargo.toml',
-  'src-tauri/icons',
-  'src-tauri/src/bin',
-  'src-tauri/src/commands/settings.rs',
-  'src-tauri/src/core/central_repo.rs',
-  'src-tauri/src/core/git_credentials.rs',
-  'src-tauri/src/core/repo_lock.rs',
-  'src-tauri/src/lib.rs',
-  'src-tauri/tauri.dev.conf.json',
-  'src-tauri/tauri.conf.json',
-  'src/components/Sidebar.tsx',
-  'src/context/AppContext.tsx',
-  'src/i18n',
-  'src/views/Backup.tsx',
-  'src/views/ProjectDetail.tsx',
-  'src/views/Settings.tsx',
-];
+const PROTECTED_PATHS = JSON.parse(fs.readFileSync(
+  new URL('../.github/upstream-tracking-protected-paths.json', import.meta.url),
+  'utf8',
+));
 
 function fail(message) {
   throw new Error(message);
