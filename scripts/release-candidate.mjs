@@ -165,14 +165,37 @@ export function verifyCandidate(options) {
     fail('candidate SHA must be a full lowercase 40-character commit SHA');
   }
 
-  const headSha = resolveBranch(head);
-  const baseSha = resolveBranch(base);
   const checkoutSha = git(['rev-parse', 'HEAD^{commit}']).stdout.trim();
-  if (candidateSha !== headSha) {
-    fail(`candidate SHA ${candidateSha} is stale; ${head} is ${headSha}`);
-  }
   if (checkoutSha !== candidateSha) {
     fail(`checked-out HEAD ${checkoutSha} does not match candidate SHA ${candidateSha}`);
+  }
+  let baseSha;
+  if (options.approved_release_sha) {
+    const releaseSha = options.approved_release_sha;
+    const previousReleaseSha = options.previous_release_sha;
+    if (!/^[0-9a-f]{40}$/.test(releaseSha) || !/^[0-9a-f]{40}$/.test(previousReleaseSha ?? '')) {
+      fail('已批准发布恢复必须提供完整的 release SHA 与 previous release SHA');
+    }
+    const parents = git(['show', '-s', '--format=%P', releaseSha]).stdout.trim().split(/\s+/);
+    if (
+      parents.length !== 2 ||
+      parents[0] !== previousReleaseSha ||
+      parents[1] !== candidateSha
+    ) {
+      fail('已批准 release merge 的双亲与候选绑定不一致');
+    }
+    const releaseTree = git(['rev-parse', `${releaseSha}^{tree}`]).stdout.trim();
+    const candidateTree = git(['rev-parse', `${candidateSha}^{tree}`]).stdout.trim();
+    if (releaseTree !== candidateTree) {
+      fail('已批准 release merge 的 tree 与候选 tree 不一致');
+    }
+    baseSha = previousReleaseSha;
+  } else {
+    const headSha = resolveBranch(head);
+    baseSha = resolveBranch(base);
+    if (candidateSha !== headSha) {
+      fail(`candidate SHA ${candidateSha} is stale; ${head} is ${headSha}`);
+    }
   }
   verifyPromotionBase(baseSha, candidateSha, base);
 
@@ -206,20 +229,22 @@ export function verifyCandidate(options) {
   }
 
   const tag = `v${version}`;
-  const tagLookup = git(['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], {
-    allowFailure: true,
-  });
-  if (tagLookup.status === 0) fail(`tag ${tag} already exists`);
-  if (tagLookup.status !== 1) fail(`unable to inspect tag ${tag}`);
   const originLookup = git(['remote', 'get-url', 'origin'], { allowFailure: true });
   const hasOrigin = originLookup.status === 0;
-  if (hasOrigin) {
-    const remoteTagLookup = git(
-      ['ls-remote', '--exit-code', '--tags', '--refs', 'origin', `refs/tags/${tag}`],
-      { allowFailure: true },
-    );
-    if (remoteTagLookup.status === 0) fail(`tag ${tag} already exists on origin`);
-    if (remoteTagLookup.status !== 2) fail(`unable to inspect tag ${tag} on origin`);
+  if (!options.approved_release_sha) {
+    const tagLookup = git(['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], {
+      allowFailure: true,
+    });
+    if (tagLookup.status === 0) fail(`tag ${tag} already exists`);
+    if (tagLookup.status !== 1) fail(`unable to inspect tag ${tag}`);
+    if (hasOrigin) {
+      const remoteTagLookup = git(
+        ['ls-remote', '--exit-code', '--tags', '--refs', 'origin', `refs/tags/${tag}`],
+        { allowFailure: true },
+      );
+      if (remoteTagLookup.status === 0) fail(`tag ${tag} already exists on origin`);
+      if (remoteTagLookup.status !== 2) fail(`unable to inspect tag ${tag} on origin`);
+    }
   }
 
   return {
@@ -228,9 +253,11 @@ export function verifyCandidate(options) {
     candidateSha,
     baseSha,
     commitRange: `${baseSha}..${candidateSha}`,
-    tagAbsence: hasOrigin
-      ? `refs/tags/${tag} 在本地和 origin 均不存在`
-      : `refs/tags/${tag} 在本地不存在（未配置 origin）`,
+    tagAbsence: options.approved_release_sha
+      ? 'tag 身份已由 release merge 恢复契约验证'
+      : hasOrigin
+        ? `refs/tags/${tag} 在本地和 origin 均不存在`
+        : `refs/tags/${tag} 在本地不存在（未配置 origin）`,
   };
 }
 

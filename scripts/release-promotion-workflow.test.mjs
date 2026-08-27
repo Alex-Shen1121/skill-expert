@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
 const promotionWorkflowPath = path.join(repositoryRoot, '.github/workflows/release-promotion.yml');
+const dispatchWorkflowPath = path.join(
+  repositoryRoot,
+  '.github/workflows/release-promotion-dispatch.yml',
+);
 
 function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
@@ -14,6 +18,10 @@ function workflow() {
 
 function promotionWorkflow() {
   return fs.readFileSync(promotionWorkflowPath, 'utf8');
+}
+
+function dispatchWorkflow() {
+  return fs.readFileSync(dispatchWorkflowPath, 'utf8');
 }
 
 function job(content, name) {
@@ -92,6 +100,7 @@ test('a packaged current candidate creates or updates exactly one release promot
 
   assert.match(promotion, /needs:\s*candidate-package/);
   assert.match(promotion, /contents:\s*read/);
+  assert.match(promotion, /actions:\s*read/);
   assert.match(promotion, /pull-requests:\s*write/);
   assert.match(promotion, /ref:\s*\$\{\{ github\.sha \}\}/);
   assert.match(promotion, /CANDIDATE_SHA:\s*\$\{\{ github\.sha \}\}/);
@@ -147,24 +156,22 @@ test('promotion keeps third-party actions pinned and grants write permission onl
 test('a manually opened non-main or cross-repository promotion fails on its own PR run', () => {
   const shape = job(promotionWorkflow(), 'promotion-source');
 
-  assert.match(shape, /HEAD_REF:\s*\$\{\{ github\.head_ref \}\}/);
-  assert.match(shape, /BASE_REF:\s*\$\{\{ github\.base_ref \}\}/);
-  assert.match(
-    shape,
-    /HEAD_REPOSITORY:\s*\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
-  );
-  assert.match(shape, /EXPECTED_REPOSITORY:\s*\$\{\{ github\.repository \}\}/);
+  assert.match(shape, /PR_NUMBER:\s*\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}/);
+  assert.match(shape, /gh api "repos\/\$\{REPO\}\/pulls\/\$\{PR_NUMBER\}"/);
+  assert.match(shape, /HEAD_REF="\$\(jq -r '\.head\.ref'/);
+  assert.match(shape, /BASE_REF="\$\(jq -r '\.base\.ref'/);
+  assert.match(shape, /HEAD_REPOSITORY="\$\(jq -r '\.head\.repo\.full_name'/);
   assert.match(shape, /"\$HEAD_REF" != "main"/);
   assert.match(shape, /"\$BASE_REF" != "release"/);
-  assert.match(shape, /"\$HEAD_REPOSITORY" != "\$EXPECTED_REPOSITORY"/);
+  assert.match(shape, /"\$HEAD_REPOSITORY" != "\$REPO"/);
 });
 
 test('main 到 release 的 PR 再次校验精确 SHA 与下一正式补丁版本', () => {
   const shape = job(promotionWorkflow(), 'promotion-contract');
 
-  assert.match(shape, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(shape, /ref:\s*\$\{\{ needs\.promotion-source\.outputs\.head_sha \}\}/);
   assert.match(shape, /fetch-depth:\s*0/);
-  assert.match(shape, /CANDIDATE_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(shape, /CANDIDATE_SHA:\s*\$\{\{ needs\.promotion-source\.outputs\.head_sha \}\}/);
   assert.match(shape, /release-promotion\.mjs verify-candidate/);
   assert.match(shape, /--candidate-sha "\$CANDIDATE_SHA"/);
   assert.match(shape, /--head main/);
@@ -201,6 +208,31 @@ test('retargeting an existing pull request to release reruns the shape guard', (
     content,
     /^  pull_request:\n    branches: \[release\]\n    types: \[opened, synchronize, reopened, edited\]$/m,
   );
+  assert.match(content, /^  workflow_dispatch:\n    inputs:\n      pr_number:/m);
+});
+
+test('候选 run 完成后再显式 dispatch 稳定晋级检查', () => {
+  const daily = job(workflow(), 'candidate-pr');
+  const promotion = promotionWorkflow();
+  const dispatcher = dispatchWorkflow();
+  const dispatchJob = job(dispatcher, 'dispatch-promotion');
+
+  assert.doesNotMatch(daily, /gh workflow run/);
+  assert.match(dispatcher, /^  workflow_run:\n    workflows: \[Test\]\n    branches: \[main\]\n    types: \[completed\]/m);
+  assert.match(dispatchJob, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(dispatchJob, /actions:\s*write/);
+  assert.match(dispatchJob, /CANDIDATE_RUN_ID:\s*\$\{\{ github\.event\.workflow_run\.id \}\}/);
+  assert.match(dispatchJob, /CANDIDATE_RUN_ATTEMPT:\s*\$\{\{ github\.event\.workflow_run\.run_attempt \}\}/);
+  assert.match(dispatchJob, /actions\/runs\/\$\{CANDIDATE_RUN_ID\}\/attempts\/\$\{CANDIDATE_RUN_ATTEMPT\}\/jobs/);
+  assert.match(dispatchJob, /\.name == "创建或刷新发布晋级" and \.conclusion == "success"/);
+  assert.match(dispatchJob, /本次 main run 不是正式发布候选，绿色结束/);
+  assert.match(dispatchJob, /release-promotion\.mjs read-selector/);
+  assert.match(dispatchJob, /SELECTED_RUN_ID[^]*?CANDIDATE_RUN_ID/);
+  assert.match(dispatchJob, /SELECTED_RUN_ATTEMPT[^]*?CANDIDATE_RUN_ATTEMPT/);
+  assert.match(dispatchJob, /gh workflow run release-promotion\.yml --ref main/);
+  assert.match(promotion, /^  workflow_dispatch:/m);
+  assert.match(promotion, /github\.event\.pull_request\.number \|\| inputs\.pr_number/);
+  assert.match(promotion, /needs\.promotion-source\.outputs\.head_sha/);
 });
 
 test('Release PR 只运行稳定命名的高层来源与晋级契约检查', () => {
@@ -210,6 +242,7 @@ test('Release PR 只运行稳定命名的高层来源与晋级契约检查', () 
   assert.match(daily, /^  pull_request:\n    branches: \[main\]\n/m);
   assert.match(promotion, /^name:\s*发布晋级门禁$/m);
   assert.match(promotion, /^  pull_request:\n    branches: \[release\]\n/m);
+  assert.match(promotion, /^  workflow_dispatch:/m);
   assert.match(promotion, /types:\s*\[opened, synchronize, reopened, edited\]/);
   assert.match(promotion, /^  promotion-source:\n[^]*?name:\s*发布晋级来源/m);
   assert.match(promotion, /^  promotion-contract:\n[^]*?name:\s*发布晋级契约/m);

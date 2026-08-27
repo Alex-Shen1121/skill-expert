@@ -116,7 +116,7 @@ function requireArtifactIdentity(artifact, expected, selector, candidateSha) {
 }
 
 function verifyProvenanceSubjects(report, manifest, manifestSha256) {
-  if (!Array.isArray(report) || report.length === 0) fail('候选来源证明验证结果为空');
+  if (!Array.isArray(report) || report.length === 0) fail('候选构建来源证明验证结果为空');
   const subjects = report.flatMap((entry) => entry.verificationResult?.statement?.subject ?? []);
   const actual = new Map(
     subjects.map((subject) => [subject.name, subject.digest?.sha256]),
@@ -128,7 +128,7 @@ function verifyProvenanceSubjects(report, manifest, manifestSha256) {
     ),
   ];
   for (const [name, digest] of expected) {
-    if (actual.get(name) !== digest) fail(`候选来源证明未绑定正确主体：${name}`);
+    if (actual.get(name) !== digest) fail(`候选构建来源证明未绑定正确主体：${name}`);
   }
 }
 
@@ -194,9 +194,9 @@ export function createCandidateManifest(options) {
   const manifestJobs = [];
   const manifestArtifacts = [];
   for (const target of TARGETS) {
-    const expectedJobName = `candidate-package / Candidate (${target})`;
+    const expectedJobName = `candidate-package / 候选构建（${target}）`;
     const jobMatches = jobs.filter(
-      (job) => job.name === expectedJobName || job.name.endsWith(` / Candidate (${target})`),
+      (job) => job.name === expectedJobName || job.name.endsWith(` / 候选构建（${target}）`),
     );
     if (jobMatches.length !== 1) fail(`${target} 必须对应唯一候选 job`);
     requireSuccessfulJob(jobMatches[0], `${target} 候选 job`, runAttempt, options.candidate_sha);
@@ -745,7 +745,7 @@ export function verifyCandidatePromotion(options) {
   }
 
   verifyProvenanceSubjects(
-    readJson(options.provenance_report, '候选来源证明验证结果'),
+    readJson(options.provenance_report, '候选构建来源证明验证结果'),
     manifest,
     manifestSha256,
   );

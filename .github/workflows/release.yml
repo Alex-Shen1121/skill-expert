@@ -15,7 +15,7 @@ permissions:
 jobs:
   prepare-release:
     name: 验证晋级证据并建立 Draft
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release' && vars.RELEASE_PIPELINE_MODE == 'candidate-reuse'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -142,6 +142,8 @@ jobs:
               --candidate-sha "$CANDIDATE_SHA" \
               --head main \
               --base release \
+              --approved-release-sha "$RELEASE_SHA" \
+              --previous-release-sha "$PREVIOUS_RELEASE_SHA" \
               --pr-body "$RUNNER_TEMP/release-pr.md" \
               --run-response "$RUNNER_TEMP/candidate-run.json" \
               --jobs-response "$RUNNER_TEMP/candidate-jobs.json" \
@@ -316,7 +318,7 @@ jobs:
             unzip -q "$ARCHIVE" -d "staging/candidate-assets/${TARGET_ID}"
           done
 
-      - name: 验证候选字节的真实 build provenance
+      - name: 验证候选字节的真实候选构建来源证明
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

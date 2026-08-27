@@ -112,7 +112,7 @@ function createFixture(t) {
     })),
     ...targets.map((target, index) => ({
       id: 2000 + index,
-      name: `candidate-package / Candidate (${target})`,
+      name: `candidate-package / 候选构建（${target}）`,
       status: 'completed',
       conclusion: 'success',
       run_attempt: runAttempt,
@@ -147,7 +147,7 @@ function createFixture(t) {
     jobs: targets.map((target, index) => ({
       target,
       id: 2000 + index,
-      name: `candidate-package / Candidate (${target})`,
+      name: `candidate-package / 候选构建（${target}）`,
       conclusion: 'success',
       runAttempt,
     })),
@@ -233,7 +233,7 @@ function createFixture(t) {
   };
 }
 
-function verifyCandidate(values) {
+function verifyCandidate(values, extraArguments = []) {
   return spawnSync(
     process.execPath,
     [
@@ -259,6 +259,7 @@ function verifyCandidate(values) {
       'candidate-evidence',
       '--provenance-report',
       'provenance-report.json',
+      ...extraArguments,
       '--json',
     ],
     {
@@ -320,6 +321,28 @@ test('发布晋级契约接受绑定同一 run attempt 的完整四平台候选'
   assert.equal(report.runAttempt, runAttempt);
   assert.equal(report.manifestSha256, values.selector.manifestSha256);
   assert.deepEqual(report.artifactIds, values.manifest.artifacts.map(({ id }) => id));
+});
+
+test('正式发布恢复绑定已批准 merge，不依赖后续移动的 main', (t) => {
+  const values = createFixture(t);
+  git(values.repository, 'switch', 'release');
+  git(values.repository, 'merge', '--no-ff', 'main', '-m', '测试：批准发布晋级');
+  const releaseSha = git(values.repository, 'rev-parse', 'HEAD');
+  git(values.repository, 'switch', 'main');
+  write(values.repository, 'after-release.txt', '发布后的日常开发\n');
+  git(values.repository, 'add', 'after-release.txt');
+  git(values.repository, 'commit', '-m', '测试：发布后继续开发');
+  git(values.repository, 'checkout', '--detach', values.candidateSha);
+
+  const result = verifyCandidate(values, [
+    '--approved-release-sha',
+    releaseSha,
+    '--previous-release-sha',
+    values.releaseBaselineSha,
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).candidateSha, values.candidateSha);
 });
 
 test('发布晋级契约拒绝缺少现有安装格式的候选文件清单', (t) => {
@@ -418,7 +441,7 @@ test('公开 CLI 从实际候选目录和 GitHub 响应生成不可变候选清�
   const candidateTree = 'b'.repeat(40);
   const jobs = targets.map((target, index) => ({
     id: 4100 + index,
-    name: `candidate-package / Candidate (${target})`,
+    name: `candidate-package / 候选构建（${target}）`,
     status: 'completed',
     conclusion: 'success',
     run_attempt: 3,

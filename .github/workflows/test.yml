@@ -59,10 +59,10 @@ jobs:
       - name: Test release preparation contract
         run: npm run test:release
 
-      - name: Test candidate packaging contract
+      - name: 测试候选打包契约
         run: npm run test:candidate
 
-      - name: Test release promotion contract
+      - name: 测试发布晋级契约
         run: npm run test:promotion
 
       - name: 测试正式发布编排契约
@@ -273,23 +273,23 @@ jobs:
     needs: main-version-policy
     if: needs.main-version-policy.outputs.release_candidate == 'true'
     runs-on: ubuntu-22.04
-    name: Release candidate guard
+    name: 发布候选门禁
 
     steps:
-      - name: Checkout exact main candidate
+      - name: 检出精确 main 候选
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Fetch promotion refs
+      - name: 获取晋级引用
         run: |
           git fetch --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main \
             +refs/heads/release:refs/remotes/origin/release
 
-      - name: Verify exact release candidate
+      - name: 验证精确发布候选
         env:
           CANDIDATE_SHA: ${{ github.sha }}
         run: >-
@@ -300,7 +300,7 @@ jobs:
 
   candidate-package:
     needs: candidate-guard
-    name: Four-target release candidate
+    name: 四平台发布候选
     permissions:
       contents: read
       actions: read
@@ -316,29 +316,29 @@ jobs:
   candidate-pr:
     needs: candidate-package
     runs-on: ubuntu-22.04
-    name: Create or refresh release promotion
+    name: 创建或刷新发布晋级
     permissions:
       contents: read
       actions: read
       pull-requests: write
 
     steps:
-      # GitHub jobs have isolated filesystems. Repeat the exact checkout and
-      # fetch here so a main push during packaging invalidates the old candidate.
-      - name: Checkout packaged candidate
+      # GitHub job 的文件系统互相隔离。这里重复执行精确检出与拉取，确保打包期间
+      # main 新增提交后旧候选立即失效。
+      - name: 检出已打包候选
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Refresh promotion refs
+      - name: 刷新晋级引用
         run: |
           git fetch --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main \
             +refs/heads/release:refs/remotes/origin/release
 
-      - name: Create or update the exact release promotion
+      - name: 创建或更新精确发布晋级
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
@@ -381,7 +381,7 @@ jobs:
 
           PR_COUNT="$(jq 'length' <<<"$VALID_PROMOTIONS")"
           if [ "$PR_COUNT" -gt 1 ]; then
-            echo "Expected at most one open release promotion pull request, found $PR_COUNT" >&2
+            echo "打开的发布晋级 PR 最多只能有一个，实际为 $PR_COUNT 个" >&2
             exit 1
           fi
 

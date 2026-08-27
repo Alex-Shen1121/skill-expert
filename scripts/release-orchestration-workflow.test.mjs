@@ -6,11 +6,17 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
+const legacyWorkflowPath = path.join(repositoryRoot, '.github/workflows/release-legacy.yml');
+const legacyAssetsScriptPath = path.join(repositoryRoot, 'scripts/legacy-release-assets.mjs');
 const testWorkflowPath = path.join(repositoryRoot, '.github/workflows/test.yml');
 const draftDownloadScriptPath = path.join(repositoryRoot, 'scripts/download-draft-release-assets.sh');
 
 function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
+}
+
+function legacyWorkflow() {
+  return fs.readFileSync(legacyWorkflowPath, 'utf8');
 }
 
 function job(content, name) {
@@ -31,8 +37,31 @@ test('正式发布只响应 release push 且所有发布串行排队不取消', 
   assert.match(content, /^concurrency:\n  group: release-production\n  cancel-in-progress: false$/m);
   assert.match(
     job(content, 'prepare-release'),
-    /if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/release'/,
+    /if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/release' && vars\.RELEASE_PIPELINE_MODE == 'candidate-reuse'/,
   );
+});
+
+test('真实演练前由显式变量隔离新旧正式发布路径', () => {
+  const current = workflow();
+  const legacy = legacyWorkflow();
+
+  assert.match(current, /vars\.RELEASE_PIPELINE_MODE == 'candidate-reuse'/);
+  assert.match(legacy, /^name:\s*正式发布 Skill Expert（旧路径）$/m);
+  assert.match(legacy, /vars\.RELEASE_PIPELINE_MODE != 'candidate-reuse'/);
+  assert.match(legacy, /cargo build --release --locked/);
+  assert.match(legacy, /npm run tauri -- build --ci/);
+  assert.match(legacy, /scripts\/legacy-release-assets\.mjs/);
+  assert.match(
+    legacy,
+    /--signer-workflow "\$REPO\/\.github\/workflows\/release-legacy\.yml"/,
+  );
+  assert.doesNotMatch(
+    legacy,
+    /--signer-workflow "\$REPO\/\.github\/workflows\/release\.yml"/,
+  );
+  assert.equal(fs.existsSync(legacyAssetsScriptPath), true);
+  assert.match(current, /^concurrency:\n  group: release-production$/m);
+  assert.match(legacy, /^concurrency:\n  group: release-production$/m);
 });
 
 test('tag 之前重新验证唯一 Release PR、merge tree、候选 run、artifact、清单和 provenance', () => {
@@ -52,6 +81,8 @@ test('tag 之前重新验证唯一 Release PR、merge tree、候选 run、artifa
   assert.match(prepare, /actions\/artifacts\/\$\{EVIDENCE_ARTIFACT_ID\}\/zip/);
   assert.match(prepare, /gh attestation verify/);
   assert.match(prepare, /release-promotion\.mjs[^]*?verify-candidate/);
+  assert.match(prepare, /--approved-release-sha "\$RELEASE_SHA"/);
+  assert.match(prepare, /--previous-release-sha "\$PREVIOUS_RELEASE_SHA"/);
   assert.ok(prepare.indexOf('verify-candidate') < tagPosition, '候选证据预检必须发生在创建 tag 前');
   assert.match(prepare, /repos\/\$\{REPO\}\/git\/tags/);
   assert.match(prepare, /repos\/\$\{REPO\}\/git\/refs/);

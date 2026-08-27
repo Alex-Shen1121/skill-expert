@@ -15,7 +15,7 @@ Release PR 还会重复已经在同一 candidate SHA 上通过的完整 CI。重
 
 正式候选 workflow 是安装包、Updater 包本体和 CLI 字节的唯一构建来源。它在 `main`
 candidate SHA 上使用临时 Updater 密钥完成四平台构建和原生回验，并生成绑定 tree、run
-attempt、job、artifact ID/digest 和逐文件哈希的候选清单及 build provenance。
+attempt、job、artifact ID/digest 和逐文件哈希的候选清单及候选构建来源证明。
 
 Release PR 继续使用 merge commit，合并仍是唯一正式发布批准，但 PR 只运行稳定命名的来源
 检查和高层晋级契约。可编辑正文只是精确 run 的选择入口；门禁重新读取 GitHub API、不可变
@@ -23,10 +23,14 @@ artifact、清单和 provenance。
 
 `release` workflow 在 tag 前再次验证候选身份和 tree，相同后按 artifact ID 下载候选字节。
 它不得重新编译，必须丢弃临时 `.sig`，且只有一个绑定 `release Environment` 的 job 可以用
-生产密钥重新签署 Updater 包。候选来源证明指向真实构建所在的 `main` candidate SHA；正式
+生产密钥重新签署 Updater 包。候选构建来源证明指向真实构建所在的 `main` candidate SHA；正式
 来源证明只覆盖在 release SHA 上生成的签名、元数据、校验和与晋级绑定证明。
 
 手工测试包使用独立入口和 `manual-test-package` 用途；无论选择多少平台都不可晋级。
+
+迁移期间保留旧正式重建 workflow，并由仓库变量 `RELEASE_PIPELINE_MODE` 显式选择。变量只有等于
+`candidate-reuse` 时才执行新路径；真实演练、Ruleset 与 required checks 验收全部通过后，另行删除
+旧路径与开关，使本决策成为唯一默认实现。
 
 ## 结果
 

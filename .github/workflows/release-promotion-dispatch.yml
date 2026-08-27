@@ -1,0 +1,87 @@
+name: 发布晋级门禁调度
+
+on:
+  workflow_run:
+    workflows: [Test]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-promotion:
+    name: 候选完成后调度晋级门禁
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    steps:
+      - name: 检出已完成的精确候选
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: 只为本次已完成候选调度晋级门禁
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          CANDIDATE_RUN_ID: ${{ github.event.workflow_run.id }}
+          CANDIDATE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/actions/runs/${CANDIDATE_RUN_ID}/attempts/${CANDIDATE_RUN_ATTEMPT}/jobs?per_page=100" \
+            > "$RUNNER_TEMP/candidate-run-jobs.json"
+          CANDIDATE_PR_COUNT="$(jq '[.jobs[] | select(.name == "创建或刷新发布晋级" and .conclusion == "success")] | length' \
+            "$RUNNER_TEMP/candidate-run-jobs.json")"
+          if [ "$CANDIDATE_PR_COUNT" = "0" ]; then
+            echo "本次 main run 不是正式发布候选，绿色结束"
+            exit 0
+          fi
+          if [ "$CANDIDATE_PR_COUNT" != "1" ]; then
+            echo "本次候选必须包含唯一成功的 Release PR 创建任务" >&2
+            exit 1
+          fi
+
+          CURRENT_MAIN_SHA="$(gh api "repos/${REPO}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$CURRENT_MAIN_SHA" != "$CANDIDATE_SHA" ]; then
+            echo "main 已前进，本次已完成候选不再调度晋级门禁"
+            exit 0
+          fi
+
+          PROMOTION_PRS="$(gh pr list --state open --base release --limit 1000 \
+            --json number,headRefName,baseRefName,isCrossRepository,headRefOid)"
+          MATCHES="$(jq --arg candidate_sha "$CANDIDATE_SHA" \
+            '[.[] | select(.headRefName == "main" and .baseRefName == "release" and (.isCrossRepository | not) and .headRefOid == $candidate_sha)]' \
+            <<<"$PROMOTION_PRS")"
+          PR_COUNT="$(jq 'length' <<<"$MATCHES")"
+          if [ "$PR_COUNT" = "0" ]; then
+            echo "本次 main run 没有正式发布候选，绿色结束"
+            exit 0
+          fi
+          if [ "$PR_COUNT" != "1" ]; then
+            echo "本次候选必须对应唯一 Release PR，实际为 $PR_COUNT 个" >&2
+            exit 1
+          fi
+
+          PR_NUMBER="$(jq -r '.[0].number' <<<"$MATCHES")"
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.body // ""' \
+            > "$RUNNER_TEMP/release-pr.md"
+          node scripts/release-promotion.mjs read-selector \
+            --pr-body "$RUNNER_TEMP/release-pr.md" \
+            > "$RUNNER_TEMP/candidate-selector.json"
+          SELECTED_RUN_ID="$(jq -r '.runId' "$RUNNER_TEMP/candidate-selector.json")"
+          SELECTED_RUN_ATTEMPT="$(jq -r '.runAttempt' "$RUNNER_TEMP/candidate-selector.json")"
+          if [ "$SELECTED_RUN_ID" != "$CANDIDATE_RUN_ID" ] || \
+             [ "$SELECTED_RUN_ATTEMPT" != "$CANDIDATE_RUN_ATTEMPT" ]; then
+            echo "Release PR 选择器未绑定本次已完成候选 run" >&2
+            exit 1
+          fi
+
+          gh workflow run release-promotion.yml --ref main -f "pr_number=${PR_NUMBER}"

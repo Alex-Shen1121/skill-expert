@@ -53,6 +53,15 @@ test('候选指南把手工测试包与正式候选彻底隔离', () => {
   assert.match(guide, /即使[^\n]+四个平台[^\n]+不能晋级/);
 });
 
+test('候选指南记录完成后调度晋级门禁的顺序保证', () => {
+  const guide = read('docs/candidate-builds.md');
+
+  assert.match(guide, /release-promotion-dispatch\.yml/);
+  assert.match(guide, /已完成 run ID\/attempt/);
+  assert.match(guide, /workflow_dispatch/);
+  assert.match(guide, /in_progress/);
+});
+
 test('candidate guide is included by the repository ignore contract', () => {
   const result = spawnSync('git', ['check-ignore', 'docs/candidate-builds.md'], {
     cwd: repositoryRoot,

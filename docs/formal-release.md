@@ -4,6 +4,17 @@ Skill Expert 只接受经过审阅的 `main → release` 晋级。Release PR 必
 且**合并即批准正式发布**。功能、修复、版本和双语 Changelog 先进入 `main`；`release` 不
 接受独有修改，也不反向合并回 `main`。
 
+## 演练切换
+
+候选资产复用路径在真实演练通过前由仓库变量 `RELEASE_PIPELINE_MODE` 隔离：
+
+- 变量未设置或不是 `candidate-reuse` 时，`.github/workflows/release-legacy.yml` 继续执行旧的正式重建路径；
+- 变量精确设置为 `candidate-reuse` 时，`.github/workflows/release.yml` 才执行候选资产复用路径，旧路径绿色跳过；
+- 两个 workflow 共用串行发布 concurrency，不能同时发布同一个 release push。
+
+只有完成 Ruleset 回读、测试 PR 和真实测试版本演练后，才允许删除旧 workflow、旧资产契约脚本和该开关，
+并把候选资产复用设为唯一默认路径。切换变量本身不替代 Release PR 合并批准。
+
 ## 首发前置条件
 
 代码合入不代表生产环境已经完成配置。第一次正式发布前必须完成：
@@ -65,14 +76,14 @@ Release PR 只运行两个稳定的高层检查：`发布晋级来源` 和 `发�
 公开 Release 精确包含 18 个四平台文件和 6 个生成文件，共 24 个资产：
 
 - `candidate-manifest.json`：候选身份、run、artifact 与逐文件哈希；
-- `candidate-build-provenance.json`：候选来源证明指向真实构建所在的 `main` candidate SHA；
+- `candidate-build-provenance.json`：候选构建来源证明指向真实构建所在的 `main` candidate SHA；
 - `promotion-binding.json`：绑定版本、tag、release SHA、candidate SHA、相同 tree、run
   attempt、artifact 身份、清单摘要和复用本体哈希；
 - `release-provenance.json`：正式来源证明指向生成签名和元数据的 release SHA；
 - `latest.json`：四平台稳定下载 URL 与生产签名；
 - `SHA256SUMS`：覆盖公开契约要求的候选本体和可独立校验的生成文件。
 
-候选 build provenance 只声明安装包、Updater 包本体和 CLI 来自候选 workflow；正式
+候选构建来源证明只声明安装包、Updater 包本体和 CLI 来自候选 workflow；正式
 provenance 只声明生产 `.sig`、Updater 元数据、校验和与晋级证明来自 release workflow。
 不得把在 `main` 构建的候选字节伪装成在 `release` 重新构建。
 

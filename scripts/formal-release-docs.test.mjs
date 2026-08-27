@@ -24,7 +24,7 @@ test('正式发布指南记录唯一批准入口、完整门禁和不可变故�
   assert.match(guide, /candidate-build-provenance\.json/);
   assert.match(guide, /promotion-binding\.json/);
   assert.match(guide, /release-provenance\.json/);
-  assert.match(guide, /候选来源证明[^\n]+main[^\n]+candidate SHA/);
+  assert.match(guide, /候选构建来源证明[^\n]+main[^\n]+candidate SHA/);
   assert.match(guide, /正式来源证明[^\n]+release SHA/);
   assert.match(guide, /下载回验[\s\S]*公开[\s\S]*Latest/);
   assert.match(guide, /ad-hoc[\s\S]*仍要打开/);
@@ -49,4 +49,13 @@ test('正式发布指南记录精确候选选择和 Ruleset 高层检查', () =>
   assert.match(guide, /开发集成分支[^\n]+五个完整日常 CI/);
   assert.match(guide, /发布分支[\s\S]{0,120}发布晋级来源[\s\S]{0,80}发布晋级契约/);
   assert.match(guide, /过期[^\n]+不可晋级/);
+});
+
+test('正式发布指南记录真实演练开关与旧路径退出条件', () => {
+  const guide = fs.readFileSync(guidePath, 'utf8');
+
+  assert.match(guide, /RELEASE_PIPELINE_MODE/);
+  assert.match(guide, /candidate-reuse/);
+  assert.match(guide, /Ruleset 回读[^\n]+真实测试版本演练/);
+  assert.match(guide, /删除旧 workflow、旧资产契约脚本和该开关/);
 });

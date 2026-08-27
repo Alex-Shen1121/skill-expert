@@ -25,7 +25,7 @@ runner 内生成临时 Updater 密钥，用它验证安装包和签名链路后�
 四个平台全部成功后，候选证据 job 生成并保存：
 
 - `candidate-manifest.json`：机器可验证的候选清单；
-- `candidate-build-provenance.json`：由 GitHub Attestation 生成的真实候选来源证明；
+- `candidate-build-provenance.json`：由 GitHub Attestation 生成的真实候选构建来源证明；
 - 一个独立候选证据 artifact，供 Release PR 和正式 workflow 按精确 ID 下载。
 
 清单绑定仓库、版本、candidate SHA、candidate tree、source ref、workflow 路径与 revision，
@@ -35,6 +35,11 @@ runner 内生成临时 Updater 密钥，用它验证安装包和签名链路后�
 
 Release PR 展示这些身份，但可编辑正文不是信任根。高层晋级门禁会重新读取 GitHub API、
 证据 artifact、清单和 provenance；更换重跑 attempt 必须显式刷新 PR 选择器。
+
+候选 run 内只创建或刷新 Release PR，不立即启动晋级门禁。`Test` workflow 完整成功后，
+`.github/workflows/release-promotion-dispatch.yml` 才核对 PR 选择器绑定同一个已完成 run ID/attempt，
+并通过 `workflow_dispatch` 启动高层门禁。这样不会依赖 `GITHUB_TOKEN` 被抑制的 `pull_request`
+事件，也不会在候选 run 仍为 `in_progress` 时提前验证。
 
 ## 精确资产清单
 

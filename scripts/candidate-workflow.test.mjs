@@ -45,10 +45,10 @@ test('candidate workflow declares exactly the four supported build targets', () 
 test('candidate workflow uses only ephemeral signing and has no release side effects', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const buildStep = workflow.match(
-    /- name: Build complete desktop packages and updater assets[\s\S]*?(?=\n\s+- name:)/,
+    /- name: 构建完整桌面安装包与 Updater 资产[\s\S]*?(?=\n\s+- name:)/,
   )?.[0] ?? '';
   const stageStep = workflow.match(
-    /- name: Stage stable candidate asset names[\s\S]*?(?=\n\s+- name:)/,
+    /- name: 整理稳定候选资产名[\s\S]*?(?=\n\s+- name:)/,
   )?.[0] ?? '';
 
   assert.match(workflow, /^\s+contents:\s*read\s*$/m);

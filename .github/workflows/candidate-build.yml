@@ -1,45 +1,45 @@
-name: Build Release Candidate
+name: 构建发布候选
 
 on:
   workflow_call:
     inputs:
       candidate_sha:
-        description: Exact 40-character commit SHA to package
+        description: 要打包的精确 40 位提交 SHA
         required: true
         type: string
       purpose:
-        description: Formal candidate or isolated manual test package
+        description: 正式候选或隔离的手动测试包
         required: false
         default: formal-release-candidate
         type: string
       targets_json:
-        description: Exact matrix include JSON
+        description: 精确的矩阵 include JSON
         required: true
         type: string
       artifact_prefix:
-        description: Artifact name prefix
+        description: Artifact 名称前缀
         required: false
         default: skill-expert-candidate
         type: string
     outputs:
       evidence_artifact_id:
-        description: Exact immutable candidate evidence artifact ID
+        description: 精确且不可变的候选证据 artifact ID
         value: ${{ jobs.candidate-evidence.outputs.artifact_id }}
       evidence_artifact_name:
-        description: Exact candidate evidence artifact name
+        description: 精确的候选证据 artifact 名称
         value: ${{ jobs.candidate-evidence.outputs.artifact_name }}
       evidence_artifact_digest:
-        description: SHA-256 digest reported by upload-artifact
+        description: upload-artifact 返回的 SHA-256 摘要
         value: ${{ jobs.candidate-evidence.outputs.artifact_digest }}
       manifest_sha256:
-        description: SHA-256 of candidate-manifest.json
+        description: candidate-manifest.json 的 SHA-256
         value: ${{ jobs.candidate-evidence.outputs.manifest_sha256 }}
 permissions:
   contents: read
 
 jobs:
   build-candidate:
-    name: Candidate (${{ matrix.target_id }})
+    name: 候选构建（${{ matrix.target_id }}）
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -48,14 +48,14 @@ jobs:
         include: ${{ fromJSON(inputs.targets_json) }}
 
     steps:
-      - name: Checkout exact candidate
+      - name: 检出精确候选
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.candidate_sha }}
 
-      - name: Prove exact candidate checkout
+      - name: 验证精确候选检出
         shell: bash
         env:
           EXPECTED_SHA: ${{ inputs.candidate_sha }}
@@ -63,38 +63,38 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "candidate_sha must be a full lowercase 40-character commit SHA" >&2
+            echo "candidate_sha 必须是完整的小写 40 位提交 SHA" >&2
             exit 1
           fi
           ACTUAL_SHA="$(git rev-parse HEAD)"
           if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
-            echo "Candidate checkout mismatch: expected $EXPECTED_SHA, found $ACTUAL_SHA" >&2
+            echo "候选检出不一致：预期 $EXPECTED_SHA，实际 $ACTUAL_SHA" >&2
             exit 1
           fi
           if [ "$PURPOSE" = "formal-release-candidate" ] && \
              ! git merge-base --is-ancestor "$EXPECTED_SHA" origin/main; then
-            echo "candidate_sha must belong to the development integration branch origin/main" >&2
+            echo "candidate_sha 必须属于开发集成分支 origin/main" >&2
             exit 1
           fi
 
-      - name: Setup Node.js
+      - name: 配置 Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
 
-      - name: Setup Rust toolchain
+      - name: 配置 Rust 工具链
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Cache Rust dependencies
+      - name: 缓存 Rust 依赖
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
           save-if: false
 
-      - name: Install Linux package tools
+      - name: 安装 Linux 打包工具
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -107,10 +107,10 @@ jobs:
             libarchive-tools \
             rpm
 
-      - name: Install frontend dependencies
+      - name: 安装前端依赖
         run: npm ci
 
-      - name: Generate ephemeral candidate updater key
+      - name: 生成临时候选 Updater 密钥
         shell: bash
         env:
           CANDIDATE_KEY_PATH: ${{ runner.temp }}/candidate-updater.key
@@ -123,7 +123,7 @@ jobs:
             --write-keys "$CANDIDATE_KEY_PATH"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$CANDIDATE_KEY_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Build standalone CLI
+      - name: 构建独立 CLI
         shell: bash
         run: >-
           cargo build --release --locked
@@ -131,7 +131,7 @@ jobs:
           --bin skill-expert-cli
           --target "${{ matrix.rust_target }}"
 
-      - name: Build complete desktop packages and updater assets
+      - name: 构建完整桌面安装包与 Updater 资产
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: "-"
@@ -140,7 +140,7 @@ jobs:
           BUNDLES: ${{ matrix.bundles }}
         run: npm run tauri -- build --ci --target "$RUST_TARGET" --bundles "$BUNDLES"
 
-      - name: Ad-hoc sign and verify all macOS executable surfaces
+      - name: 对全部 macOS 可执行面执行 ad-hoc 签名与回验
         if: runner.os == 'macOS'
         shell: bash
         env:
@@ -156,7 +156,7 @@ jobs:
             ARCHIVES+=("$archive")
           done < <(find "$BUILD_ROOT/bundle/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print0)
           if [ "${#ARCHIVES[@]}" -ne 1 ]; then
-            echo "Expected exactly one macOS updater archive, found ${#ARCHIVES[@]}" >&2
+            echo "macOS Updater archive 必须恰好存在一个，实际为 ${#ARCHIVES[@]} 个" >&2
             exit 1
           fi
           node scripts/verify-macos-adhoc.mjs \
@@ -164,7 +164,7 @@ jobs:
             --archive "${ARCHIVES[0]}" \
             --cli "$CLI_PATH"
 
-      - name: Stage stable candidate asset names
+      - name: 整理稳定候选资产名
         shell: bash
         env:
           BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
@@ -228,7 +228,7 @@ jobs:
           }
           EOF
 
-      - name: Upload candidate directory
+      - name: 上传候选目录
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.artifact_prefix }}-${{ inputs.candidate_sha }}-${{ github.run_attempt }}-${{ matrix.target_id }}
@@ -237,7 +237,7 @@ jobs:
           retention-days: 7
 
   candidate-evidence:
-    name: Candidate evidence
+    name: 候选证据
     needs: build-candidate
     if: inputs.purpose == 'formal-release-candidate'
     runs-on: ubuntu-22.04
@@ -253,14 +253,14 @@ jobs:
       artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
       manifest_sha256: ${{ steps.manifest.outputs.manifest_sha256 }}
     steps:
-      - name: Checkout exact candidate evidence tools
+      - name: 检出精确候选的证据工具
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
           persist-credentials: false
           ref: ${{ inputs.candidate_sha }}
 
-      - name: Download the four exact candidate artifacts by ID
+      - name: 按 ID 下载四个平台的精确候选 artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,7 +298,7 @@ jobs:
             unzip -q "$ARCHIVE" -d "candidate-assets/${TARGET_ID}"
           done
 
-      - name: Generate immutable candidate manifest
+      - name: 生成不可变候选清单
         id: manifest
         shell: bash
         env:
@@ -333,7 +333,7 @@ jobs:
           echo "manifest_sha256=$MANIFEST_SHA256" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Attest candidate bytes and immutable manifest
+      - name: 证明候选字节与不可变清单
         id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -342,13 +342,13 @@ jobs:
             candidate-evidence/candidate-manifest.json
           show-summary: false
 
-      - name: Retain candidate build provenance bundle
+      - name: 保存候选构建来源证明包
         shell: bash
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: cp "$BUNDLE_PATH" candidate-evidence/candidate-build-provenance.json
 
-      - name: Upload immutable candidate evidence
+      - name: 上传不可变候选证据
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
