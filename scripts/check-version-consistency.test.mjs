@@ -22,24 +22,24 @@ function writeJson(root, relativePath, value) {
   write(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function fixture(t) {
+function fixture(t, { version = VERSION, changelogVersion = version } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'version-contract-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  writeJson(root, 'package.json', { name: 'fixture-app', version: VERSION });
+  writeJson(root, 'package.json', { name: 'fixture-app', version });
   writeJson(root, 'package-lock.json', {
     name: 'fixture-app',
-    version: VERSION,
-    packages: { '': { name: 'fixture-app', version: VERSION } },
+    version,
+    packages: { '': { name: 'fixture-app', version } },
   });
-  write(root, 'src-tauri/Cargo.toml', `[package]\nname = "fixture-app"\nversion = "${VERSION}"\n\n[dependencies]\n`);
-  write(root, 'src-tauri/Cargo.lock', `[[package]]\nname = "fixture-app"\nversion = "${VERSION}"\n`);
-  writeJson(root, 'src-tauri/tauri.conf.json', { version: VERSION });
+  write(root, 'src-tauri/Cargo.toml', `[package]\nname = "fixture-app"\nversion = "${version}"\n\n[dependencies]\n`);
+  write(root, 'src-tauri/Cargo.lock', `[[package]]\nname = "fixture-app"\nversion = "${version}"\n`);
+  writeJson(root, 'src-tauri/tauri.conf.json', { version });
   for (const locale of ['en', 'zh', 'zh-TW']) {
-    writeJson(root, `src/i18n/${locale}.json`, { settings: { version: `Fixture App ${VERSION}` } });
+    writeJson(root, `src/i18n/${locale}.json`, { settings: { version: `Fixture App ${version}` } });
   }
-  write(root, 'CHANGELOG.md', `# Changelog\n\n## [${VERSION}] - 2026-08-24\n`);
-  write(root, 'CHANGELOG-zh.md', `# 更新日志\n\n## [${VERSION}] - 2026-08-24\n`);
+  write(root, 'CHANGELOG.md', `# Changelog\n\n## [${changelogVersion}] - 2026-08-24\n`);
+  write(root, 'CHANGELOG-zh.md', `# 更新日志\n\n## [${changelogVersion}] - 2026-08-24\n`);
   return root;
 }
 
@@ -51,6 +51,24 @@ test('accepts a complete, consistent version contract', (t) => {
   const result = runVersionCheck(fixture(t));
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Version consistency check passed for 1\.2\.3\./);
+});
+
+test('接受开发序号版本，并要求变更日志继续指向对应正式版本', (t) => {
+  const result = runVersionCheck(
+    fixture(t, { version: '1.2.3-1', changelogVersion: '1.2.3' }),
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Version consistency check passed for 1\.2\.3-1\./);
+});
+
+test('拒绝正式段或开发序号中的前导零', (t) => {
+  for (const version of ['01.2.3', '1.02.3', '1.2.03', '1.2.3-01', '1.2.3-0']) {
+    const result = runVersionCheck(fixture(t, { version }));
+
+    assert.notEqual(result.status, 0, version);
+    assert.match(result.stderr, /版本必须是 x\.y\.z 或开发序号 x\.y\.z-N/);
+  }
 });
 
 test('reports both npm lockfile version fields when they drift', (t) => {

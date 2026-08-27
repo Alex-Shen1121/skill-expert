@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -29,6 +31,29 @@ jobs:
 
       - name: Test version contract
         run: npm run test:version
+
+      - name: 获取 main PR 版本策略所需引用
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: >-
+          git fetch --no-tags origin
+          +refs/heads/release:refs/remotes/origin/release
+
+      - name: 卡控 main PR 版本通道
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: >-
+          node scripts/version-policy.mjs verify-main-pr
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+          --head-ref "$HEAD_REF"
+          --head-repository "$HEAD_REPOSITORY"
+          --expected-repository "$EXPECTED_REPOSITORY"
+          --release-ref origin/release
 
       - name: Test release preparation contract
         run: npm run test:release
@@ -230,9 +255,68 @@ jobs:
             exit 1
           fi
 
-  candidate-guard:
+      - name: 检出精确发布候选
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: 获取发布晋级引用
+        run: |
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/release:refs/remotes/origin/release
+
+      - name: 校验发布晋级版本与身份
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node scripts/release-candidate.mjs verify
+          --candidate-sha "$CANDIDATE_SHA"
+          --head main
+          --base release
+
+  main-version-policy:
     needs: [frontend, workflow-lint, rust-quality, rust-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    name: main 版本通道
+    outputs:
+      release_candidate: ${{ steps.policy.outputs.release_candidate }}
+
+    steps:
+      - name: 检出精确 main 提交
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: 获取 release 版本
+        run: >-
+          git fetch --no-tags origin
+          +refs/heads/release:refs/remotes/origin/release
+
+      - name: 校验 main 版本转换
+        id: policy
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          REPORT="$(node scripts/version-policy.mjs verify-main-push \
+            --before-sha "$BEFORE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --release-ref origin/release \
+            --json)"
+          printf '%s\n' "$REPORT"
+          RELEASE_CANDIDATE="$(jq -r '.releaseCandidate' <<<"$REPORT")"
+          echo "release_candidate=$RELEASE_CANDIDATE" >> "$GITHUB_OUTPUT"
+
+  candidate-guard:
+    needs: main-version-policy
+    if: needs.main-version-policy.outputs.release_candidate == 'true'
     runs-on: ubuntu-22.04
     name: Release candidate guard
 

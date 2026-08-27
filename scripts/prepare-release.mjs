@@ -4,6 +4,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { checkVersionConsistency } from './check-version-consistency.mjs';
+import {
+  nextDevelopmentVersion,
+  nextPatchVersion,
+  parseProductVersion,
+} from './product-version.mjs';
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -12,17 +17,17 @@ const releaseArg = args[0];
 const dryRun = args[1] === '--dry-run';
 
 if (!releaseArg) {
-  console.error('Usage: npm run release:prepare -- <patch|minor|major> [--dry-run]');
+  console.error('用法：npm run release:prepare -- <development|patch> [--dry-run]');
   process.exit(1);
 }
 
 if (args.length > 2 || (args.length === 2 && !dryRun) || releaseArg.startsWith('--')) {
-  console.error('Arguments must match: patch|minor|major [--dry-run]');
+  console.error('参数必须符合：development|patch [--dry-run]');
   process.exit(1);
 }
 
-if (!['patch', 'minor', 'major'].includes(releaseArg)) {
-  console.error('Release type must be one of: patch, minor, major.');
+if (!['development', 'patch'].includes(releaseArg)) {
+  console.error('版本类型只能是 development 或 patch。');
   process.exit(1);
 }
 
@@ -47,34 +52,22 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function parseSemver(version) {
-  const m = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return null;
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
-}
-
 function bumpVersion(current, releaseType) {
-  const parsed = parseSemver(current);
+  const parsed = parseProductVersion(current);
   if (!parsed) {
-    throw new Error(`Current package version is not SemVer: ${current}`);
+    throw new Error(`当前软件包版本必须是 x.y.z 或开发序号 x.y.z-N，实际为 ${current}`);
   }
 
-  if (releaseType === 'patch') {
-    return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
-  }
-  if (releaseType === 'minor') {
-    return `${parsed.major}.${parsed.minor + 1}.0`;
-  }
-  if (releaseType === 'major') {
-    return `${parsed.major + 1}.0.0`;
+  if (releaseType === 'development') {
+    return nextDevelopmentVersion(parsed);
   }
 
-  throw new Error(`Invalid release type: ${releaseType}`);
+  return nextPatchVersion(parsed);
 }
 
 function compareSemver(left, right) {
-  const leftParts = parseSemver(left);
-  const rightParts = parseSemver(right);
+  const leftParts = parseProductVersion(left);
+  const rightParts = parseProductVersion(right);
   for (const key of ['major', 'minor', 'patch']) {
     if (leftParts[key] !== rightParts[key]) return leftParts[key] - rightParts[key];
   }
@@ -85,7 +78,10 @@ function updateSettingsVersion(i18nObj, nextVersion, fileLabel) {
   if (!i18nObj.settings || typeof i18nObj.settings.version !== 'string') {
     throw new Error(`Missing settings.version in ${fileLabel}`);
   }
-  i18nObj.settings.version = i18nObj.settings.version.replace(/\d+\.\d+\.\d+/, nextVersion);
+  i18nObj.settings.version = i18nObj.settings.version.replace(
+    /\d+\.\d+\.\d+(?:-[1-9]\d*)?/,
+    nextVersion,
+  );
 }
 
 function updateCargoPackageVersion(cargoToml, nextVersion) {
@@ -170,41 +166,46 @@ function main() {
 
   const currentVersion = pkg.version;
   const nextVersion = bumpVersion(currentVersion, releaseArg);
-  const tagName = `v${nextVersion}`;
-  const tagCheck = spawnSync('git', ['tag', '--list'], { cwd: root, encoding: 'utf8' });
-  if (tagCheck.status !== 0) {
-    throw new Error(`Unable to inspect Git tags: ${tagCheck.stderr.trim()}`);
-  }
-  const tagNames = new Set(tagCheck.stdout.split(/\r?\n/).filter(Boolean));
-  const originCheck = spawnSync('git', ['remote', 'get-url', 'origin'], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-  if (originCheck.status === 0) {
-    const remoteTagCheck = spawnSync('git', ['ls-remote', '--tags', '--refs', 'origin'], {
+  const isDevelopment = releaseArg === 'development';
+  if (!isDevelopment) {
+    const tagName = `v${nextVersion}`;
+    const tagCheck = spawnSync('git', ['tag', '--list'], { cwd: root, encoding: 'utf8' });
+    if (tagCheck.status !== 0) {
+      throw new Error(`无法检查本地 Git 标签：${tagCheck.stderr.trim()}`);
+    }
+    const tagNames = new Set(tagCheck.stdout.split(/\r?\n/).filter(Boolean));
+    const originCheck = spawnSync('git', ['remote', 'get-url', 'origin'], {
       cwd: root,
       encoding: 'utf8',
-      timeout: 30_000,
     });
-    if (remoteTagCheck.status !== 0) {
-      throw new Error(`Unable to inspect origin tags: ${remoteTagCheck.stderr.trim()}`);
+    if (originCheck.status === 0) {
+      const remoteTagCheck = spawnSync('git', ['ls-remote', '--tags', '--refs', 'origin'], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
+      if (remoteTagCheck.status !== 0) {
+        throw new Error(`无法检查 origin 标签：${remoteTagCheck.stderr.trim()}`);
+      }
+      for (const line of remoteTagCheck.stdout.split(/\r?\n/)) {
+        const tag = line.match(/\srefs\/tags\/(v\d+\.\d+\.\d+)$/)?.[1];
+        if (tag) tagNames.add(tag);
+      }
     }
-    for (const line of remoteTagCheck.stdout.split(/\r?\n/)) {
-      const tag = line.match(/\srefs\/tags\/(v\d+\.\d+\.\d+)$/)?.[1];
-      if (tag) tagNames.add(tag);
+    const stableTags = [...tagNames]
+      .map((tag) => ({ tag, version: tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1] }))
+      .filter(({ version }) => version);
+    if (stableTags.some(({ tag }) => tag === tagName)) {
+      throw new Error(`标签 ${tagName} 已存在`);
     }
-  }
-  const stableTags = [...tagNames]
-    .map((tag) => ({ tag, version: tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1] }))
-    .filter(({ version }) => version);
-  if (stableTags.some(({ tag }) => tag === tagName)) {
-    throw new Error(`Tag ${tagName} already exists`);
-  }
-  const latestTag = stableTags.sort((left, right) => compareSemver(right.version, left.version))[0];
-  if (latestTag && compareSemver(nextVersion, latestTag.version) <= 0) {
-    throw new Error(
-      `Target version ${nextVersion} must be newer than existing tag ${latestTag.tag}`,
-    );
+    const latestTag = stableTags.sort(
+      (left, right) => compareSemver(right.version, left.version),
+    )[0];
+    if (latestTag && compareSemver(nextVersion, latestTag.version) <= 0) {
+      throw new Error(
+        `目标版本 ${nextVersion} 必须高于已有标签 ${latestTag.tag}`,
+      );
+    }
   }
 
   pkg.version = nextVersion;
@@ -216,8 +217,10 @@ function main() {
   updateSettingsVersion(en, nextVersion, 'src/i18n/en.json');
   updateSettingsVersion(zh, nextVersion, 'src/i18n/zh.json');
   updateSettingsVersion(zhTw, nextVersion, 'src/i18n/zh-TW.json');
-  const nextChangelog = promoteUnreleased(changelog, nextVersion);
-  const nextChangelogZh = promoteUnreleased(changelogZh, nextVersion, { zh: true });
+  const nextChangelog = isDevelopment ? changelog : promoteUnreleased(changelog, nextVersion);
+  const nextChangelogZh = isDevelopment
+    ? changelogZh
+    : promoteUnreleased(changelogZh, nextVersion, { zh: true });
 
   if (dryRun) {
     console.log(`[dry-run] ${currentVersion} -> ${nextVersion}`);
@@ -232,13 +235,21 @@ function main() {
   writeJson(enI18nPath, en);
   writeJson(zhI18nPath, zh);
   writeJson(zhTwI18nPath, zhTw);
-  fs.writeFileSync(changelogPath, nextChangelog);
-  fs.writeFileSync(changelogZhPath, nextChangelogZh);
+  if (!isDevelopment) {
+    fs.writeFileSync(changelogPath, nextChangelog);
+    fs.writeFileSync(changelogZhPath, nextChangelogZh);
+  }
 
-  console.log(`Prepared release ${nextVersion}`);
+  console.log(
+    isDevelopment
+      ? `已准备开发序号版本 ${nextVersion}`
+      : `已准备正式版本 ${nextVersion}`,
+  );
   console.log('Updated:');
-  console.log('- CHANGELOG.md');
-  console.log('- CHANGELOG-zh.md');
+  if (!isDevelopment) {
+    console.log('- CHANGELOG.md');
+    console.log('- CHANGELOG-zh.md');
+  }
   console.log('- package.json');
   console.log('- package-lock.json');
   console.log('- src-tauri/tauri.conf.json');

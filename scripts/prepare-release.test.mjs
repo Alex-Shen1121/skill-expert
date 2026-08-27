@@ -7,7 +7,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const SOURCE_SCRIPTS = ['prepare-release.mjs', 'check-version-consistency.mjs'];
+const SOURCE_SCRIPTS = [
+  'prepare-release.mjs',
+  'check-version-consistency.mjs',
+  'product-version.mjs',
+];
 const CURRENT_VERSION = '1.2.3';
 
 function write(root, relativePath, content) {
@@ -26,39 +30,40 @@ function git(root, ...args) {
   return result.stdout;
 }
 
-function fixture(t) {
+function fixture(t, { currentVersion = CURRENT_VERSION } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-prepare-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const changelogVersion = currentVersion.split('-')[0];
 
   writeJson(root, 'package.json', {
     name: 'skill-expert',
-    version: CURRENT_VERSION,
+    version: currentVersion,
     private: true,
     scripts: { 'release:prepare': 'node scripts/prepare-release.mjs' },
   });
   writeJson(root, 'package-lock.json', {
     name: 'skill-expert',
-    version: CURRENT_VERSION,
+    version: currentVersion,
     lockfileVersion: 3,
-    packages: { '': { name: 'skill-expert', version: CURRENT_VERSION } },
+    packages: { '': { name: 'skill-expert', version: currentVersion } },
   });
-  write(root, 'src-tauri/Cargo.toml', `[package]\nname = "skill-expert"\nversion = "${CURRENT_VERSION}"\n`);
-  write(root, 'src-tauri/Cargo.lock', `[[package]]\nname = "skill-expert"\nversion = "${CURRENT_VERSION}"\n`);
-  writeJson(root, 'src-tauri/tauri.conf.json', { productName: 'Skill Expert', version: CURRENT_VERSION });
+  write(root, 'src-tauri/Cargo.toml', `[package]\nname = "skill-expert"\nversion = "${currentVersion}"\n`);
+  write(root, 'src-tauri/Cargo.lock', `[[package]]\nname = "skill-expert"\nversion = "${currentVersion}"\n`);
+  writeJson(root, 'src-tauri/tauri.conf.json', { productName: 'Skill Expert', version: currentVersion });
   for (const locale of ['en', 'zh', 'zh-TW']) {
     writeJson(root, `src/i18n/${locale}.json`, {
-      settings: { version: `Skill Expert ${CURRENT_VERSION}` },
+      settings: { version: `Skill Expert ${currentVersion}` },
     });
   }
   write(
     root,
     'CHANGELOG.md',
-    `# Changelog\n\n## [Unreleased]\n\n### Release Overview\n- Ship safer release preparation.\n\n### User-facing\n-\n\n### Developer & Governance\n-\n\n## [${CURRENT_VERSION}] - 2026-08-23\n\n### Release Overview\n- Previous release.\n`,
+    `# Changelog\n\n## [Unreleased]\n\n### Release Overview\n- Ship safer release preparation.\n\n### User-facing\n-\n\n### Developer & Governance\n-\n\n## [${changelogVersion}] - 2026-08-23\n\n### Release Overview\n- Previous release.\n`,
   );
   write(
     root,
     'CHANGELOG-zh.md',
-    `# 更新日志\n\n## [Unreleased]\n\n### 发布概览\n- 交付更安全的版本准备流程。\n\n### 用户可见更新\n-\n\n### 开发者与治理更新\n-\n\n## [${CURRENT_VERSION}] - 2026-08-23\n\n### 发布概览\n- 上一个版本。\n`,
+    `# 更新日志\n\n## [Unreleased]\n\n### 发布概览\n- 交付更安全的版本准备流程。\n\n### 用户可见更新\n-\n\n### 开发者与治理更新\n-\n\n## [${changelogVersion}] - 2026-08-23\n\n### 发布概览\n- 上一个版本。\n`,
   );
 
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -106,12 +111,14 @@ test('patch promotes both Unreleased sections under the same UTC version heading
   );
 });
 
-test('minor synchronizes every public version copy', (t) => {
+test('development 从正式版本生成首个开发序号，并保持变更日志正式版本不变', (t) => {
   const root = fixture(t);
 
-  const result = runPrepare(root, 'minor');
+  const result = runPrepare(root, 'development');
 
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /已准备开发序号版本 1\.2\.3-1/);
+  assert.doesNotMatch(result.stdout, /CHANGELOG/);
   const packageJson = JSON.parse(read(root, 'package.json'));
   const packageLock = JSON.parse(read(root, 'package-lock.json'));
   const cargoTomlVersion = read(root, 'src-tauri/Cargo.toml').match(/^version = "([^"]+)"$/m)?.[1];
@@ -133,8 +140,37 @@ test('minor synchronizes every public version copy', (t) => {
       tauriVersion,
       ...uiVersions,
     ],
-    Array(9).fill('1.3.0').map((version, index) => (index >= 6 ? `Skill Expert ${version}` : version)),
+    Array(9).fill('1.2.3-1').map((version, index) =>
+      index >= 6 ? `Skill Expert ${version}` : version,
+    ),
   );
+  assert.match(read(root, 'CHANGELOG.md'), /^## \[1\.2\.3\]/m);
+  assert.match(read(root, 'CHANGELOG-zh.md'), /^## \[1\.2\.3\]/m);
+  assert.doesNotMatch(read(root, 'CHANGELOG.md'), /^## \[1\.2\.3-1\]/m);
+});
+
+test('development 从已有开发版本严格递增一个序号', (t) => {
+  const root = fixture(t, { currentVersion: '1.2.3-9' });
+
+  const result = runPrepare(root, 'development');
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(read(root, 'package.json')).version, '1.2.3-10');
+  assert.equal(
+    JSON.parse(read(root, 'src/i18n/zh.json')).settings.version,
+    'Skill Expert 1.2.3-10',
+  );
+});
+
+test('patch 从开发序号准备下一正式补丁版本', (t) => {
+  const root = fixture(t, { currentVersion: '1.2.3-9' });
+
+  const result = runPrepare(root, 'patch');
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(read(root, 'package.json')).version, '1.2.4');
+  assert.match(read(root, 'CHANGELOG.md'), /^## \[1\.2\.4\]/m);
+  assert.match(read(root, 'CHANGELOG-zh.md'), /^## \[1\.2\.4\]/m);
 });
 
 test('rejects an explicit version without changing the repository', (t) => {
@@ -143,7 +179,7 @@ test('rejects an explicit version without changing the repository', (t) => {
   const result = runPrepare(root, '1.2.4');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /release type must be one of: patch, minor, major/i);
+  assert.match(result.stderr, /版本类型只能是 development 或 patch/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
@@ -157,7 +193,10 @@ test('rejects unknown flags and extra positional arguments without changing the 
     const result = runPrepare(root, ...invalidArgs);
 
     assert.notEqual(result.status, 0, invalidArgs.join(' '));
-    assert.match(result.stderr, /Arguments must match: patch\|minor\|major \[--dry-run\]/);
+    assert.match(
+      result.stderr,
+      /参数必须符合：development\|patch \[--dry-run\]/,
+    );
     assert.equal(git(root, 'status', '--porcelain'), '');
   }
 });
@@ -204,7 +243,7 @@ test('fails without partial writes when the target tag already exists', (t) => {
   const result = runPrepare(root, 'patch');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Tag v1\.2\.4 already exists/);
+  assert.match(result.stderr, /标签 v1\.2\.4 已存在/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
@@ -224,7 +263,7 @@ test('fails without partial writes when the target tag exists only on origin', (
   const result = runPrepare(root, 'patch', '--dry-run');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Tag v1\.2\.4 already exists/);
+  assert.match(result.stderr, /标签 v1\.2\.4 已存在/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
@@ -235,18 +274,19 @@ test('fails without partial writes when the target would roll back the tagged re
   const result = runPrepare(root, 'patch');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Target version 1\.2\.4 must be newer than existing tag v1\.3\.0/);
+  assert.match(result.stderr, /目标版本 1\.2\.4 必须高于已有标签 v1\.3\.0/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
-test('major dry-run reports the proposed version without changing the repository', (t) => {
-  const root = fixture(t);
+test('拒绝 minor 与 major，正式版本只能递增补丁号', (t) => {
+  for (const releaseType of ['minor', 'major']) {
+    const root = fixture(t);
+    const result = runPrepare(root, releaseType);
 
-  const result = runPrepare(root, 'major', '--dry-run');
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /\[dry-run\] 1\.2\.3 -> 2\.0\.0/);
-  assert.equal(git(root, 'status', '--porcelain'), '');
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /版本类型只能是 development 或 patch/);
+    assert.equal(git(root, 'status', '--porcelain'), '');
+  }
 });
 
 test('fails without partial writes when Chinese Unreleased has no release note', (t) => {

@@ -74,7 +74,7 @@ function createCandidateRepository(
   t,
   {
     baseVersion = '1.0.0',
-    candidateVersion = '1.1.0',
+    candidateVersion = '1.0.1',
     basePackageName = 'skill-expert',
   } = {},
 ) {
@@ -195,12 +195,12 @@ test('verifies an exact current main candidate through the public guard CLI', (t
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    version: '1.1.0',
-    tag: 'v1.1.0',
+    version: '1.0.1',
+    tag: 'v1.0.1',
     candidateSha,
     baseSha,
     commitRange: `${baseSha}..${candidateSha}`,
-    tagAbsence: 'refs/tags/v1.1.0 is absent locally (no origin configured)',
+    tagAbsence: 'refs/tags/v1.0.1 is absent locally (no origin configured)',
   });
 });
 
@@ -340,11 +340,11 @@ test('拒绝树内容不等于上次 main 候选的 release merge commit', (t) =
 
 test('rejects every release branch pair except main to release', (t) => {
   const { repository, baseSha, candidateSha } = createCandidateRepository(t);
-  git(repository, 'branch', 'release-prep/v1.1.0', candidateSha);
+  git(repository, 'branch', 'release-prep/v1.0.1', candidateSha);
   git(repository, 'branch', 'production', baseSha);
 
   for (const [head, base] of [
-    ['release-prep/v1.1.0', 'release'],
+    ['release-prep/v1.0.1', 'release'],
     ['main', 'production'],
   ]) {
     const result = runCandidateGuard(repository, candidateSha, { head, base });
@@ -414,7 +414,7 @@ test('rejects prerelease and other non-stable candidate versions', (t) => {
   assert.notEqual(result.status, 0);
   assert.match(
     result.stderr,
-    /candidate version must be a stable SemVer x\.y\.z, found 1\.1\.0-rc\.1/,
+    /候选版本必须是稳定 SemVer x\.y\.z，实际为 1\.1\.0-rc\.1/,
   );
 });
 
@@ -425,7 +425,7 @@ test('rejects a candidate whose version copies have drifted', (t) => {
     name: 'skill-expert',
     version: '9.9.9',
     lockfileVersion: 3,
-    packages: { '': { name: 'skill-expert', version: '1.1.0' } },
+    packages: { '': { name: 'skill-expert', version: '1.0.1' } },
   });
   git(repository, 'add', lockPath);
   git(repository, 'commit', '--amend', '--no-edit');
@@ -435,12 +435,12 @@ test('rejects a candidate whose version copies have drifted', (t) => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /candidate version contract is inconsistent/);
-  assert.match(result.stderr, /package-lock\.json root version: expected 1\.1\.0, found 9\.9\.9/);
+  assert.match(result.stderr, /package-lock\.json root version: expected 1\.0\.1, found 9\.9\.9/);
 });
 
 test('rejects a candidate with empty English or Chinese release notes', (t) => {
   const { repository } = createCandidateRepository(t);
-  writeVersionContract(repository, '1.1.0', { englishNotes: '', chineseNotes: '' });
+  writeVersionContract(repository, '1.0.1', { englishNotes: '', chineseNotes: '' });
   git(repository, 'add', 'CHANGELOG.md', 'CHANGELOG-zh.md');
   git(repository, 'commit', '--amend', '--no-edit');
   const candidateSha = git(repository, 'rev-parse', 'HEAD');
@@ -448,18 +448,18 @@ test('rejects a candidate with empty English or Chinese release notes', (t) => {
   const result = runCandidateGuard(repository, candidateSha);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /CHANGELOG\.md release 1\.1\.0 must contain a non-empty bullet/);
-  assert.match(result.stderr, /CHANGELOG-zh\.md release 1\.1\.0 must contain a non-empty bullet/);
+  assert.match(result.stderr, /CHANGELOG\.md release 1\.0\.1 must contain a non-empty bullet/);
+  assert.match(result.stderr, /CHANGELOG-zh\.md release 1\.0\.1 must contain a non-empty bullet/);
 });
 
 test('rejects an existing candidate tag even when it exists only on origin', (t) => {
   const { repository, candidateSha } = createCandidateRepository(t);
-  publishFixtureToOrigin(t, repository, { tag: 'v1.1.0' });
+  publishFixtureToOrigin(t, repository, { tag: 'v1.0.1' });
 
   const result = runCandidateGuard(repository, candidateSha);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /tag v1\.1\.0 already exists on origin/);
+  assert.match(result.stderr, /tag v1\.0\.1 already exists on origin/);
 });
 
 test('accepts Skill Expert 1.0.0 as the one bootstrap from the legacy release baseline', (t) => {
@@ -483,7 +483,25 @@ test('requires later Skill Expert candidates to advance the release version', (t
   const result = runCandidateGuard(repository, candidateSha);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /candidate version 1\.1\.0 must be newer than release version 1\.1\.0/);
+  assert.match(
+    result.stderr,
+    /正式候选版本 1\.1\.0 必须是 release 版本 1\.1\.0 的下一补丁版本；预期 1\.1\.1/,
+  );
+});
+
+test('正式发布候选必须严格进入 release 的下一补丁版本，不能跳号', (t) => {
+  const { repository, candidateSha } = createCandidateRepository(t, {
+    baseVersion: '1.0.3',
+    candidateVersion: '1.0.5',
+  });
+
+  const result = runCandidateGuard(repository, candidateSha);
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /正式候选版本 1\.0\.5 必须是 release 版本 1\.0\.3 的下一补丁版本；预期 1\.0\.4/,
+  );
 });
 
 test('renders the complete bilingual release promotion approval contract', (t) => {
@@ -504,7 +522,7 @@ test('renders the complete bilingual release promotion approval contract', (t) =
 
   assert.equal(result.status, 0, result.stderr);
   const body = readFileSync(outputPath, 'utf8');
-  assert.match(body, /Skill Expert v1\.1\.0/);
+  assert.match(body, /Skill Expert v1\.0\.1/);
   assert.match(body, new RegExp(`Candidate SHA[^\n]+${candidateSha}`));
   assert.match(body, new RegExp(`Commit range[^\n]+${baseSha}\.\.${candidateSha}`));
   assert.match(body, /English release note/);
@@ -516,7 +534,7 @@ test('renders the complete bilingual release promotion approval contract', (t) =
   assert.match(body, /Ordinary main CI[^\n]+passed/i);
   assert.match(body, /Four-target candidate packaging[^\n]+passed/i);
   assert.match(body, /Version consistency[^\n]+passed/i);
-  assert.match(body, /refs\/tags\/v1\.1\.0 is absent locally and on origin/);
+  assert.match(body, /refs\/tags\/v1\.0\.1 is absent locally and on origin/);
   assert.match(body, /Merge means publication approval \/ 合并即批准正式发布/);
   assert.match(body, /Merge commit required \/ 必须使用 merge commit/);
   assert.match(body, /Normal feature pull requests may still use squash/);

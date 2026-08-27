@@ -12,6 +12,8 @@ test('dispatch prepares a release preparation branch and opens a pull request to
   const workflow = fs.readFileSync(WORKFLOW_PATH, 'utf8');
 
   assert.match(workflow, /^\s*workflow_dispatch:\s*$/m);
+  assert.match(workflow, /release_type:[^]*?options:\s*\n\s*- patch/);
+  assert.doesNotMatch(workflow, /^\s*- (?:minor|major)\s*$/m);
   assert.match(
     workflow,
     /if:\s*\$\{\{\s*github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/release'\s*\}\}/,
@@ -19,6 +21,7 @@ test('dispatch prepares a release preparation branch and opens a pull request to
   assert.match(workflow, /^\s*pull-requests:\s*write\s*$/m);
   assert.match(workflow, /^\s*ref:\s*main\s*$/m);
   assert.match(workflow, /release-prep\/v\$\{VERSION\}/);
+  assert.match(workflow, /\\\(-\[0-9\]\[0-9\]\*\\\)\\\?/);
   assert.match(workflow, /git ls-remote[^\n]+refs\/heads\/\$\{BRANCH\}/);
   assert.match(workflow, /gh pr list[^\n]+--head "\$BRANCH"/);
   assert.match(workflow, /git switch -c "\$BRANCH"/);

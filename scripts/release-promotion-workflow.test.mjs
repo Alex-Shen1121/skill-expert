@@ -21,18 +21,47 @@ function job(content, name) {
   return match[0];
 }
 
-test('ordinary main CI gates reusable four-target packaging at the exact push SHA', () => {
+test('main PR 通过公开版本策略 CLI 卡控开发序号或发布准备例外', () => {
   const content = workflow();
+  const frontend = job(content, 'frontend');
+
+  assert.match(frontend, /if:\s*github\.event_name == 'pull_request' && github\.base_ref == 'main'/);
+  assert.match(frontend, /BASE_SHA:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(frontend, /HEAD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(frontend, /HEAD_REF:\s*\$\{\{ github\.head_ref \}\}/);
+  assert.match(
+    frontend,
+    /HEAD_REPOSITORY:\s*\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
+  );
+  assert.match(frontend, /EXPECTED_REPOSITORY:\s*\$\{\{ github\.repository \}\}/);
+  assert.match(frontend, /version-policy\.mjs verify-main-pr/);
+  assert.match(frontend, /--base-sha "\$BASE_SHA"/);
+  assert.match(frontend, /--head-sha "\$HEAD_SHA"/);
+  assert.match(frontend, /--head-ref "\$HEAD_REF"/);
+  assert.match(frontend, /--head-repository "\$HEAD_REPOSITORY"/);
+  assert.match(frontend, /--expected-repository "\$EXPECTED_REPOSITORY"/);
+  assert.match(frontend, /--release-ref origin\/release/);
+});
+
+test('main push 先区分开发序号与正式候选，只有正式候选进入四平台构建', () => {
+  const content = workflow();
+  assert.match(
+    content,
+    /main-version-policy:\n[^]*?needs:\s*\[frontend, workflow-lint, rust-quality, rust-tests\]/,
+  );
+  assert.match(
+    content,
+    /main-version-policy:\n[^]*?if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
+  );
+  assert.match(content, /BEFORE_SHA:\s*\$\{\{ github\.event\.before \}\}/);
+  assert.match(content, /HEAD_SHA:\s*\$\{\{ github\.sha \}\}/);
+  assert.match(content, /version-policy\.mjs verify-main-push/);
+  assert.match(content, /release_candidate=\$RELEASE_CANDIDATE/);
 
   assert.match(
     content,
-    /candidate-guard:\n[^]*?needs:\s*\[frontend, workflow-lint, rust-quality, rust-tests\]/,
+    /candidate-guard:\n[^]*?needs:\s*main-version-policy[^]*?if:\s*needs\.main-version-policy\.outputs\.release_candidate == 'true'/,
   );
-  assert.match(
-    content,
-    /candidate-guard:\n[^]*?if:\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
-  );
-  assert.match(content, /ref:\s*\$\{\{ github\.sha \}\}/);
   assert.match(content, /CANDIDATE_SHA:\s*\$\{\{ github\.sha \}\}/);
   assert.match(content, /release-candidate\.mjs verify[^]*?--candidate-sha "\$CANDIDATE_SHA"/);
   assert.match(content, /--head main[^]*?--base release/);
@@ -124,6 +153,18 @@ test('a manually opened non-main or cross-repository promotion fails on its own 
   assert.match(shape, /"\$HEAD_REF" != "main"/);
   assert.match(shape, /"\$BASE_REF" != "release"/);
   assert.match(shape, /"\$HEAD_REPOSITORY" != "\$EXPECTED_REPOSITORY"/);
+});
+
+test('main 到 release 的 PR 再次校验精确 SHA 与下一正式补丁版本', () => {
+  const shape = job(workflow(), 'release-promotion-shape');
+
+  assert.match(shape, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(shape, /fetch-depth:\s*0/);
+  assert.match(shape, /CANDIDATE_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(shape, /release-candidate\.mjs verify/);
+  assert.match(shape, /--candidate-sha "\$CANDIDATE_SHA"/);
+  assert.match(shape, /--head main/);
+  assert.match(shape, /--base release/);
 });
 
 test('existing promotion lookup binds the repository main head to the packaged SHA', () => {

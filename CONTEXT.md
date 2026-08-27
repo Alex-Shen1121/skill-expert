@@ -47,6 +47,16 @@ The merge-commit pull request that advances a release candidate from `main` to
 `release`; merging it is the approval to publish that candidate.
 _Avoid_: Release merge, tag push
 
+## 版本通道语言
+
+**开发序号版本**：
+`main` 上普通功能 PR 使用的 `x.y.z-N` 版本。`N` 从 1 开始逐次递增，只表示当前正式版本之后的开发集成批次，不是可发布版本，也不进入 Updater。
+_避免使用_：补丁版本、正式候选
+
+**正式补丁版本**：
+由 `release-prep/vx.y.z` 发布准备 PR 生成的稳定 `x.y.z` 版本。它必须是当前 `release` 的下一补丁版本，合入 `main` 后才允许构建一次四平台候选。
+_避免使用_：开发序号、任意较新版本
+
 ## Compatibility-only legacy markers
 
 The serialized backup protocol retains `.skills-manager` metadata paths,
