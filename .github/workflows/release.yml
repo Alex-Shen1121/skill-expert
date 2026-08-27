@@ -413,7 +413,10 @@ jobs:
         run: |
           set -euo pipefail
           npm run updater:check:production
-          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ] || { echo "release Environment 缺少生产 Updater 签名 Secret" >&2; exit 1; }
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+            echo "release Environment 缺少生产 Updater 签名 Secret" >&2
+            exit 1
+          fi
           for TARGET_ID in macos-arm64 macos-x64 windows-x64 linux-x64; do
             node scripts/sign-release-updater.mjs --version "$VERSION" --target "$TARGET_ID" --directory staging/release-assets
           done
