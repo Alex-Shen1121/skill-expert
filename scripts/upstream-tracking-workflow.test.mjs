@@ -11,7 +11,7 @@ function workflow() {
   return fs.readFileSync(workflowPath, 'utf8');
 }
 
-test('weekly and manual checks fetch only the trusted upstream main through the public CLI', () => {
+test('每周和手动检查只通过公开 CLI 获取受信任的上游 main', () => {
   const content = workflow();
 
   assert.match(content, /^name: Upstream tracking$/m);
@@ -20,7 +20,7 @@ test('weekly and manual checks fetch only the trusted upstream main through the 
   assert.match(content, /^\s+workflow_dispatch:\s*$/m);
   assert.match(
     content,
-    /uses:\s*actions\/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5/,
+    /uses:\s*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/,
   );
   assert.match(content, /node scripts\/upstream-tracking\.mjs prepare/);
   assert.match(content, /xingkongliang\/skills-manager/);
@@ -28,7 +28,7 @@ test('weekly and manual checks fetch only the trusted upstream main through the 
   assert.doesNotMatch(content, /refs\/heads\/(?:master|develop)/);
 });
 
-test('no-change is zero-write while a change safely refreshes one branch and one main pull request', () => {
+test('无变化时零写入，有变化时安全刷新唯一分支和 main PR', () => {
   const content = workflow();
 
   assert.match(content, /jq -r '\.status' "\$RESULT_PATH"/);
@@ -47,7 +47,7 @@ test('no-change is zero-write while a change safely refreshes one branch and one
   assert.doesNotMatch(content, /gh pr merge|--auto|enablePullRequestAutoMerge/);
 });
 
-test('an exact open main-to-release promotion keeps the upstream review waiting and draft', () => {
+test('存在精确的 main 到 release 晋级时，上游评审保持等待和草稿状态', () => {
   const content = workflow();
 
   assert.match(content, /gh pr list --state open --base release --head main/);
@@ -59,7 +59,7 @@ test('an exact open main-to-release promotion keeps the upstream review waiting 
   assert.doesNotMatch(content, /HEAD:refs\/heads\/(?:main|release)/);
 });
 
-test('workflow permissions are limited to reading code and writing only its branch and pull request', () => {
+test('工作流权限仅允许读取代码并写入自己的分支和 PR', () => {
   const content = workflow();
 
   assert.match(content, /permissions:\n\s+contents: read/);
@@ -70,7 +70,7 @@ test('workflow permissions are limited to reading code and writing only its bran
   assert.doesNotMatch(content, /issues: write|actions: write|checks: write|id-token: write|packages: write/);
 });
 
-test('package and ordinary CI expose the upstream tracking contract suite', () => {
+test('package 和日常 CI 暴露上游跟踪契约测试套件', () => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
   const testWorkflow = fs.readFileSync(
     path.join(repositoryRoot, '.github/workflows/test.yml'),

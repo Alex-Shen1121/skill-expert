@@ -23,28 +23,27 @@ jobs:
       pull-requests: read
       issues: read
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read # 允许 Claude 读取 PR 的 CI 结果
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
+      - name: 运行 Claude Code
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@70fec183852c4f82f3f1969faed7dd60c5149ca7 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-          # This is an optional setting that allows Claude to read CI results on PRs
+          # 可选：允许 Claude 读取 PR 的 CI 结果
           additional_permissions: |
             actions: read
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+          # 可选：提供自定义提示词；省略时执行 @claude 评论中的指令
+          # prompt: '更新 PR 描述并包含变更摘要。'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          # 可选：通过 claude_args 自定义行为与配置
+          # 参考 https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # 或 https://code.claude.com/docs/en/cli-reference
           # claude_args: '--allowed-tools Bash(gh pr *)'
-
