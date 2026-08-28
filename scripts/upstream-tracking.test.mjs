@@ -45,6 +45,8 @@ function createFixture(t) {
   write(upstreamWork, 'src/shared.txt', 'shared baseline\n');
   write(upstreamWork, 'package.json', '{"name":"skills-manager","version":"1.34.2"}\n');
   write(upstreamWork, 'CHANGELOG.md', '# Skills Manager history\n');
+  write(upstreamWork, 'assets/kept.svg', '<svg>kept</svg>\n');
+  write(upstreamWork, 'assets/star-history.svg', '<svg>upstream baseline</svg>\n');
   write(upstreamWork, '.github/workflows/release.yml', 'name: Upstream release\n');
   write(
     upstreamWork,
@@ -209,6 +211,28 @@ test('prepares a fixed review branch while preserving Skill Expert release decis
   const verification = verifyReview(checkout);
   assert.equal(verification.status, 0, verification.stderr);
   assert.match(verification.stdout, /Upstream review has no unresolved conflict paths\./);
+});
+
+test('我方删除而上游修改受保护文件时仍可生成评审', (t) => {
+  const { root, upstreamWork, checkout } = createFixture(t);
+  git(checkout, 'rm', 'assets/star-history.svg');
+  git(checkout, 'commit', '-m', '删除独立发行不再使用的历史图');
+  git(checkout, 'push', 'origin', 'main');
+
+  write(upstreamWork, 'assets/star-history.svg', '<svg>upstream changed</svg>\n');
+  git(upstreamWork, 'add', 'assets/star-history.svg');
+  git(upstreamWork, 'commit', '-m', '更新上游历史图');
+  git(upstreamWork, 'push', 'origin', 'main');
+  const resultPath = path.join(root, 'result.json');
+
+  const result = runTracking(checkout, resultPath);
+
+  assert.equal(result.status, 0, result.stderr);
+  const outcome = JSON.parse(readFileSync(resultPath, 'utf8'));
+  assert.equal(outcome.status, 'review-ready');
+  assert.ok(outcome.protectedChanges.includes('assets/star-history.svg'));
+  assert.equal(existsSync(path.join(checkout, 'assets/star-history.svg')), false);
+  assert.equal(git(checkout, 'status', '--porcelain'), '');
 });
 
 test('按独立治理清单保护工作树基线入口与安全文档', (t) => {

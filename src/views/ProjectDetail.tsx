@@ -34,6 +34,11 @@ import { PresetBar } from "../components/PresetBar";
 import { SkillMarkdown } from "../components/SkillMarkdown";
 import { DocumentDiffViewer } from "../components/DocumentDiffViewer";
 import { getTagActiveColor, getTagColor, pruneStaleTagFilters, UNTAGGED_FILTER } from "../lib/skillTags";
+import {
+  updateProjectGroupToCenter,
+  type ProjectCenterAdapter,
+  type ProjectCenterVariant,
+} from "../lib/projectCenterSync";
 import { cn } from "../utils";
 import * as api from "../lib/tauri";
 import type { ProjectSkill, ManagedSkill, ProjectAgentTarget } from "../lib/tauri";
@@ -42,6 +47,10 @@ import { AddSkillsSheet } from "../components/AddSkillsSheet";
 
 const PROJECT_DEFAULT_EXPORT_AGENTS_KEY = "project_default_export_agents";
 const PROJECT_EXPORT_AGENT_PRIORITY = ["claude_code", "codex", "cursor", "gemini_cli", "github_copilot"];
+const projectCenterAdapter: ProjectCenterAdapter = {
+  updateToCenter: api.updateProjectSkillToCenter,
+  updateFromCenter: api.updateProjectSkillFromCenter,
+};
 
 const projectLastUsedAgentsKey = (projectId: string) =>
   `project_last_used_export_agents:${projectId}`;
@@ -60,6 +69,14 @@ interface ProjectSkillGroup {
   status: ProjectSkill["sync_status"];
   tags: string[];
   centerSkillIds: string[];
+}
+
+function toProjectCenterVariants(variants: ProjectSkill[]): ProjectCenterVariant[] {
+  return variants.map((variant) => ({
+    agent: variant.agent,
+    relativePath: variant.relative_path,
+    syncStatus: variant.sync_status,
+  }));
 }
 
 // Keys of project agents that can actually receive skills right now: both
@@ -534,8 +551,22 @@ export function ProjectDetail() {
     if (!id) return;
     setUpdatingCenterSkill(getSkillKey(skill));
     try {
-      await api.updateProjectSkillToCenter(id, skill.primaryVariant.relative_path, skill.primaryVariant.agent);
-      toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+      const result = await updateProjectGroupToCenter(
+        id,
+        toProjectCenterVariants(skill.variants),
+        projectCenterAdapter
+      );
+      if (result.status === "conflict") {
+        toast.warning(
+          t("project.updateCenterConflict", { name: skill.name, count: result.conflicting })
+        );
+      } else if (result.status === "partial") {
+        toast.warning(
+          t("project.updateCenterAlignFailed", { name: skill.name, count: result.alignFailed })
+        );
+      } else {
+        toast.success(t("project.updateCenterSuccess", { name: skill.name }));
+      }
       await Promise.all([refreshManagedSkills(), refreshPresets(), loadSkills()]);
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, t("common.error")));
@@ -706,6 +737,8 @@ export function ProjectDetail() {
     try {
       let updated = 0;
       let failed = 0;
+      let conflicting = 0;
+      let alignFailed = 0;
       for (const skill of selectedSkills) {
         const canUpdateCenter =
           skill.status === "project_only" ||
@@ -713,14 +746,26 @@ export function ProjectDetail() {
           skill.status === "diverged";
         if (!canUpdateCenter) continue;
         try {
-          await api.updateProjectSkillToCenter(id, skill.primaryVariant.relative_path, skill.primaryVariant.agent);
-          updated++;
+          const result = await updateProjectGroupToCenter(
+            id,
+            toProjectCenterVariants(skill.variants),
+            projectCenterAdapter
+          );
+          if (result.status === "conflict") conflicting++;
+          else if (result.status === "partial") alignFailed += result.alignFailed;
+          else updated++;
         } catch {
           failed++;
         }
       }
       if (updated > 0) {
         toast.success(t("project.batchUpdatedCenter", { count: updated }));
+      }
+      if (conflicting > 0) {
+        toast.warning(t("project.batchUpdateCenterConflict", { count: conflicting }));
+      }
+      if (alignFailed > 0) {
+        toast.warning(t("project.batchUpdateCenterAlignFailed", { count: alignFailed }));
       }
       if (failed > 0) {
         toast.error(t("project.batchUpdateCenterFailed", { count: failed }));

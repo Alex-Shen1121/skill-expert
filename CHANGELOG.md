@@ -11,14 +11,18 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ### Release Overview
 - 将桌面应用显示名称统一改为“Agent 技能管家”。
 - 为技能库增加可记忆的自定义、名称、最近添加和最近更新排序。
+- Selectively incorporate the Kimi path correction and multi-agent data protection from upstream `6e32c3a` while retaining the independent product and four-platform release boundary.
 
 ### User-facing
 - 应用包、窗口、托盘、界面文案、诊断信息和发布标题统一显示“Agent 技能管家”。
 - 技能库新增按 Git 来源仓库和“有可用更新”筛选：仓库支持多选并仅收窄 Git 来源，可与搜索、来源、标签和 Preset 条件组合，网格与列表视图保持一致。
 - 排序始终保留当前 Preset 已启用项优先，自动排序不会覆盖手动顺序，筛选后的部分集合也不会误写回 Preset。
+- Kimi Code now uses the directories read by the current CLI: `~/.kimi-code/skills` and project-level `.kimi-code/skills`. Eligible normal syncs deploy to the new location while preserving the old directory and refusing unmanaged content at the new target.
+- Multi-agent projects update the Skills Center only from the single variant proven to contain the change. When several variants may hold independent content, nothing is written; after a successful push, the remaining safe variants are realigned serially.
 
 ### Developer & Governance
 - 仓库、CLI、包名、数据目录、Bundle ID、Updater 信任根和 Release 资产前缀继续保留 `skill-expert` 技术身份，避免破坏既有安装与自动更新兼容性。
+- Full-scenario sync, single-skill sync, and custom agent path changes preserve deployments still claimed by another tool. Upstream tracking now handles protected modify/delete conflicts and records the reviewed but excluded ZCode, OS-language detection, and Linux ARM64 release changes.
 
 ## [1.0.5] - 2026-08-28
 
