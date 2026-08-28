@@ -20,10 +20,9 @@ _避免使用_：Skill Expert、Skills Manager
 为兼容既有安装与发布链而保留的 `skill-expert` 仓库、CLI、包名、数据目录、Bundle ID、Updater 信任根和 Release 资产前缀；它不是当前应用显示名称。
 _避免使用_：Agent 技能管家仓库、Agent 技能管家 CLI
 
-**Upstream tracking**:
-The reviewed incorporation of selected upstream changes without surrendering
-Agent 技能管家的产品决策或独立发布线。
-_Avoid_: Upstream sync
+**上游跟踪**：
+对可信上游的完整变更进行审阅，只引入 Agent 技能管家需要的部分，同时保留独立的产品决策与发行线。
+_避免使用_：上游同步、整包合并、自动合并
 
 **Existing-installation import**:
 A user-approved one-time copy of upstream product data into Agent 技能管家, not a

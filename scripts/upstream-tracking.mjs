@@ -104,8 +104,10 @@ function unresolvedPaths() {
     .filter(Boolean);
 }
 
-function changedPathsFromMain() {
-  return git(['diff', '--name-only', '-z', MAIN_REF]).stdout.split('\0').filter(Boolean);
+function upstreamChangedPaths() {
+  return git(['diff', '--name-only', '-z', `${MAIN_REF}...${UPSTREAM_REF}`]).stdout
+    .split('\0')
+    .filter(Boolean);
 }
 
 function resolveConflictsToMain(conflicts) {
@@ -198,6 +200,7 @@ function verifyReview(options) {
 function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
   const clean = git(['status', '--porcelain']).stdout.trim();
   if (clean) fail('working tree must be clean before preparing upstream tracking');
+  const upstreamProtectedChanges = upstreamChangedPaths().filter(isProtected);
   git(['switch', '--force-create', SYNC_BRANCH, MAIN_REF]);
   const merge = git(
     ['merge', '--no-ff', '--no-commit', '-m', `Track upstream ${upstreamSha}`, UPSTREAM_REF],
@@ -211,7 +214,7 @@ function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
   const reviewConflicts = conflicts.filter((relativePath) => !isProtected(relativePath));
   const protectedChanges = [
     ...new Set([
-      ...changedPathsFromMain().filter(isProtected),
+      ...upstreamProtectedChanges,
       ...conflicts.filter(isProtected),
     ]),
   ].sort();
