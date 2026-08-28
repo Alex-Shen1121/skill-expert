@@ -5,7 +5,8 @@ import path from 'node:path';
 const root = process.cwd();
 const expectedCommand = 'skill-expert-cli';
 const expectedPackage = 'skill-expert';
-const expectedProduct = 'Skill Expert';
+const expectedCliProduct = 'Skill Expert';
+const expectedDesktopName = 'Agent 技能管家';
 const legacyCommand = 'skills-manager-cli';
 const legacyProduct = 'Skills Manager';
 const expectedStateRoot = '~/.skill-expert';
@@ -115,13 +116,13 @@ for (const verifier of releaseVerifiers) {
 }
 expect(
   'release product identity',
-  releaseWorkflow.includes(expectedProduct) && !releaseWorkflow.includes(legacyProduct),
-  `release workflow must use ${expectedProduct}, not ${legacyProduct}`,
+  releaseWorkflow.includes(expectedDesktopName) && !releaseWorkflow.includes(legacyProduct),
+  `release workflow must use ${expectedDesktopName}, not ${legacyProduct}`,
 );
 expect(
   'macOS bundle path',
-  read('scripts/verify-macos-release.mjs').includes("'Skill Expert.app'"),
-  'release verifier must require the Skill Expert.app bundle',
+  read('scripts/verify-macos-release.mjs').includes("'Agent 技能管家.app'"),
+  'release verifier must require the Agent 技能管家.app bundle',
 );
 
 for (const relativePath of ['README.md', 'README.zh-CN.md', 'skills/manage-skills/SKILL.md']) {
@@ -146,7 +147,7 @@ expect(
 );
 expect(
   'manage-skills product identity',
-  manageSkill.includes('Skill Expert') && !manageSkill.includes('Skills Manager'),
+  manageSkill.includes(expectedCliProduct) && !manageSkill.includes('Skills Manager'),
   'skill body exposes the legacy product name',
 );
 expect(

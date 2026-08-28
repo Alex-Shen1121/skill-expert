@@ -49,10 +49,10 @@ function fixture(t, { currentVersion = CURRENT_VERSION } = {}) {
   });
   write(root, 'src-tauri/Cargo.toml', `[package]\nname = "skill-expert"\nversion = "${currentVersion}"\n`);
   write(root, 'src-tauri/Cargo.lock', `[[package]]\nname = "skill-expert"\nversion = "${currentVersion}"\n`);
-  writeJson(root, 'src-tauri/tauri.conf.json', { productName: 'Skill Expert', version: currentVersion });
+  writeJson(root, 'src-tauri/tauri.conf.json', { productName: 'Agent 技能管家', version: currentVersion });
   for (const locale of ['en', 'zh', 'zh-TW']) {
     writeJson(root, `src/i18n/${locale}.json`, {
-      settings: { version: `Skill Expert ${currentVersion}` },
+      settings: { version: `Agent 技能管家 ${currentVersion}` },
     });
   }
   write(
@@ -191,7 +191,7 @@ test('fails without partial writes when English Unreleased has no release note',
 test('fails without partial writes when the current version contract has drifted', (t) => {
   const root = fixture(t);
   writeJson(root, 'src/i18n/zh-TW.json', {
-    settings: { version: 'Skill Expert 1.2.2' },
+    settings: { version: 'Agent 技能管家 1.2.2' },
   });
   git(root, 'add', 'src/i18n/zh-TW.json');
   git(root, 'commit', '-qm', 'drift version fixture');

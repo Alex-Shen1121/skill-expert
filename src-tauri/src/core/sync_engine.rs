@@ -151,7 +151,7 @@ impl ReplacePolicy<'_> {
 
     fn describe(&self) -> &'static str {
         match self {
-            ReplacePolicy::NoClobber => "is not managed by Skill Expert",
+            ReplacePolicy::NoClobber => "is not managed by Agent 技能管家",
             ReplacePolicy::Recorded { .. } => "does not match its recorded deployment",
             ReplacePolicy::UserConfirmed => "cannot be replaced",
         }

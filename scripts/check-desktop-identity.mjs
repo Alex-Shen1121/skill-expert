@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const expectedName = 'Skill Expert';
+const expectedName = 'Agent 技能管家';
 const expectedIdentifier = 'com.codingshen.skill-expert';
 const expectedRepository = 'Alex-Shen1121/skill-expert';
 const expectedUpdaterEndpoint = `https://github.com/${expectedRepository}/releases/latest/download/latest.json`;
@@ -83,7 +83,7 @@ expect(
 );
 expect(
   'backup identity',
-  backupView.includes('description=Skill%20Expert%20Backup') &&
+  backupView.includes('description=Agent%20%E6%8A%80%E8%83%BD%E7%AE%A1%E5%AE%B6%20Backup') &&
     !backupView.includes('description=Skills%20Manager%20Backup'),
   `backup UI must use ${expectedName}`,
 );

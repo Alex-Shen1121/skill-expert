@@ -124,7 +124,7 @@ jobs:
           BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
         run: |
           set -euo pipefail
-          APP_PATH="$BUILD_ROOT/bundle/macos/Skill Expert.app"
+          APP_PATH="$BUILD_ROOT/bundle/macos/Agent 技能管家.app"
           CLI_PATH="$BUILD_ROOT/skill-expert-cli"
           codesign --force --sign - "$CLI_PATH"
           ARCHIVE="$(find "$BUILD_ROOT/bundle/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"

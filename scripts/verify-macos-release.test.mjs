@@ -22,13 +22,13 @@ function createAssets(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const assets = path.join(root, 'assets');
   const imageSource = path.join(root, 'image-source');
-  const app = path.join(imageSource, 'Skill Expert.app');
+  const app = path.join(imageSource, 'Agent 技能管家.app');
   const contents = path.join(app, 'Contents');
-  const executable = path.join(contents, 'MacOS', 'Skill Expert');
+  const executable = path.join(contents, 'MacOS', 'skill-expert');
   const cli = path.join(root, 'skill-expert-cli');
   const cliSource = path.join(root, 'skill-expert-cli.c');
-  const archive = path.join(root, 'Skill Expert.app.tar.gz');
-  const dmg = path.join(root, 'Skill Expert.dmg');
+  const archive = path.join(root, 'Agent 技能管家.app.tar.gz');
+  const dmg = path.join(root, 'Agent 技能管家.dmg');
 
   mkdirSync(path.dirname(executable), { recursive: true });
   mkdirSync(assets);
@@ -39,9 +39,9 @@ function createAssets(t) {
     `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>Skill Expert</string>
+  <key>CFBundleExecutable</key><string>skill-expert</string>
   <key>CFBundleIdentifier</key><string>com.codingshen.skill-expert.fixture</string>
-  <key>CFBundleName</key><string>Skill Expert</string>
+  <key>CFBundleName</key><string>Agent 技能管家</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${version}</string>
 </dict></plist>
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
     '-fs',
     'HFS+',
     '-volname',
-    'Skill Expert 测试',
+    'Agent 技能管家测试',
     '-srcfolder',
     imageSource,
     dmg,

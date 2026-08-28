@@ -65,29 +65,29 @@ function writeBuildArtifact(buildRoot, relativePath) {
 
 const buildArtifacts = {
   'macos-arm64': [
-    'bundle/dmg/Skill Expert_1.2.3_aarch64.dmg',
-    'bundle/macos/Skill Expert.app.tar.gz',
-    'bundle/macos/Skill Expert.app.tar.gz.sig',
+    'bundle/dmg/Agent 技能管家_1.2.3_aarch64.dmg',
+    'bundle/macos/Agent 技能管家.app.tar.gz',
+    'bundle/macos/Agent 技能管家.app.tar.gz.sig',
     'skill-expert-cli',
   ],
   'macos-x64': [
-    'bundle/dmg/Skill Expert_1.2.3_x64.dmg',
-    'bundle/macos/Skill Expert.app.tar.gz',
-    'bundle/macos/Skill Expert.app.tar.gz.sig',
+    'bundle/dmg/Agent 技能管家_1.2.3_x64.dmg',
+    'bundle/macos/Agent 技能管家.app.tar.gz',
+    'bundle/macos/Agent 技能管家.app.tar.gz.sig',
     'skill-expert-cli',
   ],
   'windows-x64': [
-    'bundle/nsis/Skill Expert_1.2.3_x64-setup.exe',
-    'bundle/nsis/Skill Expert_1.2.3_x64-setup.exe.sig',
-    'bundle/msi/Skill Expert_1.2.3_x64_en-US.msi',
-    'bundle/msi/Skill Expert_1.2.3_x64_en-US.msi.sig',
+    'bundle/nsis/Agent 技能管家_1.2.3_x64-setup.exe',
+    'bundle/nsis/Agent 技能管家_1.2.3_x64-setup.exe.sig',
+    'bundle/msi/Agent 技能管家_1.2.3_x64_en-US.msi',
+    'bundle/msi/Agent 技能管家_1.2.3_x64_en-US.msi.sig',
     'skill-expert-cli.exe',
   ],
   'linux-x64': [
-    'bundle/appimage/Skill Expert_1.2.3_amd64.AppImage',
-    'bundle/appimage/Skill Expert_1.2.3_amd64.AppImage.sig',
-    'bundle/deb/Skill Expert_1.2.3_amd64.deb',
-    'bundle/rpm/Skill Expert-1.2.3-1.x86_64.rpm',
+    'bundle/appimage/Agent 技能管家_1.2.3_amd64.AppImage',
+    'bundle/appimage/Agent 技能管家_1.2.3_amd64.AppImage.sig',
+    'bundle/deb/Agent 技能管家_1.2.3_amd64.deb',
+    'bundle/rpm/Agent 技能管家-1.2.3-1.x86_64.rpm',
     'skill-expert-cli',
   ],
 };

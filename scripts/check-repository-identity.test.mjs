@@ -101,7 +101,7 @@ test('rejects legacy product spelling case-insensitively', (t) => {
   replaceInFixture(
     fixtureRoot,
     '.github/ISSUE_TEMPLATE/bug_report.md',
-    'Report a problem with Skill Expert',
+    'Report a problem with Agent 技能管家',
     'Report a problem with Skills manager',
   );
 

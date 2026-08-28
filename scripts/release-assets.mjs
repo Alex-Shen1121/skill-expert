@@ -74,7 +74,7 @@ export function createUpdaterMetadata(directory, version, pubDate) {
 
   const metadata = {
     version,
-    notes: `Skill Expert v${version}`,
+    notes: `Agent 技能管家 v${version}`,
     pub_date: pubDate,
     platforms,
   };

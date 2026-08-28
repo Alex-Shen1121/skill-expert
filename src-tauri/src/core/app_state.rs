@@ -77,11 +77,9 @@ fn initialize_store_inner(
     central_repo::ensure_central_repo().context("Failed to create central repo")?;
     timings.ensure_central_repo_ms = step.elapsed().as_millis();
 
-    // Resolve/migrate Skill Expert's own configured central library first so
-    // an approved upstream import always targets the final active path. An
-    // explicit runtime override is an isolated library and must not consume the
-    // desktop installation's pending marker. CLI callers have already been
-    // rejected at lock acquisition when that desktop marker is Pending.
+    // 先解析并迁移 Agent 技能管家自身配置的中央库，确保已批准的上游导入始终指向
+    // 最终生效路径。显式运行时覆盖属于隔离库，不能消费桌面安装的待处理标记；当该标记
+    // 为 Pending 时，CLI 调用方已在获取锁时被拒绝。
     if caller == super::existing_install_import::ProcessCallerRole::Gui
         && !isolated_runtime_library
         && import_lock_is_exclusive
@@ -91,7 +89,7 @@ fn initialize_store_inner(
     }
     if caller == super::existing_install_import::ProcessCallerRole::Gui {
         super::existing_install_import::downgrade_process_lifetime_lock_to_shared(caller)
-            .context("Failed to downgrade process lock before opening the Skill Expert database")?;
+            .context("打开 Agent 技能管家数据库前无法降级进程锁")?;
     }
 
     let db_path = central_repo::db_path();

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const root = process.cwd();
 const expectedRepository = 'Alex-Shen1121/skill-expert';
-const expectedProduct = 'Skill Expert';
+const expectedProduct = 'Agent 技能管家';
 const expectedPackage = 'skill-expert';
 const failures = [];
 
@@ -242,10 +242,10 @@ expect(
 );
 expect(
   'desktop release asset identity',
-  testPackageWorkflow.includes('$BUILD_ROOT/bundle/macos/Skill Expert.app') &&
+  testPackageWorkflow.includes('$BUILD_ROOT/bundle/macos/Agent 技能管家.app') &&
     releaseWorkflow.includes('verify-macos-release.mjs') &&
-    macosReleaseVerifier.includes("'Skill Expert.app'"),
-  'missing Skill Expert desktop asset',
+    macosReleaseVerifier.includes("'Agent 技能管家.app'"),
+  'missing Agent 技能管家 desktop asset',
 );
 
 if (failures.length > 0) {

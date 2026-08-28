@@ -1,5 +1,5 @@
 version = 1
-name = "Skill Expert"
+name = "Agent 技能管家"
 
 [setup]
 script = "npm ci"
