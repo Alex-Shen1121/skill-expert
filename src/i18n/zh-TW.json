@@ -364,6 +364,13 @@
       "enabled": "當前 Preset 已啟用",
       "available": "當前 Preset 未啟用"
     },
+    "updateFilter": {
+      "available": "有可用更新"
+    },
+    "viewMode": {
+      "grid": "網格檢視",
+      "list": "列表檢視"
+    },
     "sourceType": "來源類型",
     "sourceFilter": {
       "all": "全部來源",

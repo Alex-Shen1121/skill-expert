@@ -395,6 +395,13 @@
       "enabled": "当前 Preset 已启用",
       "available": "当前 Preset 未启用"
     },
+    "updateFilter": {
+      "available": "有可用更新"
+    },
+    "viewMode": {
+      "grid": "网格视图",
+      "list": "列表视图"
+    },
     "sourceFilter": {
       "all": "全部来源",
       "local": "本地",

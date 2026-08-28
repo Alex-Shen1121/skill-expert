@@ -129,6 +129,19 @@ function centralDirName(skill: ManagedSkill) {
   return skill.central_path.split(/[\\/]/).filter(Boolean).pop() || skill.name;
 }
 
+function canRefreshSkill(skill: ManagedSkill) {
+  return (
+    skill.source_type === "git" ||
+    skill.source_type === "skillssh" ||
+    ((skill.source_type === "local" || skill.source_type === "import") &&
+      Boolean(skill.source_ref?.trim()))
+  );
+}
+
+function hasAvailableUpdate(skill: ManagedSkill) {
+  return skill.update_status === "update_available" && canRefreshSkill(skill);
+}
+
 export function MySkills() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -148,6 +161,7 @@ export function MySkills() {
   const [filterMode, setFilterMode] = useState<"all" | "enabled" | "available">("all");
   const [sourceFilters, setSourceFilters] = useState<Set<string>>(new Set());
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
+  const [showAvailableUpdatesOnly, setShowAvailableUpdatesOnly] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   // Tag management from the filter bar (#233): right-click a tag pill to
   // rename (dialog) or delete (confirm). Left-click stays "filter only".
@@ -248,11 +262,13 @@ export function MySkills() {
     search.trim() !== "" ||
     sourceFilters.size > 0 ||
     tagFilters.size > 0 ||
+    showAvailableUpdatesOnly ||
     filterMode !== "all";
   const clearFilters = () => {
     setSearch("");
     setSourceFilters(new Set());
     setTagFilters(new Set());
+    setShowAvailableUpdatesOnly(false);
     setFilterMode("all");
   };
 
@@ -286,6 +302,8 @@ export function MySkills() {
 
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
 
+      if (showAvailableUpdatesOnly && !hasAvailableUpdate(skill)) return false;
+
       if (tagFilters.size > 0) {
         const wantUntagged = tagFilters.has(UNTAGGED_FILTER);
         const matchUntagged = wantUntagged && skill.tags.length === 0;
@@ -318,7 +336,7 @@ export function MySkills() {
     }
 
     return result;
-  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, filterMode, viewedPreset, presetSkillOrder]);
+  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, showAvailableUpdatesOnly, filterMode, viewedPreset, presetSkillOrder]);
 
   const {
     isMultiSelect, setIsMultiSelect,
@@ -639,7 +657,7 @@ export function MySkills() {
   };
 
   const handleBatchRefresh = async () => {
-    const refreshableSkills = skills.filter((skill) => selectedIds.has(skill.id) && canRefresh(skill));
+    const refreshableSkills = skills.filter((skill) => selectedIds.has(skill.id) && canRefreshSkill(skill));
     if (refreshableSkills.length === 0) return;
 
     setBatchUpdating(true);
@@ -681,9 +699,7 @@ export function MySkills() {
   } | null>(null);
 
   const handleUpdateAvailableSkills = async () => {
-    const updatableSkills = skills.filter(
-      (skill) => skill.update_status === "update_available" && canRefresh(skill)
-    );
+    const updatableSkills = skills.filter(hasAvailableUpdate);
     if (updatableSkills.length === 0) return;
 
     setBatchUpdating(true);
@@ -1004,21 +1020,16 @@ export function MySkills() {
     }
   };
 
-  const canRefresh = (skill: ManagedSkill) =>
-    skill.source_type === "git" ||
-    skill.source_type === "skillssh" ||
-    ((skill.source_type === "local" || skill.source_type === "import") && !!skill.source_ref);
-
   const anyRefreshableSelected = useMemo(
-    () => skills.some((skill) => selectedIds.has(skill.id) && canRefresh(skill)),
+    () => skills.some((skill) => selectedIds.has(skill.id) && canRefreshSkill(skill)),
     [skills, selectedIds]
   );
   const availableUpdateCount = useMemo(
-    () => skills.filter((skill) => skill.update_status === "update_available" && canRefresh(skill)).length,
+    () => skills.filter(hasAvailableUpdate).length,
     [skills]
   );
   const refreshableSelectedCount = useMemo(
-    () => skills.filter((skill) => selectedIds.has(skill.id) && canRefresh(skill)).length,
+    () => skills.filter((skill) => selectedIds.has(skill.id) && canRefreshSkill(skill)).length,
     [skills, selectedIds]
   );
 
@@ -1134,6 +1145,8 @@ export function MySkills() {
             {t("mySkills.updateActions.updateAvailable", { count: availableUpdateCount })}
           </button>
           <button
+            type="button"
+            aria-label={t("mySkills.viewMode.grid")}
             onClick={() => setViewMode("grid")}
             className={cn(
               "rounded-md p-2 transition-colors outline-none",
@@ -1143,6 +1156,8 @@ export function MySkills() {
             <LayoutGrid className="h-4 w-4" />
           </button>
           <button
+            type="button"
+            aria-label={t("mySkills.viewMode.list")}
             onClick={() => setViewMode("list")}
             className={cn(
               "rounded-md p-2 transition-colors outline-none",
@@ -1165,6 +1180,20 @@ export function MySkills() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1 px-1 -mt-2 -mb-3">
+        <button
+          type="button"
+          aria-pressed={showAvailableUpdatesOnly}
+          onClick={() => setShowAvailableUpdatesOnly((active) => !active)}
+          className={cn(
+            "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
+            showAvailableUpdatesOnly
+              ? "bg-accent text-white dark:bg-accent dark:text-white"
+              : "bg-surface-hover text-muted hover:text-secondary"
+          )}
+        >
+          {t("mySkills.updateFilter.available")}
+        </button>
+        <span className="mx-0.5 h-3 w-px bg-border-subtle" />
         {(["local", "import", "git", "skillssh"] as const).map((src) => (
           <button
             key={src}
@@ -1289,8 +1318,7 @@ export function MySkills() {
               ? skill.preset_ids.includes(viewedPreset.id)
               : false;
             const badge = statusBadge(skill);
-            const hasUpdate =
-              skill.update_status === "update_available" && canRefresh(skill);
+            const hasUpdate = hasAvailableUpdate(skill);
             // The header pill is hidden in multi-select, so the body badge has to
             // take over — otherwise the update state vanishes entirely.
             const showUpdatePill = hasUpdate && !isMultiSelect;
@@ -1388,7 +1416,7 @@ export function MySkills() {
                               disabled: checkingSkillId === skill.id,
                               onSelect: () => handleCheckUpdate(skill),
                             },
-                            ...(canRefresh(skill)
+                            ...(canRefreshSkill(skill)
                               ? [{
                                   key: "refresh",
                                   label: refreshLabel(skill),
@@ -1728,7 +1756,7 @@ export function MySkills() {
                           disabled: checkingSkillId === skill.id,
                           onSelect: () => handleCheckUpdate(skill),
                         },
-                        ...(canRefresh(skill)
+                        ...(canRefreshSkill(skill)
                           ? [{
                               key: "refresh",
                               label: refreshLabel(skill),
