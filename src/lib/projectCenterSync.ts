@@ -6,7 +6,7 @@ export interface ProjectCenterVariant {
   syncStatus: ProjectSkill["sync_status"];
 }
 
-export interface ProjectCenterGateway {
+export interface ProjectCenterAdapter {
   updateToCenter: (projectId: string, relativePath: string, agent: string) => Promise<void>;
   updateFromCenter: (projectId: string, relativePath: string, agent: string) => Promise<void>;
 }
@@ -19,7 +19,7 @@ export type ProjectCenterSyncResult =
 export async function updateProjectGroupToCenter(
   projectId: string,
   variants: ProjectCenterVariant[],
-  gateway: ProjectCenterGateway
+  adapter: ProjectCenterAdapter
 ): Promise<ProjectCenterSyncResult> {
   const unproven = variants.filter((variant) => variant.syncStatus !== "in_sync");
   if (unproven.length > 1) {
@@ -31,12 +31,12 @@ export async function updateProjectGroupToCenter(
     throw new Error("项目 Skill 至少需要一个 Agent 副本");
   }
 
-  await gateway.updateToCenter(projectId, winner.relativePath, winner.agent);
+  await adapter.updateToCenter(projectId, winner.relativePath, winner.agent);
   let alignFailed = 0;
   for (const variant of variants) {
     if (variant === winner) continue;
     try {
-      await gateway.updateFromCenter(projectId, variant.relativePath, variant.agent);
+      await adapter.updateFromCenter(projectId, variant.relativePath, variant.agent);
     } catch {
       alignFailed += 1;
     }

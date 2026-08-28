@@ -1000,6 +1000,7 @@
     "batchUpdatedProject": "已更新项目中的 {{count}} 个 Skill",
     "batchUpdateCenterFailed": "{{count}} 个 Skill 未能完成到 Skills 中心的更新",
     "batchUpdateCenterConflict": "{{count}} 个 Skill 存在多个可能含有独立内容的副本，未做处理",
+    "batchUpdateCenterAlignFailed": "中心已更新，但有 {{count}} 个副本对齐失败",
     "batchUpdateProjectFailed": "{{count}} 个 Skill 更新到项目失败",
     "skillDirectoryNotFound": "未找到 Skill 目录",
     "batchEditTags": "标签 ({{count}})",

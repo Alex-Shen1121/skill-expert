@@ -1109,7 +1109,7 @@ mod tests {
         let adapter = default_tool_adapters()
             .into_iter()
             .find(|adapter| adapter.key == "kimi")
-            .expect("kimi adapter should exist");
+            .expect("应当存在 Kimi 适配器");
 
         assert_eq!(adapter.relative_skills_dir, ".kimi-code/skills");
         assert_eq!(adapter.relative_detect_dir, ".kimi-code");

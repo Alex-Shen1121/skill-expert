@@ -61,15 +61,12 @@ fn unsync_all_for_tool(store: &SkillStore, tool_key: &str) {
             .iter()
             .any(|remaining| remaining.target_path == target.target_path)
         {
-            log::info!(
-                "Keeping {} because another tool still claims it",
-                target.target_path
-            );
+            log::info!("保留仍被其他工具声明的目标 {}", target.target_path);
             continue;
         }
         let path = PathBuf::from(&target.target_path);
         if let Err(e) = sync_engine::remove_recorded_target(&path, &target.mode) {
-            log::warn!("Failed to remove retired target {}: {e}", path.display());
+            log::warn!("移除不再使用的目标 {} 失败：{e}", path.display());
         }
     }
 }

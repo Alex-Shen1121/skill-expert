@@ -1000,6 +1000,7 @@
     "batchUpdatedProject": "{{count}} skills updated in project",
     "batchUpdateCenterFailed": "{{count}} skill(s) did not finish updating to the Skills Center",
     "batchUpdateCenterConflict": "{{count}} skill(s) had several variants that may hold independent content and were left untouched",
+    "batchUpdateCenterAlignFailed": "The center was updated, but {{count}} variant(s) failed to realign",
     "batchUpdateProjectFailed": "{{count}} skills failed to update in project",
     "skillDirectoryNotFound": "Skill directory not found",
     "batchEditTags": "Tags ({{count}})",

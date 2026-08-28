@@ -36,7 +36,7 @@ import { DocumentDiffViewer } from "../components/DocumentDiffViewer";
 import { getTagActiveColor, getTagColor, pruneStaleTagFilters, UNTAGGED_FILTER } from "../lib/skillTags";
 import {
   updateProjectGroupToCenter,
-  type ProjectCenterGateway,
+  type ProjectCenterAdapter,
   type ProjectCenterVariant,
 } from "../lib/projectCenterSync";
 import { cn } from "../utils";
@@ -47,7 +47,7 @@ import { AddSkillsSheet } from "../components/AddSkillsSheet";
 
 const PROJECT_DEFAULT_EXPORT_AGENTS_KEY = "project_default_export_agents";
 const PROJECT_EXPORT_AGENT_PRIORITY = ["claude_code", "codex", "cursor", "gemini_cli", "github_copilot"];
-const projectCenterGateway: ProjectCenterGateway = {
+const projectCenterAdapter: ProjectCenterAdapter = {
   updateToCenter: api.updateProjectSkillToCenter,
   updateFromCenter: api.updateProjectSkillFromCenter,
 };
@@ -554,7 +554,7 @@ export function ProjectDetail() {
       const result = await updateProjectGroupToCenter(
         id,
         toProjectCenterVariants(skill.variants),
-        projectCenterGateway
+        projectCenterAdapter
       );
       if (result.status === "conflict") {
         toast.warning(
@@ -738,6 +738,7 @@ export function ProjectDetail() {
       let updated = 0;
       let failed = 0;
       let conflicting = 0;
+      let alignFailed = 0;
       for (const skill of selectedSkills) {
         const canUpdateCenter =
           skill.status === "project_only" ||
@@ -748,10 +749,10 @@ export function ProjectDetail() {
           const result = await updateProjectGroupToCenter(
             id,
             toProjectCenterVariants(skill.variants),
-            projectCenterGateway
+            projectCenterAdapter
           );
           if (result.status === "conflict") conflicting++;
-          else if (result.status === "partial") failed++;
+          else if (result.status === "partial") alignFailed += result.alignFailed;
           else updated++;
         } catch {
           failed++;
@@ -762,6 +763,9 @@ export function ProjectDetail() {
       }
       if (conflicting > 0) {
         toast.warning(t("project.batchUpdateCenterConflict", { count: conflicting }));
+      }
+      if (alignFailed > 0) {
+        toast.warning(t("project.batchUpdateCenterAlignFailed", { count: alignFailed }));
       }
       if (failed > 0) {
         toast.error(t("project.batchUpdateCenterFailed", { count: failed }));

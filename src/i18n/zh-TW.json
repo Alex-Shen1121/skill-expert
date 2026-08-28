@@ -916,6 +916,7 @@
     "batchUpdatedProject": "已更新專案中的 {{count}} 個 Skill",
     "batchUpdateCenterFailed": "{{count}} 個 Skill 未能完成到 Skills 中心的更新",
     "batchUpdateCenterConflict": "{{count}} 個 Skill 存在多個可能含有獨立內容的副本，未做處理",
+    "batchUpdateCenterAlignFailed": "中心已更新，但有 {{count}} 個副本對齊失敗",
     "batchUpdateProjectFailed": "{{count}} 個 Skill 更新到專案失敗",
     "skillDirectoryNotFound": "找不到 Skill 目錄",
     "batchEditTags": "標籤 ({{count}})",

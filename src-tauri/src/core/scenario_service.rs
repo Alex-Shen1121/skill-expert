@@ -200,6 +200,43 @@ fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
     canonical_parent.join(name)
 }
 
+fn retire_retargeted_target(
+    store: &SkillStore,
+    all_targets: &[SkillTargetRecord],
+    target: &SkillTargetRecord,
+    new_path: &Path,
+) {
+    let old_path = PathBuf::from(&target.target_path);
+    let legacy_kimi_path = target.tool == "kimi"
+        && old_path
+            .parent()
+            .is_some_and(|parent| parent.ends_with(Path::new(".config/agents/skills")));
+    let mut memo = HashMap::new();
+    let old_key = ownership_key(&old_path, &mut memo);
+    let claimed_by_another = all_targets.iter().any(|other| {
+        (other.skill_id != target.skill_id || other.tool != target.tool)
+            && ownership_key(Path::new(&other.target_path), &mut memo) == old_key
+    });
+
+    if legacy_kimi_path || claimed_by_another {
+        log::info!(
+            "重定向 {} 到 {} 时保留旧目标 {}，仅移除过期记录",
+            target.tool,
+            new_path.display(),
+            old_path.display()
+        );
+    } else {
+        remove_recorded_or_warn(&old_path, &target.mode);
+    }
+    if let Err(e) = store.delete_target(&target.skill_id, &target.tool) {
+        log::warn!(
+            "删除 Skill {} 的 {} 过期目标记录失败：{e}",
+            target.skill_id,
+            target.tool
+        );
+    }
+}
+
 /// Authorization for a deployment write: a `skill_targets` row claiming this
 /// exact path lets us replace what it recorded, otherwise we may only write
 /// where nothing of the user's would be destroyed (#363).
@@ -223,10 +260,9 @@ pub fn sync_desired_targets(
     desired_targets: &[ScenarioSyncTarget],
 ) -> Result<Vec<String>, AppError> {
     let batch_start = Instant::now();
-    let existing_targets: HashMap<(String, String), SkillTargetRecord> = store
-        .get_all_targets()
-        .map_err(AppError::db)?
-        .into_iter()
+    let all_existing_targets = store.get_all_targets().map_err(AppError::db)?;
+    let existing_targets: HashMap<(String, String), &SkillTargetRecord> = all_existing_targets
+        .iter()
         .map(|target| ((target.skill_id.clone(), target.tool.clone()), target))
         .collect();
 
@@ -247,22 +283,7 @@ pub fn sync_desired_targets(
         if let Some(existing) = existing_targets.get(&key) {
             let target_path = PathBuf::from(&existing.target_path);
             if target_path != desired.target {
-                // 场景同步可能因内置 Agent 升级默认目录而重新计算目标。
-                // 旧目录可能包含用户修改或仍被其他 Agent 使用，因此这里只移除
-                // 过期记录，让后续写入在新目录按 NoClobber 规则重新部署。
-                log::info!(
-                    "Keeping {} while retargeting {} to {}; dropping the stale record only",
-                    target_path.display(),
-                    desired.tool,
-                    desired.target.display()
-                );
-                if let Err(e) = store.delete_target(&desired.skill_id, &desired.tool) {
-                    log::warn!(
-                        "Failed to delete stale target record for skill {}, tool {}: {e}",
-                        desired.skill_id,
-                        desired.tool
-                    );
-                }
+                retire_retargeted_target(store, &all_existing_targets, existing, &desired.target);
             } else if existing.status == "ok" {
                 if let Some(check_mode) = skip_check_mode(&existing.mode, desired.mode) {
                     if sync_engine::is_target_current(
@@ -484,20 +505,17 @@ pub fn sync_skill_to_active_scenario(
             };
             let source = PathBuf::from(&skill.central_path);
             let target_name = sync_engine::target_dir_name(&source, &skill.name);
-            let old_targets = store.get_targets_for_skill(skill_id).unwrap_or_default();
+            let old_targets = store.get_all_targets().unwrap_or_default();
             for adapter in &adapters {
                 let target = adapter.skills_dir().join(&target_name);
                 let mut recorded_mode: Option<String> = None;
-                if let Some(old) = old_targets.iter().find(|t| t.tool == adapter.key) {
+                if let Some(old) = old_targets
+                    .iter()
+                    .find(|target| target.skill_id == skill_id && target.tool == adapter.key)
+                {
                     let old_path = PathBuf::from(&old.target_path);
                     if old_path != target {
-                        log::info!(
-                            "Keeping {} while retargeting {} to {}; dropping the stale record only",
-                            old_path.display(),
-                            adapter.key,
-                            target.display()
-                        );
-                        let _ = store.delete_target(skill_id, &adapter.key);
+                        retire_retargeted_target(store, &old_targets, old, &target);
                     } else {
                         recorded_mode = Some(old.mode.clone());
                     }
@@ -1194,7 +1212,12 @@ mod sync_desired_targets_tests {
         let source = central_repo::skills_dir().join("skill-a");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("SKILL.md"), "center source").unwrap();
-        let old_target = tmp.path().join("legacy-kimi").join("skill-a");
+        let old_target = tmp
+            .path()
+            .join(".config")
+            .join("agents")
+            .join("skills")
+            .join("skill-a");
         fs::create_dir_all(&old_target).unwrap();
         fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
         let new_target = tmp.path().join("kimi-code").join("skill-a");
@@ -1235,7 +1258,6 @@ mod sync_desired_targets_tests {
                 source_hash: Some("h1".to_string()),
             })
             .unwrap();
-
         sync_desired_targets(
             &store,
             &[ScenarioSyncTarget {
@@ -1348,6 +1370,19 @@ mod sync_desired_targets_tests {
                 source_hash: Some("h1".to_string()),
             })
             .unwrap();
+        store
+            .insert_target(&SkillTargetRecord {
+                id: "target-other".to_string(),
+                skill_id: "skill-a".to_string(),
+                tool: "other_agent".to_string(),
+                target_path: old_target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: Some("h1".to_string()),
+            })
+            .unwrap();
 
         sync_skill_to_active_scenario(&store, "active", "skill-a").unwrap();
 
@@ -1360,8 +1395,82 @@ mod sync_desired_targets_tests {
             "center source"
         );
         let targets = store.get_targets_for_skill("skill-a").unwrap();
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].target_path, new_target.to_string_lossy());
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|target| {
+            target.tool == "test_agent" && target.target_path == new_target.to_string_lossy()
+        }));
+        assert!(targets.iter().any(|target| {
+            target.tool == "other_agent" && target.target_path == old_target.to_string_lossy()
+        }));
+    }
+
+    #[test]
+    fn ordinary_unshared_retargeting_removes_the_previous_managed_path() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = tmp.path().join("center").join("skill-a");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "center source").unwrap();
+        let old_target = tmp.path().join("old-agent").join("skill-a");
+        fs::create_dir_all(&old_target).unwrap();
+        fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
+        let new_target = tmp.path().join("new-agent").join("skill-a");
+        store
+            .insert_skill(&SkillRecord {
+                id: "skill-a".to_string(),
+                name: "skill-a".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(source.to_string_lossy().to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: source.to_string_lossy().to_string(),
+                content_hash: Some("h1".to_string()),
+                enabled: true,
+                created_at: 1,
+                updated_at: 1,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+            })
+            .unwrap();
+        store
+            .insert_target(&SkillTargetRecord {
+                id: "target-old".to_string(),
+                skill_id: "skill-a".to_string(),
+                tool: "ordinary_agent".to_string(),
+                target_path: old_target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: Some("h1".to_string()),
+            })
+            .unwrap();
+
+        sync_desired_targets(
+            &store,
+            &[ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "ordinary_agent".to_string(),
+                source,
+                target: new_target.clone(),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            }],
+        )
+        .unwrap();
+
+        assert!(!old_target.exists());
+        assert_eq!(
+            fs::read_to_string(new_target.join("SKILL.md")).unwrap(),
+            "center source"
+        );
     }
 
     /// Issue #153 regression: when the existing target was written in
