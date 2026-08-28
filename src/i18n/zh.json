@@ -398,6 +398,10 @@
     "updateFilter": {
       "available": "有可用更新"
     },
+    "repositoryFilter": {
+      "label": "Git 仓库",
+      "empty": "没有可用仓库"
+    },
     "viewMode": {
       "grid": "网格视图",
       "list": "列表视图"

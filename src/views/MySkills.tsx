@@ -142,6 +142,34 @@ function hasAvailableUpdate(skill: ManagedSkill) {
   return skill.update_status === "update_available" && canRefreshSkill(skill);
 }
 
+type RepositoryOption = {
+  identity: string;
+  label: string;
+};
+
+function normalizeRepositoryIdentity(source: string | null) {
+  const trimmed = source?.trim().replace(/\/+$/, "") || "";
+  if (!trimmed) return null;
+  return trimmed.endsWith(".git") ? trimmed.slice(0, -4) : trimmed;
+}
+
+function repositoryDisplayName(identity: string) {
+  let path = identity;
+  try {
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(identity)) {
+      path = new URL(identity).pathname;
+    } else {
+      const scpSeparator = identity.indexOf(":");
+      if (scpSeparator >= 0) path = identity.slice(scpSeparator + 1);
+    }
+  } catch {
+    return identity;
+  }
+
+  const segments = path.split("/").filter(Boolean);
+  return segments.length >= 2 ? segments.slice(-2).join("/") : identity;
+}
+
 export function MySkills() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -160,6 +188,8 @@ export function MySkills() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [filterMode, setFilterMode] = useState<"all" | "enabled" | "available">("all");
   const [sourceFilters, setSourceFilters] = useState<Set<string>>(new Set());
+  const [repositoryFilters, setRepositoryFilters] = useState<Set<string>>(new Set());
+  const [repositoryMenuOpen, setRepositoryMenuOpen] = useState(false);
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
   const [showAvailableUpdatesOnly, setShowAvailableUpdatesOnly] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -247,11 +277,29 @@ export function MySkills() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tagMenu]);
 
+  useEffect(() => {
+    if (!repositoryMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRepositoryMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [repositoryMenuOpen]);
+
   const toggleFilter = (set: Set<string>, value: string): Set<string> => {
     const next = new Set(set);
     if (next.has(value)) next.delete(value);
     else next.add(value);
     return next;
+  };
+
+  const handleToggleSource = (source: string) => {
+    const removingGit = source === "git" && sourceFilters.has("git");
+    setSourceFilters((current) => toggleFilter(current, source));
+    if (removingGit) {
+      setRepositoryFilters(new Set());
+      setRepositoryMenuOpen(false);
+    }
   };
 
   // A filter can outlive the control that set it (the tag row hides itself once
@@ -261,12 +309,15 @@ export function MySkills() {
   const hasActiveFilters =
     search.trim() !== "" ||
     sourceFilters.size > 0 ||
+    repositoryFilters.size > 0 ||
     tagFilters.size > 0 ||
     showAvailableUpdatesOnly ||
     filterMode !== "all";
   const clearFilters = () => {
     setSearch("");
     setSourceFilters(new Set());
+    setRepositoryFilters(new Set());
+    setRepositoryMenuOpen(false);
     setTagFilters(new Set());
     setShowAvailableUpdatesOnly(false);
     setFilterMode("all");
@@ -291,6 +342,37 @@ export function MySkills() {
     return displayNames;
   }, [skills]);
 
+  const repositoryOptions = useMemo<RepositoryOption[]>(() => {
+    const identities = new Set<string>();
+    for (const skill of skills) {
+      if (skill.source_type !== "git") continue;
+      const identity = normalizeRepositoryIdentity(skill.source_ref_resolved);
+      if (identity) identities.add(identity);
+    }
+
+    const candidates = [...identities].map((identity) => ({
+      identity,
+      shortLabel: repositoryDisplayName(identity),
+    }));
+    const labelCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+      labelCounts.set(candidate.shortLabel, (labelCounts.get(candidate.shortLabel) || 0) + 1);
+    }
+
+    return candidates.map(({ identity, shortLabel }) => ({
+      identity,
+      label: (labelCounts.get(shortLabel) || 0) > 1 ? identity : shortLabel,
+    }));
+  }, [skills]);
+
+  useEffect(() => {
+    const available = new Set(repositoryOptions.map((option) => option.identity));
+    setRepositoryFilters((current) => {
+      const next = new Set([...current].filter((identity) => available.has(identity)));
+      return next.size === current.size ? current : next;
+    });
+  }, [repositoryOptions]);
+
   const filtered = useMemo(() => {
     const result = skills.filter((skill) => {
       const displayName = skillDisplayNames.get(skill.id) || skill.name;
@@ -301,6 +383,11 @@ export function MySkills() {
       if (!matchesSearch) return false;
 
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
+
+      if (repositoryFilters.size > 0 && skill.source_type === "git") {
+        const identity = normalizeRepositoryIdentity(skill.source_ref_resolved);
+        if (!identity || !repositoryFilters.has(identity)) return false;
+      }
 
       if (showAvailableUpdatesOnly && !hasAvailableUpdate(skill)) return false;
 
@@ -336,7 +423,7 @@ export function MySkills() {
     }
 
     return result;
-  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, showAvailableUpdatesOnly, filterMode, viewedPreset, presetSkillOrder]);
+  }, [skills, skillDisplayNames, search, sourceFilters, repositoryFilters, tagFilters, showAvailableUpdatesOnly, filterMode, viewedPreset, presetSkillOrder]);
 
   const {
     isMultiSelect, setIsMultiSelect,
@@ -1197,7 +1284,9 @@ export function MySkills() {
         {(["local", "import", "git", "skillssh"] as const).map((src) => (
           <button
             key={src}
-            onClick={() => setSourceFilters(toggleFilter(sourceFilters, src))}
+            type="button"
+            aria-pressed={sourceFilters.has(src)}
+            onClick={() => handleToggleSource(src)}
             className={cn(
               "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
               sourceFilters.has(src)
@@ -1208,6 +1297,67 @@ export function MySkills() {
             {t(`mySkills.sourceFilter.${src}`)}
           </button>
         ))}
+        {sourceFilters.has("git") && (
+          <div className="relative">
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={repositoryMenuOpen}
+              onClick={() => setRepositoryMenuOpen((open) => !open)}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
+                repositoryFilters.size > 0
+                  ? "bg-accent text-white dark:bg-accent dark:text-white"
+                  : "border border-border bg-surface-hover text-muted hover:text-secondary"
+              )}
+            >
+              {t("mySkills.repositoryFilter.label")}
+            </button>
+            {repositoryMenuOpen && (
+              <>
+                <div
+                  aria-hidden="true"
+                  className="fixed inset-0 z-10"
+                  onClick={() => setRepositoryMenuOpen(false)}
+                />
+                <div
+                  role="listbox"
+                  aria-label={t("mySkills.repositoryFilter.label")}
+                  aria-multiselectable="true"
+                  className="absolute left-0 top-full z-20 mt-1 min-w-64 rounded-lg border border-border bg-surface py-1 shadow-xl"
+                >
+                  {repositoryOptions.length === 0 ? (
+                    <p className="px-3 py-2 text-[12px] text-muted">
+                      {t("mySkills.repositoryFilter.empty")}
+                    </p>
+                  ) : repositoryOptions.map((option) => {
+                    const selected = repositoryFilters.has(option.identity);
+                    return (
+                      <button
+                        key={option.identity}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => setRepositoryFilters(toggleFilter(repositoryFilters, option.identity))}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors",
+                          selected
+                            ? "bg-accent-bg text-accent-light"
+                            : "text-secondary hover:bg-surface-hover"
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={option.identity}>
+                          {option.label}
+                        </span>
+                        {selected && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {allTags.length > 0 && (
           <>
             <span className="mx-0.5 h-3 w-px bg-border-subtle" />

@@ -78,6 +78,9 @@ type SkillFixture = {
   sourceType: ManagedSkill["source_type"];
   updateStatus: ManagedSkill["update_status"];
   sourceRef?: string | null;
+  sourceRefResolved?: string | null;
+  sourceSubpath?: string | null;
+  sourceBranch?: string | null;
   tags?: string[];
   presetIds?: string[];
 };
@@ -88,6 +91,9 @@ function createSkill({
   sourceType,
   updateStatus,
   sourceRef = null,
+  sourceRefResolved = null,
+  sourceSubpath = null,
+  sourceBranch = null,
   tags = [],
   presetIds = [],
 }: SkillFixture): ManagedSkill {
@@ -97,9 +103,9 @@ function createSkill({
     description: `${name} 描述`,
     source_type: sourceType,
     source_ref: sourceRef,
-    source_ref_resolved: null,
-    source_subpath: null,
-    source_branch: null,
+    source_ref_resolved: sourceRefResolved,
+    source_subpath: sourceSubpath,
+    source_branch: sourceBranch,
     source_revision: null,
     remote_revision: null,
     update_status: updateStatus,
@@ -133,6 +139,89 @@ const updateContractSkills = [
   createSkill({ id: "import-no-source", name: "导入无来源", sourceType: "import", updateStatus: "update_available" }),
   createSkill({ id: "local-blank-source", name: "本地空白来源", sourceType: "local", sourceRef: "   ", updateStatus: "update_available" }),
 ];
+
+const repositoryFilterSkills = [
+  createSkill({
+    id: "git-tools-main",
+    name: "工具仓主分支",
+    sourceType: "git",
+    sourceRefResolved: "https://github.com/acme/tools.git/",
+    sourceSubpath: "skills/main",
+    sourceBranch: "main",
+    updateStatus: "update_available",
+    tags: ["核心"],
+    presetIds: ["preset-a"],
+  }),
+  createSkill({
+    id: "git-tools-next",
+    name: "工具仓开发分支",
+    sourceType: "git",
+    sourceRefResolved: "https://github.com/acme/tools/",
+    sourceSubpath: "skills/next",
+    sourceBranch: "next",
+    updateStatus: "up_to_date",
+    tags: ["扩展"],
+  }),
+  createSkill({
+    id: "git-other",
+    name: "其他仓技能",
+    sourceType: "git",
+    sourceRefResolved: "https://gitlab.com/acme/other.git",
+    updateStatus: "update_available",
+    tags: ["核心"],
+    presetIds: ["preset-a"],
+  }),
+  createSkill({
+    id: "git-tools-scp",
+    name: "SCP 工具仓技能",
+    sourceType: "git",
+    sourceRefResolved: "git@github.com:acme/tools.git",
+    updateStatus: "update_available",
+  }),
+  createSkill({
+    id: "git-tools-case",
+    name: "大小写工具仓技能",
+    sourceType: "git",
+    sourceRefResolved: "https://github.com/Acme/Tools.git",
+    updateStatus: "update_available",
+  }),
+  createSkill({
+    id: "git-missing-repository",
+    name: "缺少仓库身份的 Git Skill",
+    sourceType: "git",
+    updateStatus: "update_available",
+  }),
+  createSkill({
+    id: "git-blank-repository",
+    name: "空仓库身份的 Git Skill",
+    sourceType: "git",
+    sourceRefResolved: "   ",
+    updateStatus: "update_available",
+  }),
+  createSkill({
+    id: "skillssh-market",
+    name: "技能站仓库技能",
+    sourceType: "skillssh",
+    sourceRefResolved: "https://github.com/acme/market.git",
+    updateStatus: "update_available",
+  }),
+  createSkill({
+    id: "local-skill",
+    name: "本地技能",
+    sourceType: "local",
+    sourceRef: "/来源/本地技能",
+    updateStatus: "update_available",
+    tags: ["核心"],
+    presetIds: ["preset-a"],
+  }),
+];
+
+function expectOnlyRepositorySkills(names: string[]) {
+  const visibleNames = new Set(names);
+  for (const skill of repositoryFilterSkills) {
+    expectSkillVisible(skill.name, visibleNames.has(skill.name));
+  }
+}
 
 function renderPage() {
   return render(
@@ -301,6 +390,220 @@ describe("MySkills 有可用更新筛选", () => {
       await i18n.changeLanguage(language);
       const page = renderPage();
       expect(screen.getByRole("button", { name: label }).textContent).toBe(label);
+      page.unmount();
+    }
+  });
+});
+
+describe("MySkills Git 来源仓库筛选", () => {
+  beforeEach(() => {
+    appState.managedSkills = repositoryFilterSkills;
+  });
+
+  it("只在明确选择 Git 来源后显示可访问的仓库多选，并保守归组直接 Git 仓库", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "Git 仓库" })).toBeNull();
+    await user.click(await screen.findByRole("button", { name: "Git" }));
+
+    const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Git 仓库" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("listbox");
+
+    trigger.focus();
+    await user.keyboard("{Enter}");
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("listbox", { name: "Git 仓库" }).getAttribute("aria-multiselectable")).toBe("true");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(4);
+    expect(new Set(options.map((option) => option.textContent))).toEqual(new Set([
+      "https://github.com/acme/tools",
+      "git@github.com:acme/tools",
+      "Acme/Tools",
+      "acme/other",
+    ]));
+    for (const option of options) {
+      expect(option.getAttribute("aria-selected")).toBe("false");
+    }
+    expect(screen.queryByRole("option", { name: /market/ })).toBeNull();
+  });
+
+  it("仓库内部使用 OR，并且仓库条件只收窄直接 Git 来源分支", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Git" }));
+    expectOnlyRepositorySkills([
+      "工具仓主分支",
+      "工具仓开发分支",
+      "其他仓技能",
+      "SCP 工具仓技能",
+      "大小写工具仓技能",
+      "缺少仓库身份的 Git Skill",
+      "空仓库身份的 Git Skill",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    const otherRepository = screen.getByRole("option", { name: "acme/other" });
+    otherRepository.focus();
+    await user.keyboard(" ");
+    expect(otherRepository.getAttribute("aria-selected")).toBe("true");
+    expectOnlyRepositorySkills(["其他仓技能"]);
+
+    await user.click(screen.getByRole("button", { name: "本地" }));
+    expectOnlyRepositorySkills(["其他仓技能", "本地技能"]);
+
+    const toolsRepository = screen.getByRole("option", {
+      name: "https://github.com/acme/tools",
+    });
+    await user.click(toolsRepository);
+    expect(toolsRepository.getAttribute("aria-selected")).toBe("true");
+    expectOnlyRepositorySkills([
+      "工具仓主分支",
+      "工具仓开发分支",
+      "其他仓技能",
+      "本地技能",
+    ]);
+  });
+
+  it("取消并重新选择 Git 来源时不会恢复隐藏的仓库条件", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const gitSource = await screen.findByRole("button", { name: "Git" });
+    await user.click(gitSource);
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    await user.click(screen.getByRole("option", { name: "acme/other" }));
+    expectOnlyRepositorySkills(["其他仓技能"]);
+
+    await user.click(gitSource);
+    expect(screen.queryByRole("button", { name: "Git 仓库" })).toBeNull();
+    for (const skill of repositoryFilterSkills) {
+      expectSkillVisible(skill.name, true);
+    }
+
+    await user.click(gitSource);
+    const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Git 仓库" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expectOnlyRepositorySkills([
+      "工具仓主分支",
+      "工具仓开发分支",
+      "其他仓技能",
+      "SCP 工具仓技能",
+      "大小写工具仓技能",
+      "缺少仓库身份的 Git Skill",
+      "空仓库身份的 Git Skill",
+    ]);
+  });
+
+  it("来源仓库从技能库消失时清理失效选择", async () => {
+    const user = userEvent.setup();
+    const page = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Git" }));
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    await user.click(screen.getByRole("option", { name: "acme/other" }));
+    expectOnlyRepositorySkills(["其他仓技能"]);
+    await user.keyboard("{Escape}");
+
+    appState.managedSkills = repositoryFilterSkills.filter((skill) => skill.id !== "git-other");
+    page.rerender(
+      <MemoryRouter>
+        <MySkills />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expectSkillVisible("工具仓主分支", true));
+    for (const skill of appState.managedSkills) {
+      expectSkillVisible(skill.name, skill.source_type === "git");
+    }
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    expect(screen.queryByRole("option", { name: "acme/other" })).toBeNull();
+  });
+
+  it("与更新、搜索、标签和 Preset 条件组合，并在列表视图保持相同结果", async () => {
+    const user = userEvent.setup();
+    appState.viewedPreset = {
+      id: "preset-a",
+      name: "工作 Preset",
+      description: null,
+      icon: null,
+      sort_order: 0,
+      skill_count: 3,
+      created_at: 1,
+      updated_at: 1,
+    };
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Git" }));
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    await user.click(screen.getByRole("option", { name: "https://github.com/acme/tools" }));
+    await user.keyboard("{Escape}");
+    expectOnlyRepositorySkills(["工具仓主分支", "工具仓开发分支"]);
+
+    await user.click(screen.getByRole("button", { name: "有可用更新" }));
+    expectOnlyRepositorySkills(["工具仓主分支"]);
+
+    const search = screen.getByPlaceholderText("搜索中央仓库中的 Skills...");
+    await user.type(search, "工具仓");
+    expectOnlyRepositorySkills(["工具仓主分支"]);
+
+    await user.click(await screen.findByRole("button", { name: "核心" }));
+    expectOnlyRepositorySkills(["工具仓主分支"]);
+
+    await user.click(screen.getByRole("button", { name: "当前 Preset 已启用" }));
+    expectOnlyRepositorySkills(["工具仓主分支"]);
+
+    await user.click(screen.getByRole("button", { name: "列表视图" }));
+    expectOnlyRepositorySkills(["工具仓主分支"]);
+  });
+
+  it("清除筛选和重新进入页面都会重置仓库条件", async () => {
+    const user = userEvent.setup();
+    const firstPage = renderPage();
+
+    const gitSource = await screen.findByRole("button", { name: "Git" });
+    await user.click(gitSource);
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    await user.click(screen.getByRole("option", { name: "acme/other" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByPlaceholderText("搜索中央仓库中的 Skills..."), "不存在");
+
+    expect(screen.getByText("没有符合当前搜索或筛选条件的 Skills")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.queryByRole("button", { name: "Git 仓库" })).toBeNull();
+    for (const skill of repositoryFilterSkills) {
+      expectSkillVisible(skill.name, true);
+    }
+
+    await user.click(screen.getByRole("button", { name: "Git" }));
+    await user.click(screen.getByRole("button", { name: "Git 仓库" }));
+    await user.click(screen.getByRole("option", { name: "acme/other" }));
+    firstPage.unmount();
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "Git 仓库" })).toBeNull();
+    for (const skill of repositoryFilterSkills) {
+      expectSkillVisible(skill.name, true);
+    }
+  });
+
+  it("在三种界面语言中提供仓库筛选文案和可访问名称", async () => {
+    for (const [language, label] of [
+      ["zh", "Git 仓库"],
+      ["zh-TW", "Git 倉庫"],
+      ["en", "Git repositories"],
+    ] as const) {
+      await i18n.changeLanguage(language);
+      const user = userEvent.setup();
+      const page = renderPage();
+      await user.click(screen.getByRole("button", { name: "Git" }));
+
+      const trigger = screen.getByRole("button", { name: label });
+      await user.click(trigger);
+      expect(screen.getByRole("listbox", { name: label })).not.toBeNull();
       page.unmount();
     }
   });

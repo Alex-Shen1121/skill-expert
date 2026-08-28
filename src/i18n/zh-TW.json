@@ -367,6 +367,10 @@
     "updateFilter": {
       "available": "有可用更新"
     },
+    "repositoryFilter": {
+      "label": "Git 倉庫",
+      "empty": "沒有可用倉庫"
+    },
     "viewMode": {
       "grid": "網格檢視",
       "list": "列表檢視"
