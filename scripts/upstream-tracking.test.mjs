@@ -45,6 +45,7 @@ function createFixture(t) {
   write(upstreamWork, 'src/shared.txt', 'shared baseline\n');
   write(upstreamWork, 'package.json', '{"name":"skills-manager","version":"1.34.2"}\n');
   write(upstreamWork, 'CHANGELOG.md', '# Skills Manager history\n');
+  write(upstreamWork, 'assets/kept.svg', '<svg>kept</svg>\n');
   write(upstreamWork, 'assets/star-history.svg', '<svg>upstream baseline</svg>\n');
   write(upstreamWork, '.github/workflows/release.yml', 'name: Upstream release\n');
   write(

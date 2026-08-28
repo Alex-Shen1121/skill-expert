@@ -218,7 +218,7 @@ function prepareReview(mainSha, upstreamSha, options, previousSyncSha) {
       ...conflicts.filter(isProtected),
     ]),
   ].sort();
-  resolveConflictsToMain(reviewConflicts);
+  resolveConflictsToMain(conflicts);
   restoreProtectedPaths();
   const remaining = unresolvedPaths();
   if (remaining.length > 0) {
