@@ -10,10 +10,12 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Release Overview
 - 将桌面应用显示名称统一改为“Agent 技能管家”。
+- 为技能库增加可记忆的自定义、名称、最近添加和最近更新排序。
 
 ### User-facing
 - 应用包、窗口、托盘、界面文案、诊断信息和发布标题统一显示“Agent 技能管家”。
 - 技能库新增按 Git 来源仓库和“有可用更新”筛选：仓库支持多选并仅收窄 Git 来源，可与搜索、来源、标签和 Preset 条件组合，网格与列表视图保持一致。
+- 排序始终保留当前 Preset 已启用项优先，自动排序不会覆盖手动顺序，筛选后的部分集合也不会误写回 Preset。
 
 ### Developer & Governance
 - 仓库、CLI、包名、数据目录、Bundle ID、Updater 信任根和 Release 资产前缀继续保留 `skill-expert` 技术身份，避免破坏既有安装与自动更新兼容性。

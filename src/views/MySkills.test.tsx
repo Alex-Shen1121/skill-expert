@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import i18n from "../i18n";
+import i18n, { i18nReady } from "../i18n";
 import type { ManagedSkill, Preset } from "../lib/tauri";
 import { MySkills } from "./MySkills";
 
@@ -223,7 +223,12 @@ function expectOnlyRepositorySkills(names: string[]) {
   }
 }
 
-function renderPage() {
+function renderPage(
+  skills: ManagedSkill[] = appState.managedSkills,
+  viewedPreset: Preset | null = appState.viewedPreset,
+) {
+  appState.managedSkills = skills;
+  appState.viewedPreset = viewedPreset;
   return render(
     <MemoryRouter>
       <MySkills />
@@ -244,19 +249,85 @@ function expectOnlySkills(names: string[]) {
   }
 }
 
+
+const sortingPreset: Preset = {
+  id: "preset-1",
+  name: "工作 Preset",
+  description: null,
+  icon: null,
+  sort_order: 0,
+  skill_count: 2,
+  created_at: 1,
+  updated_at: 1,
+};
+
+const otherSortingPreset: Preset = {
+  ...sortingPreset,
+  id: "preset-2",
+  name: "另一个 Preset",
+};
+
+function skill(
+  id: string,
+  name: string,
+  options: Partial<ManagedSkill> = {},
+): ManagedSkill {
+  return {
+    ...createSkill({
+      id,
+      name,
+      sourceType: "local",
+      updateStatus: "up_to_date",
+      presetIds: [sortingPreset.id],
+    }),
+    description: null,
+    central_path: `/skills/${name}`,
+    enabled: false,
+    ...options,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function visibleSkillNames() {
+  return screen
+    .getAllByRole("heading", { level: 3 })
+    .map((heading) => heading.textContent);
+}
+
 beforeAll(async () => {
+  await i18nReady;
   await i18n.changeLanguage("zh");
 });
-
 beforeEach(async () => {
   await i18n.changeLanguage("zh");
   appState.viewedPreset = null;
   appState.managedSkills = updateContractSkills;
   appState.detailSkillId = null;
+  localStorage.clear();
   vi.clearAllMocks();
+  apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+  apiMocks.gitBackupPendingConflicts.mockResolvedValue([]);
+  apiMocks.getAllTags.mockResolvedValue(["核心", "扩展"]);
+  apiMocks.getSettings.mockResolvedValue(null);
+  apiMocks.gitBackupStatus.mockResolvedValue(null);
+  apiMocks.reorderPresetSkills.mockResolvedValue(undefined);
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  const sortField = screen.queryByRole("combobox") as HTMLSelectElement | null;
+  if (sortField && sortField.value !== "custom") {
+    fireEvent.change(sortField, { target: { value: "custom" } });
+  }
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("MySkills 有可用更新筛选", () => {
   it("按严格刷新契约筛选缓存状态，关闭后恢复列表且不触发更新入口", async () => {
@@ -415,8 +486,9 @@ describe("MySkills Git 来源仓库筛选", () => {
     await user.keyboard("{Enter}");
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("listbox", { name: "Git 仓库" }).getAttribute("aria-multiselectable")).toBe("true");
-    const options = screen.getAllByRole("option");
+    const repositoryListbox = screen.getByRole("listbox", { name: "Git 仓库" });
+    expect(repositoryListbox.getAttribute("aria-multiselectable")).toBe("true");
+    const options = within(repositoryListbox).getAllByRole("option");
     expect(options).toHaveLength(4);
     expect(new Set(options.map((option) => option.textContent))).toEqual(new Set([
       "https://github.com/acme/tools",
@@ -427,7 +499,7 @@ describe("MySkills Git 来源仓库筛选", () => {
     for (const option of options) {
       expect(option.getAttribute("aria-selected")).toBe("false");
     }
-    expect(screen.queryByRole("option", { name: /market/ })).toBeNull();
+    expect(within(repositoryListbox).queryByRole("option", { name: /market/ })).toBeNull();
   });
 
   it("仓库内部使用 OR，并且仓库条件只收窄直接 Git 来源分支", async () => {
@@ -604,6 +676,410 @@ describe("MySkills Git 来源仓库筛选", () => {
       const trigger = screen.getByRole("button", { name: label });
       await user.click(trigger);
       expect(screen.getByRole("listbox", { name: label })).not.toBeNull();
+      page.unmount();
+    }
+  });
+});
+
+describe("MySkills 排序", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
+    localStorage.clear();
+    appState.viewedPreset = sortingPreset;
+    appState.managedSkills = [];
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+    apiMocks.gitBackupPendingConflicts.mockResolvedValue([]);
+    apiMocks.getAllTags.mockResolvedValue([]);
+    apiMocks.getSettings.mockResolvedValue("");
+    apiMocks.gitBackupStatus.mockResolvedValue(null);
+    apiMocks.reorderPresetSkills.mockResolvedValue(undefined);
+  });
+  it("等待自定义顺序读取完成后再按 Preset 顺序展示完整分组", async () => {
+    const order = deferred<string[]>();
+    apiMocks.getPresetSkillOrder.mockReturnValue(order.promise);
+
+    renderPage([
+      skill("available", "Available", { preset_ids: [] }),
+      skill("enabled-b", "Enabled B"),
+      skill("enabled-a", "Enabled A"),
+    ]);
+
+    expect(
+      screen.getByRole("status", { name: "Loading custom order" }),
+    ).not.toBeNull();
+    expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
+
+    order.resolve(["enabled-a", "enabled-b"]);
+
+    await waitFor(() =>
+      expect(visibleSkillNames()).toEqual([
+        "Enabled A",
+        "Enabled B",
+        "Available",
+      ]),
+    );
+  });
+
+  it("按可见名称进行忽略大小写的自然排序，并支持反向浏览", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue([
+      "same-a",
+      "same-b",
+      "beta-b",
+      "beta-a",
+    ]);
+
+    renderPage([
+      skill("available", "Available 0", { preset_ids: [] }),
+      skill("same-a", "Duplicate", { central_path: "/skills/Skill 10" }),
+      skill("same-b", "Duplicate", { central_path: "/skills/skill 2" }),
+      skill("beta-b", "Beta"),
+      skill("beta-a", "beta"),
+    ]);
+
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(5));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "name",
+    );
+
+    expect(visibleSkillNames()).toEqual([
+      "beta",
+      "Beta",
+      "skill 2",
+      "Skill 10",
+      "Available 0",
+    ]);
+
+    const direction = screen.getByRole("button", {
+      name: "Switch to descending",
+    });
+    expect((direction as HTMLButtonElement).disabled).toBe(false);
+    await user.click(direction);
+
+    expect(visibleSkillNames()).toEqual([
+      "Skill 10",
+      "skill 2",
+      "beta",
+      "Beta",
+      "Available 0",
+    ]);
+  });
+
+  it("按添加和更新时间排序，并让缺失时间始终位于有效时间之后", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+
+    renderPage([
+      skill("missing", "Missing", { created_at: 0, updated_at: 0 }),
+      skill("old", "Old", { created_at: 100, updated_at: 900 }),
+      skill("new", "New", { created_at: 300, updated_at: 100 }),
+      skill("tie-z", "Same", { created_at: 200, updated_at: 500 }),
+      skill("tie-a", "Same", { created_at: 200, updated_at: 500 }),
+    ]);
+
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(5));
+    const field = screen.getByRole("combobox", { name: "Sort skills" });
+
+    await user.selectOptions(field, "created");
+    expect(visibleSkillNames()).toEqual([
+      "New",
+      "Same",
+      "Same",
+      "Old",
+      "Missing",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Switch to ascending" }));
+    expect(visibleSkillNames()).toEqual([
+      "Old",
+      "Same",
+      "Same",
+      "New",
+      "Missing",
+    ]);
+
+    await user.selectOptions(field, "updated");
+    expect(visibleSkillNames()).toEqual([
+      "Old",
+      "Same",
+      "Same",
+      "New",
+      "Missing",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Switch to ascending" }));
+    expect(visibleSkillNames()).toEqual([
+      "New",
+      "Same",
+      "Same",
+      "Old",
+      "Missing",
+    ]);
+  });
+
+  it("离开后在其他 Preset 的第一次可见结果中恢复字段和方向", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+    const first = renderPage([
+      skill("a", "Alpha"),
+      skill("b", "Beta"),
+    ]);
+
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(2));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "name",
+    );
+    await user.click(screen.getByRole("button", { name: "Switch to descending" }));
+    expect(visibleSkillNames()).toEqual(["Beta", "Alpha"]);
+    first.unmount();
+
+    const unresolvedOrder = deferred<string[]>();
+    apiMocks.getPresetSkillOrder.mockReturnValue(unresolvedOrder.promise);
+    renderPage(
+      [
+        skill("a", "Alpha", { preset_ids: [otherSortingPreset.id] }),
+        skill("b", "Beta", { preset_ids: [otherSortingPreset.id] }),
+      ],
+      otherSortingPreset,
+    );
+
+    expect(
+      (screen.getByRole("combobox", { name: "Sort skills" }) as HTMLSelectElement).value,
+    ).toBe("name");
+    expect(visibleSkillNames()).toEqual(["Beta", "Alpha"]);
+    expect(screen.queryByRole("status", { name: "Loading custom order" })).toBeNull();
+  });
+
+  it("仅在自定义顺序展示完整已启用集合时提供拖动入口", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue(["enabled-a", "enabled-b"]);
+    apiMocks.getAllTags.mockResolvedValue(["重要"]);
+
+    renderPage([
+      skill("enabled-a", "Alpha", {
+        source_type: "git",
+        update_status: "update_available",
+        tags: ["重要"],
+      }),
+      skill("enabled-b", "Beta"),
+      skill("available", "Gamma", { preset_ids: [] }),
+    ]);
+
+    await waitFor(() =>
+      expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2),
+    );
+
+    const field = screen.getByRole("combobox", { name: "Sort skills" });
+    await user.selectOptions(field, "name");
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+
+    await user.selectOptions(field, "custom");
+    expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+
+    const search = screen.getByPlaceholderText("Search skills in the central library...");
+    await user.type(search, "Alpha");
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+    expect(
+      screen.getByText("Clear the current filters to reorder the custom order."),
+    ).not.toBeNull();
+
+    await user.clear(search);
+    expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+
+    await user.type(search, " ");
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+    await user.clear(search);
+
+    await user.click(screen.getByRole("button", { name: "Local" }));
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Local" }));
+
+    await user.click(await screen.findByRole("button", { name: "重要" }));
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "重要" }));
+
+    const updateFilter = screen.getByRole("button", { name: "Updates available" });
+    await user.click(updateFilter);
+    expect(updateFilter.getAttribute("aria-pressed")).toBe("true");
+    expect(visibleSkillNames()).toEqual(["Alpha"]);
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+
+    await user.selectOptions(field, "name");
+    await user.selectOptions(field, "custom");
+    expect(updateFilter.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+
+    await user.click(updateFilter);
+    expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Enabled" }));
+    expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Available" }));
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+  });
+
+  it("网格和列表共享排序，并在排序后保留搜索与多选身份", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue(["beta", "alpha"]);
+    renderPage([
+      skill("beta", "Beta", { updated_at: 100 }),
+      skill("alpha", "Alpha", { updated_at: 200 }),
+    ]);
+
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(2));
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    await user.click(screen.getByRole("heading", { level: 3, name: "Beta" }));
+    expect(screen.getByText("1 selected")).not.toBeNull();
+
+    const search = screen.getByPlaceholderText("Search skills in the central library...");
+    await user.type(search, "a");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "updated",
+    );
+    expect((search as HTMLInputElement).value).toBe("a");
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta"]);
+    expect(screen.getByText("1 selected")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "List view" }));
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta"]);
+    expect(screen.getByText("1 selected")).not.toBeNull();
+  });
+
+  it("没有可用 Preset 时以名称升序稳定回退且不允许拖动", () => {
+    renderPage([
+      skill("ten", "Skill 10", { preset_ids: [] }),
+      skill("two", "skill 2", { preset_ids: [] }),
+    ], null);
+
+    expect(visibleSkillNames()).toEqual(["skill 2", "Skill 10"]);
+    expect(screen.queryByTitle("Drag to reorder")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Custom order has no direction" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(apiMocks.getPresetSkillOrder).not.toHaveBeenCalled();
+  });
+
+  it("自动排序不会写回手动顺序，切回后恢复原有排列", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue(["beta", "alpha"]);
+    renderPage([
+      skill("alpha", "Alpha"),
+      skill("beta", "Beta"),
+    ]);
+
+    await waitFor(() => expect(visibleSkillNames()).toEqual(["Beta", "Alpha"]));
+    const field = screen.getByRole("combobox", { name: "Sort skills" });
+    await user.selectOptions(field, "name");
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta"]);
+    await user.selectOptions(field, "custom");
+    expect(visibleSkillNames()).toEqual(["Beta", "Alpha"]);
+    expect(apiMocks.reorderPresetSkills).not.toHaveBeenCalled();
+  });
+
+  it("损坏或未知的本机偏好静默回退到自定义顺序", async () => {
+    const user = userEvent.setup();
+    const first = renderPage([skill("alpha", "Alpha")]);
+    await waitFor(() => expect(visibleSkillNames()).toEqual(["Alpha"]));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "updated",
+    );
+    first.unmount();
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key) localStorage.setItem(key, "{unknown preference");
+    }
+
+    const unresolvedOrder = deferred<string[]>();
+    apiMocks.getPresetSkillOrder.mockReturnValue(unresolvedOrder.promise);
+    renderPage([skill("alpha", "Alpha")]);
+
+    expect(
+      (screen.getByRole("combobox", { name: "Sort skills" }) as HTMLSelectElement).value,
+    ).toBe("custom");
+    expect(screen.getByRole("status", { name: "Loading custom order" })).not.toBeNull();
+  });
+
+  it("本机存储读取异常时从会话内存恢复排序", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+    const first = renderPage([
+      skill("beta", "Beta"),
+      skill("alpha", "Alpha"),
+    ]);
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(2));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "name",
+    );
+    first.unmount();
+
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage read failed");
+    });
+    renderPage([
+      skill("beta", "Beta"),
+      skill("alpha", "Alpha"),
+    ]);
+
+    expect(
+      (screen.getByRole("combobox", { name: "Sort skills" }) as HTMLSelectElement).value,
+    ).toBe("name");
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta"]);
+    getItem.mockRestore();
+  });
+
+  it("本机存储写入异常时让最新会话排序覆盖旧存储值", async () => {
+    const user = userEvent.setup();
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+    const first = renderPage([
+      skill("beta", "Beta"),
+      skill("alpha", "Alpha"),
+    ]);
+    await waitFor(() => expect(visibleSkillNames()).toHaveLength(2));
+
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage write failed");
+    });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort skills" }),
+      "name",
+    );
+    first.unmount();
+
+    renderPage([
+      skill("beta", "Beta"),
+      skill("alpha", "Alpha"),
+    ]);
+
+    expect(
+      (screen.getByRole("combobox", { name: "Sort skills" }) as HTMLSelectElement).value,
+    ).toBe("name");
+    expect(visibleSkillNames()).toEqual(["Alpha", "Beta"]);
+    setItem.mockRestore();
+  });
+
+  it("简体中文、繁体中文和英文都提供可理解的排序控件名称", async () => {
+    apiMocks.getPresetSkillOrder.mockResolvedValue([]);
+    const cases = [
+      { language: "zh", label: "排序 Skills", custom: "自定义顺序" },
+      { language: "zh-TW", label: "排序 Skills", custom: "自訂順序" },
+      { language: "en", label: "Sort skills", custom: "Custom order" },
+    ];
+
+    for (const testCase of cases) {
+      await i18n.changeLanguage(testCase.language);
+      const page = renderPage([skill("alpha", "Alpha")]);
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: testCase.label })).not.toBeNull(),
+      );
+      expect(screen.getByRole("option", { name: testCase.custom })).not.toBeNull();
       page.unmount();
     }
   });

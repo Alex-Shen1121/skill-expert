@@ -259,6 +259,24 @@
     "remove": "Remove from preset",
     "moreActions": "More actions",
     "dragToReorder": "Drag to reorder",
+    "gridView": "Grid view",
+    "listView": "List view",
+    "sorting": {
+      "label": "Sort skills",
+      "fields": {
+        "custom": "Custom order",
+        "name": "Name",
+        "created": "Recently added",
+        "updated": "Recently updated"
+      },
+      "ascending": "Ascending",
+      "descending": "Descending",
+      "switchToAscending": "Switch to ascending",
+      "switchToDescending": "Switch to descending",
+      "customDirectionUnavailable": "Custom order has no direction",
+      "filteredDragDisabled": "Clear the current filters to reorder the custom order.",
+      "loadingCustomOrder": "Loading custom order"
+    },
     "delete": "Delete skill",
     "deleteConfirm": "Delete skill \"{{name}}\" permanently? This removes its central library files, preset links, and synced agent targets.",
     "deleted": "deleted",

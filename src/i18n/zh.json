@@ -259,6 +259,24 @@
     "remove": "从当前 Preset 移除",
     "moreActions": "更多操作",
     "dragToReorder": "拖动排序",
+    "gridView": "网格视图",
+    "listView": "列表视图",
+    "sorting": {
+      "label": "排序 Skills",
+      "fields": {
+        "custom": "自定义顺序",
+        "name": "名称",
+        "created": "最近添加",
+        "updated": "最近更新"
+      },
+      "ascending": "升序",
+      "descending": "降序",
+      "switchToAscending": "切换为升序",
+      "switchToDescending": "切换为降序",
+      "customDirectionUnavailable": "自定义顺序没有排序方向",
+      "filteredDragDisabled": "清除当前筛选后可调整自定义顺序。",
+      "loadingCustomOrder": "正在读取自定义顺序"
+    },
     "delete": "删除 Skill",
     "deleteConfirm": "确定彻底删除 Skill \"{{name}}\" 吗？中央仓库文件、Preset 关联和已同步到各 Agent 的目标都会被移除。",
     "deleted": "已删除",
