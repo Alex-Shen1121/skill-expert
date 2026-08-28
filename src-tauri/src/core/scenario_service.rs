@@ -200,42 +200,35 @@ fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
     canonical_parent.join(name)
 }
 
-fn retire_retargeted_target(
-    store: &SkillStore,
-    all_targets: &[SkillTargetRecord],
-    retiring_targets: &HashSet<(String, String)>,
+fn retire_successful_retarget(
+    initial_targets: &[SkillTargetRecord],
+    final_targets: &[SkillTargetRecord],
     target: &SkillTargetRecord,
     new_path: &Path,
 ) {
     let old_path = PathBuf::from(&target.target_path);
-    let legacy_kimi_path = target.tool == "kimi"
-        && old_path
-            .parent()
-            .is_some_and(|parent| parent.ends_with(Path::new(".config/agents/skills")));
     let mut memo = HashMap::new();
     let old_key = ownership_key(&old_path, &mut memo);
-    let claimed_by_another = all_targets.iter().any(|other| {
-        (other.skill_id != target.skill_id || other.tool != target.tool)
-            && !retiring_targets.contains(&(other.skill_id.clone(), other.tool.clone()))
+    let legacy_kimi_path = initial_targets.iter().any(|other| {
+        other.tool == "kimi"
+            && Path::new(&other.target_path)
+                .parent()
+                .is_some_and(|parent| parent.ends_with(Path::new(".config/agents/skills")))
             && ownership_key(Path::new(&other.target_path), &mut memo) == old_key
     });
+    let still_claimed = final_targets
+        .iter()
+        .any(|other| ownership_key(Path::new(&other.target_path), &mut memo) == old_key);
 
-    if legacy_kimi_path || claimed_by_another {
+    if legacy_kimi_path || still_claimed {
         log::info!(
-            "重定向 {} 到 {} 时保留旧目标 {}，仅移除过期记录",
+            "成功重定向 {} 到 {} 后保留旧目标 {}",
             target.tool,
             new_path.display(),
             old_path.display()
         );
     } else {
         remove_recorded_or_warn(&old_path, &target.mode);
-    }
-    if let Err(e) = store.delete_target(&target.skill_id, &target.tool) {
-        log::warn!(
-            "删除 Skill {} 的 {} 过期目标记录失败：{e}",
-            target.skill_id,
-            target.tool
-        );
     }
 }
 
@@ -267,20 +260,12 @@ pub fn sync_desired_targets(
         .iter()
         .map(|target| ((target.skill_id.clone(), target.tool.clone()), target))
         .collect();
-    let retiring_targets: HashSet<(String, String)> = desired_targets
-        .iter()
-        .filter_map(|desired| {
-            let key = (desired.skill_id.clone(), desired.tool.clone());
-            existing_targets.get(&key).and_then(|existing| {
-                (Path::new(&existing.target_path) != desired.target.as_path()).then_some(key)
-            })
-        })
-        .collect();
 
     let mut synced_count = 0usize;
     let mut skipped_count = 0usize;
     let mut failed_count = 0usize;
     let mut refusals: Vec<String> = Vec::new();
+    let mut successful_retargets: Vec<(SkillTargetRecord, PathBuf)> = Vec::new();
 
     for desired in desired_targets {
         let target_start = Instant::now();
@@ -291,17 +276,13 @@ pub fn sync_desired_targets(
             .get(&key)
             .filter(|existing| Path::new(&existing.target_path) == desired.target.as_path())
             .map(|existing| existing.mode.clone());
+        let retargeted = existing_targets
+            .get(&key)
+            .copied()
+            .filter(|existing| Path::new(&existing.target_path) != desired.target.as_path());
         if let Some(existing) = existing_targets.get(&key) {
             let target_path = PathBuf::from(&existing.target_path);
-            if target_path != desired.target {
-                retire_retargeted_target(
-                    store,
-                    &all_existing_targets,
-                    &retiring_targets,
-                    existing,
-                    &desired.target,
-                );
-            } else if existing.status == "ok" {
+            if target_path == desired.target && existing.status == "ok" {
                 if let Some(check_mode) = skip_check_mode(&existing.mode, desired.mode) {
                     if sync_engine::is_target_current(
                         &desired.source,
@@ -354,13 +335,18 @@ pub fn sync_desired_targets(
                     // skill content has not changed (issue #153).
                     source_hash: desired.source_hash.clone(),
                 };
-                if let Err(e) = store.insert_target(&target_record) {
-                    log::warn!(
-                        "Failed to insert sync target for skill {}: {e}",
-                        desired.skill_id
-                    );
+                match store.insert_target(&target_record) {
+                    Ok(()) => {
+                        synced_count += 1;
+                        if let Some(old) = retargeted {
+                            successful_retargets.push((old.clone(), desired.target.clone()));
+                        }
+                    }
+                    Err(e) => {
+                        failed_count += 1;
+                        log::warn!("写入 Skill {} 的同步目标记录失败：{e}", desired.skill_id);
+                    }
                 }
-                synced_count += 1;
                 let elapsed = target_start.elapsed().as_millis();
                 if elapsed >= 200 {
                     log::warn!(
@@ -390,6 +376,15 @@ pub fn sync_desired_targets(
                 );
             }
         }
+    }
+
+    match store.get_all_targets() {
+        Ok(final_targets) => {
+            for (old, new_path) in &successful_retargets {
+                retire_successful_retarget(&all_existing_targets, &final_targets, old, new_path);
+            }
+        }
+        Err(e) => log::warn!("无法读取重定向后的目标记录，保留全部旧部署：{e}"),
     }
 
     log::info!(
@@ -523,33 +518,21 @@ pub fn sync_skill_to_active_scenario(
             let source = PathBuf::from(&skill.central_path);
             let target_name = sync_engine::target_dir_name(&source, &skill.name);
             let old_targets = store.get_all_targets().unwrap_or_default();
-            let retiring_targets: HashSet<(String, String)> = adapters
-                .iter()
-                .filter_map(|adapter| {
-                    let old = old_targets
-                        .iter()
-                        .find(|target| target.skill_id == skill_id && target.tool == adapter.key)?;
-                    (Path::new(&old.target_path) != adapter.skills_dir().join(&target_name))
-                        .then(|| (skill_id.to_string(), adapter.key.clone()))
-                })
-                .collect();
+            let mut successful_retargets: Vec<(SkillTargetRecord, PathBuf)> = Vec::new();
             for adapter in &adapters {
                 let target = adapter.skills_dir().join(&target_name);
                 let mut recorded_mode: Option<String> = None;
+                let retargeted = old_targets
+                    .iter()
+                    .find(|target| target.skill_id == skill_id && target.tool == adapter.key)
+                    .filter(|old| Path::new(&old.target_path) != target)
+                    .cloned();
                 if let Some(old) = old_targets
                     .iter()
                     .find(|target| target.skill_id == skill_id && target.tool == adapter.key)
                 {
                     let old_path = PathBuf::from(&old.target_path);
-                    if old_path != target {
-                        retire_retargeted_target(
-                            store,
-                            &old_targets,
-                            &retiring_targets,
-                            old,
-                            &target,
-                        );
-                    } else {
+                    if old_path == target {
                         recorded_mode = Some(old.mode.clone());
                     }
                 }
@@ -575,8 +558,15 @@ pub fn sync_skill_to_active_scenario(
                             last_error: None,
                             source_hash: skill.content_hash.clone(),
                         };
-                        if let Err(e) = store.insert_target(&target_record) {
-                            log::warn!("Failed to insert sync target for skill {skill_id}: {e}");
+                        match store.insert_target(&target_record) {
+                            Ok(()) => {
+                                if let Some(old) = retargeted {
+                                    successful_retargets.push((old, target.clone()));
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("写入 Skill {skill_id} 的同步目标记录失败：{e}");
+                            }
                         }
                     }
                     Err(e) => {
@@ -586,6 +576,14 @@ pub fn sync_skill_to_active_scenario(
                         );
                     }
                 }
+            }
+            match store.get_all_targets() {
+                Ok(final_targets) => {
+                    for (old, new_path) in &successful_retargets {
+                        retire_successful_retarget(&old_targets, &final_targets, old, new_path);
+                    }
+                }
+                Err(e) => log::warn!("无法读取重定向后的目标记录，保留全部旧部署：{e}"),
             }
         }
     }
@@ -1583,6 +1581,173 @@ mod sync_desired_targets_tests {
         assert!(targets
             .iter()
             .all(|target| target.target_path != old_target.to_string_lossy()));
+    }
+
+    #[test]
+    fn legacy_kimi_path_is_preserved_when_every_shared_claimant_retargets() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = tmp.path().join("center").join("skill-a");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "center source").unwrap();
+        let old_target = tmp
+            .path()
+            .join(".config")
+            .join("agents")
+            .join("skills")
+            .join("skill-a");
+        fs::create_dir_all(&old_target).unwrap();
+        fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
+        store
+            .insert_skill(&SkillRecord {
+                id: "skill-a".to_string(),
+                name: "skill-a".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(source.to_string_lossy().to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: source.to_string_lossy().to_string(),
+                content_hash: Some("h1".to_string()),
+                enabled: true,
+                created_at: 1,
+                updated_at: 1,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+            })
+            .unwrap();
+        for (id, tool) in [("target-kimi", "kimi"), ("target-other", "ordinary_agent")] {
+            store
+                .insert_target(&SkillTargetRecord {
+                    id: id.to_string(),
+                    skill_id: "skill-a".to_string(),
+                    tool: tool.to_string(),
+                    target_path: old_target.to_string_lossy().to_string(),
+                    mode: "copy".to_string(),
+                    status: "ok".to_string(),
+                    synced_at: Some(1),
+                    last_error: None,
+                    source_hash: Some("h1".to_string()),
+                })
+                .unwrap();
+        }
+        let desired = [
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "kimi".to_string(),
+                source: source.clone(),
+                target: tmp.path().join("new-kimi").join("skill-a"),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "ordinary_agent".to_string(),
+                source,
+                target: tmp.path().join("new-other").join("skill-a"),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+        ];
+
+        sync_desired_targets(&store, &desired).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(old_target.join("SKILL.md")).unwrap(),
+            "old deployment"
+        );
+    }
+
+    #[test]
+    fn failed_retarget_keeps_the_old_shared_deployment_and_record() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = tmp.path().join("center").join("skill-a");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "center source").unwrap();
+        let old_target = tmp.path().join("shared-old").join("skill-a");
+        fs::create_dir_all(&old_target).unwrap();
+        fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
+        let blocked_target = tmp.path().join("blocked").join("skill-a");
+        fs::create_dir_all(&blocked_target).unwrap();
+        fs::write(blocked_target.join("unmanaged.txt"), "user content").unwrap();
+        store
+            .insert_skill(&SkillRecord {
+                id: "skill-a".to_string(),
+                name: "skill-a".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(source.to_string_lossy().to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: source.to_string_lossy().to_string(),
+                content_hash: Some("h1".to_string()),
+                enabled: true,
+                created_at: 1,
+                updated_at: 1,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+            })
+            .unwrap();
+        for (id, tool) in [("target-a", "agent_a"), ("target-b", "agent_b")] {
+            store
+                .insert_target(&SkillTargetRecord {
+                    id: id.to_string(),
+                    skill_id: "skill-a".to_string(),
+                    tool: tool.to_string(),
+                    target_path: old_target.to_string_lossy().to_string(),
+                    mode: "copy".to_string(),
+                    status: "ok".to_string(),
+                    synced_at: Some(1),
+                    last_error: None,
+                    source_hash: Some("h1".to_string()),
+                })
+                .unwrap();
+        }
+        let desired = [
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "agent_a".to_string(),
+                source: source.clone(),
+                target: tmp.path().join("new-a").join("skill-a"),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "agent_b".to_string(),
+                source,
+                target: blocked_target,
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+        ];
+
+        let refusals = sync_desired_targets(&store, &desired).unwrap();
+
+        assert_eq!(refusals.len(), 1);
+        assert_eq!(
+            fs::read_to_string(old_target.join("SKILL.md")).unwrap(),
+            "old deployment"
+        );
+        let targets = store.get_targets_for_skill("skill-a").unwrap();
+        assert!(targets.iter().any(|target| {
+            target.tool == "agent_b" && target.target_path == old_target.to_string_lossy()
+        }));
     }
 
     /// Issue #153 regression: when the existing target was written in
