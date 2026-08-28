@@ -232,6 +232,37 @@ fn retire_successful_retarget(
     }
 }
 
+struct RetargetRetirement<'a> {
+    initial_targets: &'a [SkillTargetRecord],
+    successful: Vec<(SkillTargetRecord, PathBuf)>,
+}
+
+impl<'a> RetargetRetirement<'a> {
+    fn new(initial_targets: &'a [SkillTargetRecord]) -> Self {
+        Self {
+            initial_targets,
+            successful: Vec::new(),
+        }
+    }
+
+    fn record_success(&mut self, old: Option<&SkillTargetRecord>, new_path: &Path) {
+        if let Some(old) = old {
+            self.successful.push((old.clone(), new_path.to_path_buf()));
+        }
+    }
+
+    fn finish(self, store: &SkillStore) {
+        match store.get_all_targets() {
+            Ok(final_targets) => {
+                for (old, new_path) in &self.successful {
+                    retire_successful_retarget(self.initial_targets, &final_targets, old, new_path);
+                }
+            }
+            Err(e) => log::warn!("无法读取重定向后的目标记录，保留全部旧部署：{e}"),
+        }
+    }
+}
+
 /// Authorization for a deployment write: a `skill_targets` row claiming this
 /// exact path lets us replace what it recorded, otherwise we may only write
 /// where nothing of the user's would be destroyed (#363).
@@ -265,7 +296,7 @@ pub fn sync_desired_targets(
     let mut skipped_count = 0usize;
     let mut failed_count = 0usize;
     let mut refusals: Vec<String> = Vec::new();
-    let mut successful_retargets: Vec<(SkillTargetRecord, PathBuf)> = Vec::new();
+    let mut retirement = RetargetRetirement::new(&all_existing_targets);
 
     for desired in desired_targets {
         let target_start = Instant::now();
@@ -338,9 +369,7 @@ pub fn sync_desired_targets(
                 match store.insert_target(&target_record) {
                     Ok(()) => {
                         synced_count += 1;
-                        if let Some(old) = retargeted {
-                            successful_retargets.push((old.clone(), desired.target.clone()));
-                        }
+                        retirement.record_success(retargeted, &desired.target);
                     }
                     Err(e) => {
                         failed_count += 1;
@@ -378,14 +407,7 @@ pub fn sync_desired_targets(
         }
     }
 
-    match store.get_all_targets() {
-        Ok(final_targets) => {
-            for (old, new_path) in &successful_retargets {
-                retire_successful_retarget(&all_existing_targets, &final_targets, old, new_path);
-            }
-        }
-        Err(e) => log::warn!("无法读取重定向后的目标记录，保留全部旧部署：{e}"),
-    }
+    retirement.finish(store);
 
     log::info!(
         "sync_desired_targets: {} targets in {} ms (synced={synced_count}, skipped={skipped_count}, failed={failed_count})",
@@ -518,7 +540,7 @@ pub fn sync_skill_to_active_scenario(
             let source = PathBuf::from(&skill.central_path);
             let target_name = sync_engine::target_dir_name(&source, &skill.name);
             let old_targets = store.get_all_targets().unwrap_or_default();
-            let mut successful_retargets: Vec<(SkillTargetRecord, PathBuf)> = Vec::new();
+            let mut retirement = RetargetRetirement::new(&old_targets);
             for adapter in &adapters {
                 let target = adapter.skills_dir().join(&target_name);
                 let mut recorded_mode: Option<String> = None;
@@ -560,9 +582,7 @@ pub fn sync_skill_to_active_scenario(
                         };
                         match store.insert_target(&target_record) {
                             Ok(()) => {
-                                if let Some(old) = retargeted {
-                                    successful_retargets.push((old, target.clone()));
-                                }
+                                retirement.record_success(retargeted.as_ref(), &target);
                             }
                             Err(e) => {
                                 log::warn!("写入 Skill {skill_id} 的同步目标记录失败：{e}");
@@ -577,14 +597,7 @@ pub fn sync_skill_to_active_scenario(
                     }
                 }
             }
-            match store.get_all_targets() {
-                Ok(final_targets) => {
-                    for (old, new_path) in &successful_retargets {
-                        retire_successful_retarget(&old_targets, &final_targets, old, new_path);
-                    }
-                }
-                Err(e) => log::warn!("无法读取重定向后的目标记录，保留全部旧部署：{e}"),
-            }
+            retirement.finish(store);
         }
     }
     Ok(())

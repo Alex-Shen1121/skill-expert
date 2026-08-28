@@ -72,10 +72,12 @@ fn unsync_all_for_tool(store: &SkillStore, tool_key: &str) {
 }
 
 fn reconcile_tool_sync_after_path_change(store: &SkillStore, tool_key: &str) {
-    // Remove existing synced artifacts/records (old path), then re-sync to current adapter path.
-    unsync_all_for_tool(store, tool_key);
     let disabled = get_disabled_tools(store);
-    if !disabled.contains(&tool_key.to_string()) {
+    if disabled.contains(&tool_key.to_string()) {
+        unsync_all_for_tool(store, tool_key);
+    } else {
+        // 启用中的工具直接尝试新路径；场景同步会在新目标和记录都成功后
+        // 才退休旧目标，拒绝或 I/O 失败时继续保留旧部署与旧记录。
         sync_active_scenario_to_tool(store, tool_key);
     }
 }
@@ -727,5 +729,53 @@ mod tests {
         let targets = store.get_targets_for_skill("skill-a").unwrap();
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].tool, "other_agent");
+    }
+
+    #[test]
+    fn rejected_tool_path_change_keeps_the_previous_deployment_and_record() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = write_skill_dir(&tmp.path().join("center"), "skill-a", "center");
+        let old_base = tmp.path().join("old-agent");
+        let old_target = old_base.join("skill-a");
+        fs::create_dir_all(&old_target).unwrap();
+        fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
+        configure_single_custom_tool(&store, &old_base);
+        store
+            .insert_scenario(&sample_scenario("active", "Active"))
+            .unwrap();
+        store.set_active_scenario("active").unwrap();
+        store
+            .insert_skill(&sample_skill("skill-a", "skill-a", &source))
+            .unwrap();
+        store.add_skill_to_scenario("active", "skill-a").unwrap();
+        store
+            .insert_target(&SkillTargetRecord {
+                id: "target-old".to_string(),
+                skill_id: "skill-a".to_string(),
+                tool: "test_agent".to_string(),
+                target_path: old_target.to_string_lossy().to_string(),
+                mode: "copy".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: None,
+            })
+            .unwrap();
+        let new_base = tmp.path().join("blocked-agent");
+        let blocked_target = new_base.join("skill-a");
+        fs::create_dir_all(&blocked_target).unwrap();
+        fs::write(blocked_target.join("unmanaged.txt"), "user content").unwrap();
+
+        apply_tool_skills_dir(&store, "test_agent", &new_base.to_string_lossy()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(old_target.join("SKILL.md")).unwrap(),
+            "old deployment"
+        );
+        let targets = store.get_targets_for_skill("skill-a").unwrap();
+        assert!(targets.iter().any(|target| {
+            target.tool == "test_agent" && target.target_path == old_target.to_string_lossy()
+        }));
     }
 }
