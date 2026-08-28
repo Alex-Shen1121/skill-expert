@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Skill Expert"
+    "name": "Agent 技能管家"
   },
   "sidebar": {
     "dashboard": "Dashboard",
@@ -17,7 +17,7 @@
   },
   "help": {
     "eyebrow": "操作指南",
-    "title": "快速上手 Skill Expert",
+    "title": "快速上手 Agent 技能管家",
     "description": "最快路徑：安裝 Skills → 開啟全域工作區 → 點擊 Preset 標籤啟用。按 ⌘K 可隨時呼出命令面板。按需使用專案工作區、Git 備份和設定。",
     "items": {
       "workflows": {
@@ -38,7 +38,7 @@
       },
       "global": {
         "title": "全域工作區",
-        "description": "每個 Agent 都有自己的頁面，列出其全域目錄裡的所有 Skills（包括不是透過 Skill Expert 安裝的），與 Agent 實際看到的內容保持一致。點 + 新增 Skills 即可從中央庫挑選，並透過內嵌的 Agent 標籤選擇目標；也可透過「全部 Agents」總覽跨所有已安裝 Agent 統一管理。只存在於某個 Agent 目錄的 Skills 可直接在卡片上刪除。"
+        "description": "每個 Agent 都有自己的頁面，列出其全域目錄裡的所有 Skills（包括不是透過 Agent 技能管家安裝的），與 Agent 實際看到的內容保持一致。點 + 新增 Skills 即可從中央庫挑選，並透過內嵌的 Agent 標籤選擇目標；也可透過「全部 Agents」總覽跨所有已安裝 Agent 統一管理。只存在於某個 Agent 目錄的 Skills 可直接在卡片上刪除。"
       },
       "projects": {
         "title": "專案工作區",
@@ -223,11 +223,11 @@
   },
   "existingInstallImport": {
     "title": "要匯入既有上游產品的資料嗎？",
-    "subtitle": "Skill Expert 偵測到既有的上游技能庫。匯入會把資料複製到 Skill Expert 的獨立技能庫，原目錄保持不變。",
-    "safety": "匯入會在安全重新啟動後執行。啟用匯入副本前，Skill Expert 現有技能庫會保留為可復原備份。",
+    "subtitle": "Agent 技能管家偵測到既有的上游技能庫。匯入會把資料複製到 Agent 技能管家的獨立技能庫，原目錄保持不變。",
+    "safety": "匯入會在安全重新啟動後執行。啟用匯入副本前，Agent 技能管家現有技能庫會保留為可復原備份。",
     "backupPath": "可復原備份：",
     "loadErrorTitle": "技能庫啟動狀態需要處理",
-    "loadErrorSubtitle": "Skill Expert 無法確認是否需要匯入既有安裝。請先修正所示問題或重試，再選擇其他首次啟動方式。",
+    "loadErrorSubtitle": "Agent 技能管家無法確認是否需要匯入既有安裝。請先修正所示問題或重試，再選擇其他首次啟動方式。",
     "startFresh": "全新開始",
     "import": "匯入既有資料"
   },
@@ -583,7 +583,7 @@
     "help": "說明",
     "releases": "下載",
     "about": "關於",
-    "version": "Skill Expert 1.0.5",
+    "version": "Agent 技能管家 1.0.5",
     "tagline": "跨平台。極簡、高效、無感多 Preset 切換。",
     "checkUpdate": "檢查更新",
     "checking": "檢查中…",
@@ -595,7 +595,7 @@
     "restartToApply": "更新已安裝，重新啟動應用即可生效。",
     "restartNow": "立即重新啟動",
     "viewUpdate": "查看",
-    "updateRelocate": "請先把 Skill Expert 移到「應用程式」資料夾，並從那裡啟動，才能在應用內更新。",
+    "updateRelocate": "請先把 Agent 技能管家移到「應用程式」資料夾，並從那裡啟動，才能在應用內更新。",
     "updateError": "自動更新失敗，正在跳轉下載頁…",
     "reportIssue": "回報問題",
     "reportIssueHint": "複製應用 / 系統資訊和最近日誌摘要到剪貼簿並開啟新的 GitHub issue",
@@ -606,7 +606,7 @@
     "exportLogsHint": "把最近日誌和操作紀錄打包成 zip 儲存到下載資料夾",
     "exportLogsDone": "已匯出日誌（{{count}} 個檔案），請把 zip 拖到 GitHub issue 附件區。",
     "exportLogsFailed": "匯出日誌失敗。",
-    "panicBanner": "上次執行 Skill Expert 時發生崩潰（{{time}}）。",
+    "panicBanner": "上次執行 Agent 技能管家時發生崩潰（{{time}}）。",
     "repoWarning_config_unreadable": "中央庫設定檔已損壞或無法讀取，本次啟動已回退到預設路徑（~/.skill-expert）。如果技能庫看起來是空的，你的資料仍在先前設定的路徑裡——請到「中央倉庫路徑」重新指定。",
     "repoWarning_repo_path_invalid": "設定的中央倉庫路徑無效，本次啟動已回退到預設路徑（~/.skill-expert）。如果技能庫看起來是空的，請到「中央倉庫路徑」重新指定資料所在位置。",
     "repoWarning_migration_incomplete": "將中央庫遷移到新位置的操作沒有完成，本次啟動仍在使用原位置的現有技能庫——資料沒有遺失。要完成遷移，請打開設定，把「中央倉庫路徑」指向一個空的、可寫的資料夾（點「編輯」可查看你選擇的目標位置），然後重新啟動。遷移成功前，目前的技能庫會留在原地——請不要刪除它。",

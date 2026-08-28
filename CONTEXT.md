@@ -1,7 +1,6 @@
-# Skill Expert Distribution
+# Agent 技能管家发行
 
-The product and release language used to keep Skill Expert independent from the
-upstream project while retaining reviewed upstream tracking.
+用于区分 Agent 技能管家的显示品牌、独立技术身份、上游项目与发布边界的统一语言。
 
 ## Language
 
@@ -13,17 +12,21 @@ versions, releases, and update channel.
 The `Alex-Shen1121/skill-expert` project, which owns a release line distinct
 from the upstream project even when it incorporates upstream changes.
 
-**Skill Expert**:
-The product distributed by the independent fork, with its own app identity, CLI,
-packages, repository, versions, releases, and update channel.
+**Agent 技能管家**：
+独立 fork 面向用户展示的桌面应用名称，覆盖应用包、窗口、托盘、界面文案、诊断、下载说明与发布标题。
+_避免使用_：Skill Expert、Skills Manager
+
+**Skill Expert 技术身份**：
+为兼容既有安装与发布链而保留的 `skill-expert` 仓库、CLI、包名、数据目录、Bundle ID、Updater 信任根和 Release 资产前缀；它不是当前应用显示名称。
+_避免使用_：Agent 技能管家仓库、Agent 技能管家 CLI
 
 **Upstream tracking**:
 The reviewed incorporation of selected upstream changes without surrendering
-Skill Expert's product decisions or release line.
+Agent 技能管家的产品决策或独立发布线。
 _Avoid_: Upstream sync
 
 **Existing-installation import**:
-A user-approved one-time copy of upstream product data into Skill Expert, not a
+A user-approved one-time copy of upstream product data into Agent 技能管家, not a
 shared live data store between the products.
 _Avoid_: Migration, shared library
 
@@ -54,11 +57,11 @@ _避免使用_：发布源、生产分支
 ## 更新语言
 
 **应用更新**：
-Skill Expert 应用本体从一个稳定版本升级到更高稳定版本的过程；它属于独立发行线，不包含任何 Skill 内容更新。
+Agent 技能管家应用本体从一个稳定版本升级到更高稳定版本的过程；它属于独立发行线，不包含任何 Skill 内容更新。
 _避免使用_：自动更新、Skill 自动更新
 
 **Skill 自动更新**：
-用户已安装的 Skill 从各自来源升级到新修订的过程；它独立于 Skill Expert 应用版本。
+用户已安装的 Skill 从各自来源升级到新修订的过程；它独立于 Agent 技能管家应用版本。
 _避免使用_：应用更新、软件更新
 
 ## 版本通道语言
@@ -122,7 +125,7 @@ _避免使用_：备份 tag、远端恢复分支
 _避免使用_：S 人物、S 吉祥物
 
 **星际技能管理员**：
-角色标识在 Skill Expert 品牌中的身份，代表对 Skills 的收集、整理与调度。
+角色标识在 Agent 技能管家品牌中的身份，代表对 Skills 的收集、整理与调度。
 _避免使用_：技能召唤师、纯角色头像
 
 **技能核心**：

@@ -282,11 +282,9 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
     return map;
   }, [installedTools, managedSkills]);
 
-  // Overview cards should reflect each agent's ACTUAL on-disk skill count —
-  // including skills installed outside Skill Expert — to match the per-agent
-  // detail badge. The managed-only count above reads 0 for an agent whose
-  // skills all live on disk but were never imported (#287). We fill this from a
-  // per-agent scan and fall back to the managed count until it resolves.
+  // 总览卡片应反映各 Agent 磁盘上的实际 Skill 数量，包括并非通过 Agent 技能管家
+  // 安装的 Skills，并与详情徽标保持一致。若某个 Agent 的 Skills 都在磁盘上但从未导入，
+  // 上面的仅托管计数会得到 0（#287）。这里通过逐 Agent 扫描补齐，扫描完成前回退到托管计数。
   const [localCountByAgent, setLocalCountByAgent] = useState<Record<string, number>>({});
   const overviewCountsRef = useRef(0);
 

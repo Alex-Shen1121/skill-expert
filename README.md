@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="80" />
 </p>
 
-<h1 align="center">Skill Expert</h1>
+<h1 align="center">Agent 技能管家</h1>
 
 <p align="center">
   One app to manage AI agent skills across all your coding tools.
@@ -21,7 +21,7 @@
 - **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skill-expert` and can be customized in **Settings**.
 - **Marketplace** — Browse popular skills from the marketplace and find them with keyword search.
 - **Presets** — Group skills into named presets. In any workspace, click a preset pill to instantly activate or deactivate all its skills for the current agent scope. The sidebar lists all presets for quick access.
-- **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Skill Expert — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
+- **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Agent 技能管家 — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
 - **Project Workspaces** — View and manage project-local skill folders for supported agents, compare them with your central library, and sync changes in either direction. Supports nested skill directories and per-agent assignment when exporting.
 - **Linked Workspaces** — Point to any directory as a skills root — useful for skills that live outside the default agent paths. Managed as a standalone workspace without participating in global preset sync.
 - **Multi-tool sync** — Sync skills to any supported tool via symlink or copy with a single click. Every skill card shows an agent icon badge per enabled agent — click a badge to install or remove that skill for that agent right from the card, with the badge reflecting live sync state.
@@ -43,7 +43,7 @@
 </p>
 
 - **Presets are reusable skill groups** — A preset is a named collection of skills. Activate a preset in any workspace to add all its skills to the selected agents; deactivate to remove them. Applying a preset is a one-time copy — not a live sync.
-- **Global Workspace manages per-agent global skills** — Each installed agent has its own global skills folder (e.g. `~/.claude/skills/` for Claude Code). Each agent page lists everything in that folder — even skills installed without Skill Expert — so you can add, remove, or adopt them; the All Agents overview manages every agent at once.
+- **Global Workspace manages per-agent global skills** — Each installed agent has its own global skills folder (e.g. `~/.claude/skills/` for Claude Code). Each agent page lists everything in that folder — even skills installed without Agent 技能管家 — so you can add, remove, or adopt them; the All Agents overview manages every agent at once.
 - **Project Workspaces are project-local skill sets** — A project workspace manages the skills that live inside a specific project (e.g. `<project>/.claude/skills/`). Skills added here only apply to that project.
 - **Tags are for grouping and filtering** — Use tags to label similar skills, then filter by tag to find the subset you want quickly.
 - **Batch control works everywhere** — Multi-select skills in any workspace for bulk operations.
@@ -238,19 +238,19 @@ npm run cli:build
 
 ## Downloads and support
 
-Download current packages from [Skill Expert Releases](https://github.com/Alex-Shen1121/skill-expert/releases).
+Download current packages from [Agent 技能管家 Releases](https://github.com/Alex-Shen1121/skill-expert/releases).
 
 ### Opening the macOS app safely
 
-Skill Expert's macOS downloads are ad-hoc signed but not notarized, so macOS may block the
+Agent 技能管家 macOS downloads are ad-hoc signed but not notarized, so macOS may block the
 first launch even though the package's structural signature has been verified. Try opening
 the app once, then open **System Settings → Privacy & Security → Open Anyway** and confirm
-that you want to open Skill Expert. Keep Gatekeeper enabled; these steps approve only this
+that you want to open Agent 技能管家. Keep Gatekeeper enabled; these steps approve only this
 app. On-demand test-package details are in the
 [test package guide](docs/test-packages.md).
 
 Report reproducible problems with the in-app **Settings → Report Issue** action or in the
-[Skill Expert issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues).
+[Agent 技能管家 issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues).
 
 Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the issue,
 discussion, and pull-request workflow.

@@ -1,4 +1,4 @@
-# Skill Expert 手工测试包
+# Agent 技能管家手工测试包
 
 手工测试包用于在正式发布前按需验证安装结果，不是候选版本，也不能转为正式 Release。只有维护者手动触发 `.github/workflows/manual-test-package.yml` 时才会构建，普通 PR 和 `main` push 不会调用它。
 

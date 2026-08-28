@@ -131,7 +131,7 @@ pub fn delete_credential(host: &str) -> Result<()> {
 /// scripts through its bundled sh, so a single POSIX script covers all
 /// platforms.
 const ASKPASS_SCRIPT: &str = "#!/bin/sh\n\
-# Managed by Skill Expert. Supplies git credentials from the environment.\n\
+# Managed by Agent 技能管家. Supplies git credentials from the environment.\n\
 case \"$1\" in\n\
   *[Uu]sername*) printf '%s\\n' \"${SKILLS_MANAGER_ASKPASS_USERNAME}\" ;;\n\
   *) printf '%s\\n' \"${SKILLS_MANAGER_ASKPASS_PASSWORD}\" ;;\n\

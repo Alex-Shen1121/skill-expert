@@ -1954,15 +1954,11 @@ pub fn update_git_skill_internal(
             install_result.is_some().then_some(staged_path.as_path()),
         )?;
 
-        // A confirmation answers one exact question: this revision, this list
-        // as shown. It closes the window while the dialog is open — a push, or
-        // a file that changes the list, re-asks. Note a directory the new
-        // version drops is one entry, so a file created *inside* it afterwards
-        // does not change the list; approving `outputs/` approves the subtree. It cannot close the window
-        // between this scan and the removal itself: the repo lock holds off
-        // Skill Expert, not the agent processes writing into these very
-        // directories. Narrowing that further needs the directories frozen
-        // before the scan, not another scan.
+        // 一次确认只回答一个精确问题：是否批准当前修订与当前展示的列表。对话框打开期间，
+        // push 或改变列表的文件都会要求重新确认。新版本要删除的目录只算一个条目，因此
+        // 之后在该目录内部创建文件不会改变列表；批准 `outputs/` 等于批准整个子树。
+        // 扫描到实际删除之间不能再缩小窗口：仓库锁会阻止 Agent 技能管家写入这些目录，
+        // 但不能阻止 Agent 进程。若要进一步收紧，必须在扫描前冻结目录，而不是再次扫描。
         let approval = removal_approval_token(&remote_revision, &pending);
         if !pending.is_empty() && approved_removals != Some(approval.as_str()) {
             // Declining is not a failure: nothing was touched and the update is

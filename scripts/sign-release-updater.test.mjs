@@ -42,14 +42,14 @@ function generateKeyPair(root, name) {
 }
 
 test('Updater 重签跨平台直接调用 Node CLI 而不依赖 cmd shim', () => {
-  const invocation = tauriSignerInvocation('C:\\测试包\\Skill Expert.exe');
+  const invocation = tauriSignerInvocation('C:\\测试包\\Agent 技能管家.exe');
 
   assert.equal(invocation.command, process.execPath);
   assert.match(invocation.args[0], /@tauri-apps[\\/]cli[\\/]tauri\.js$/);
   assert.deepEqual(invocation.args.slice(1), [
     'signer',
     'sign',
-    'C:\\测试包\\Skill Expert.exe',
+    'C:\\测试包\\Agent 技能管家.exe',
   ]);
 });
 

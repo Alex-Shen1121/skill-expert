@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> 显示名称部分已由 [ADR-0006](0006-rename-desktop-display-name.md) 更新；`skill-expert` 技术身份与独立发行边界继续有效。
+
 # Distribute the independent fork as Skill Expert
 
 The independent fork will be distributed as the independent product **Skill

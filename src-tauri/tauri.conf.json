@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Skill Expert",
+  "productName": "Agent 技能管家",
   "version": "1.0.5",
   "identifier": "com.codingshen.skill-expert",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Skill Expert",
+        "title": "Agent 技能管家",
         "width": 1440,
         "height": 860,
         "minWidth": 1100,

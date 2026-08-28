@@ -118,7 +118,7 @@ pub fn connect_backup_repo(
                     "name": repo_name,
                     "private": true,
                     "auto_init": false,
-                    "description": "Skill Expert backup",
+                    "description": "Agent 技能管家 backup",
                 }))
                 .send()
                 .context("GITHUB_NETWORK: could not reach api.github.com")?;

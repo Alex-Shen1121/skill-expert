@@ -10,7 +10,7 @@ import { verifyCliVersion } from './release-binary-version.mjs';
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const targets = ['macos-arm64', 'macos-x64'];
-const expectedAppName = 'Skill Expert.app';
+const expectedAppName = 'Agent 技能管家.app';
 
 function run(command, args) {
   return spawnSync(command, args, { encoding: 'utf8' });

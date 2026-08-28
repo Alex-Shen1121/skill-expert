@@ -1,4 +1,4 @@
-name: 正式发布 Skill Expert
+name: 正式发布 Agent 技能管家
 
 on:
   workflow_dispatch:
@@ -148,7 +148,7 @@ jobs:
           BODY_ZH="$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" CHANGELOG-zh.md | awk -f scripts/strip-empty-sections.awk)"
           RELEASE_DATE="$(grep -m1 "^## \[${VERSION}\] - " CHANGELOG.md | sed -E "s/^## \[${VERSION}\] - ([0-9-]+).*/\1/")"
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          # Skill Expert ${TAG}
+          # Agent 技能管家 ${TAG}
 
           发布日期：\`${RELEASE_DATE}\`
           发布提交：\`${RELEASE_SHA}\`
@@ -173,10 +173,10 @@ jobs:
           set -euo pipefail
           TAG_OBJECT_SHA="$(gh api --method POST "repos/${REPO}/git/tags" \
             -f tag="$TAG" \
-            -f message="Skill Expert $TAG"$'\n'"workflow-run-id: ${RUN_ID}" \
+            -f message="Agent 技能管家 $TAG"$'\n'"workflow-run-id: ${RUN_ID}" \
             -f object="$RELEASE_SHA" \
             -f type="commit" \
-            -f 'tagger[name]=Skill Expert 发布机器人' \
+            -f 'tagger[name]=Agent 技能管家发布机器人' \
             -f 'tagger[email]=skill-expert-release@users.noreply.github.com' \
             -f "tagger[date]=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --jq '.sha')"
@@ -197,7 +197,7 @@ jobs:
           gh release create "$TAG" \
             --repo "$REPO" \
             --target "$RELEASE_SHA" \
-            --title "Skill Expert v${VERSION}" \
+            --title "Agent 技能管家 v${VERSION}" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --draft \
             --latest=false \
@@ -309,7 +309,7 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE_DIR="$BUILD_ROOT/bundle/macos"
-          APP_PATH="$BUNDLE_DIR/Skill Expert.app"
+          APP_PATH="$BUNDLE_DIR/Agent 技能管家.app"
           CLI_PATH="$BUILD_ROOT/skill-expert-cli"
           codesign --force --sign - "$CLI_PATH"
           ARCHIVE="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"

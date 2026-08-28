@@ -82,7 +82,7 @@ fn try_acquire_process_lock_at(path: &Path, mode: ProcessLockMode) -> Result<Fil
     let file = open_process_lock_file(path)?;
     try_lock_file(&file, mode).with_context(|| {
         format!(
-            "failed to acquire {} Skill Expert process lock at {}",
+            "failed to acquire {} Agent 技能管家 process lock at {}",
             mode.name(),
             path.display()
         )
@@ -100,7 +100,7 @@ fn acquire_process_lock_at(path: &Path, mode: ProcessLockMode, timeout: Duration
             Err(err) if started.elapsed() >= timeout => {
                 return Err(err).with_context(|| {
                     format!(
-                        "timed out after {} ms waiting for {} Skill Expert process lock at {}",
+                        "timed out after {} ms waiting for {} Agent 技能管家 process lock at {}",
                         timeout.as_millis(),
                         mode.name(),
                         path.display()
@@ -177,7 +177,7 @@ fn acquire_startup_process_lock_at(
                 if caller == ProcessCallerRole::Cli && fixed_import_state_is_pending_at(state_path)
                 {
                     anyhow::bail!(
-                        "a pending import must be completed by restarting Skill Expert via the GUI before using the CLI"
+                        "a pending import must be completed by restarting Agent 技能管家 via the GUI before using the CLI"
                     );
                 }
                 return Ok(ProcessLifetimeLock {
@@ -188,7 +188,7 @@ fn acquire_startup_process_lock_at(
             Err(err) if started.elapsed() >= timeout => {
                 return Err(err).with_context(|| {
                     format!(
-                        "timed out after {} ms waiting for {} Skill Expert process lock at {}",
+                        "timed out after {} ms waiting for {} Agent 技能管家 process lock at {}",
                         timeout.as_millis(),
                         mode.name(),
                         lock_path.display()
@@ -212,7 +212,7 @@ pub(crate) fn acquire_process_lifetime_lock(caller: ProcessCallerRole) -> Result
     };
     if caller == ProcessCallerRole::Cli && fixed_import_state_is_pending_at(&state_path) {
         anyhow::bail!(
-            "a pending import must be completed by restarting Skill Expert via the GUI before using the CLI"
+            "a pending import must be completed by restarting Agent 技能管家 via the GUI before using the CLI"
         );
     }
     Ok(*guard.mode.lock().unwrap_or_else(|err| err.into_inner()) == ProcessLockMode::Exclusive)
@@ -245,7 +245,7 @@ fn downgrade_process_lock_once_to_shared(
     let guard = match cell.get() {
         Some(Ok(guard)) => guard,
         Some(Err(message)) => anyhow::bail!(message.clone()),
-        None => anyhow::bail!("Skill Expert process lock has not been acquired"),
+        None => anyhow::bail!("Agent 技能管家 process lock has not been acquired"),
     };
     let mut mode = guard.mode.lock().unwrap_or_else(|err| err.into_inner());
     if *mode == ProcessLockMode::Shared {
@@ -262,7 +262,7 @@ fn downgrade_process_lock_once_to_shared(
             }
             Err(err) if started.elapsed() >= timeout => {
                 return Err(err)
-                    .context("timed out downgrading Skill Expert process lock to shared");
+                    .context("timed out downgrading Agent 技能管家 process lock to shared");
             }
             Err(_) => std::thread::sleep(PROCESS_LOCK_RETRY_INTERVAL),
         }
@@ -272,7 +272,7 @@ fn downgrade_process_lock_once_to_shared(
 pub(crate) fn downgrade_process_lifetime_lock_to_shared(caller: ProcessCallerRole) -> Result<()> {
     anyhow::ensure!(
         caller == ProcessCallerRole::Gui,
-        "only the Skill Expert GUI may downgrade an exclusive import lock"
+        "only the Agent 技能管家 GUI may downgrade an exclusive import lock"
     );
     downgrade_process_lock_once_to_shared(&PROCESS_LIFETIME_LOCK, PROCESS_LOCK_WAIT_TIMEOUT)
 }
@@ -454,7 +454,7 @@ pub fn choose(choice: &str, confirmed_source: Option<&str>) -> Result<()> {
 pub(crate) fn process_pending_before_store_open(caller: ProcessCallerRole) -> Result<()> {
     anyhow::ensure!(
         caller == ProcessCallerRole::Gui,
-        "only the Skill Expert GUI may process a pending existing-installation import"
+        "only the Agent 技能管家 GUI may process a pending existing-installation import"
     );
     process_pending_import(&production_environment()?)
 }
@@ -565,7 +565,7 @@ fn validate_pending_import(
     let backup = PathBuf::from(backup_path);
     for (path, label) in [
         (&source, "pending upstream source"),
-        (&target, "pending Skill Expert target"),
+        (&target, "pending Agent 技能管家 target"),
         (&staging, "pending import staging artifact"),
         (&backup, "pending import backup artifact"),
     ] {
@@ -573,20 +573,20 @@ fn validate_pending_import(
     }
     anyhow::ensure!(
         target == environment.target_base,
-        "pending import target no longer matches Skill Expert's configured library"
+        "pending import target no longer matches the configured Agent 技能管家 library"
     );
     anyhow::ensure!(
         staging == sibling_artifact(&target, "import-staging", import_id)?,
-        "pending import staging path is not a safe Skill Expert artifact"
+        "pending import staging path is not a safe Agent 技能管家 artifact"
     );
     anyhow::ensure!(
         backup == sibling_artifact(&target, "pre-import-backup", import_id)?,
-        "pending import backup path is not a safe Skill Expert artifact"
+        "pending import backup path is not a safe Agent 技能管家 artifact"
     );
     let resolved_parent = resolve_with_nearest_existing_ancestor(
         target
             .parent()
-            .ok_or_else(|| anyhow::anyhow!("Skill Expert target has no parent directory"))?,
+            .ok_or_else(|| anyhow::anyhow!("Agent 技能管家 target has no parent directory"))?,
     )?;
     for (artifact, label) in [(&staging, "staging"), (&backup, "backup")] {
         let artifact_parent = artifact
@@ -594,14 +594,14 @@ fn validate_pending_import(
             .ok_or_else(|| anyhow::anyhow!("pending {label} artifact has no parent"))?;
         anyhow::ensure!(
             resolve_with_nearest_existing_ancestor(artifact_parent)? == resolved_parent,
-            "pending import {label} artifact escapes the Skill Expert target parent"
+            "pending import {label} artifact escapes the Agent 技能管家 target parent"
         );
         if fs::symlink_metadata(artifact).is_ok() {
             reject_symlink_or_reparse_root(artifact, &format!("pending import {label} artifact"))?;
         }
     }
     if fs::symlink_metadata(&target).is_ok() {
-        reject_symlink_or_reparse_root(&target, "pending Skill Expert target")?;
+        reject_symlink_or_reparse_root(&target, "pending Agent 技能管家 target")?;
     }
     let resolved_source = resolve_with_nearest_existing_ancestor(&source)?;
     let resolved_target = resolve_with_nearest_existing_ancestor(&target)?;
@@ -609,7 +609,7 @@ fn validate_pending_import(
         resolved_source != resolved_target
             && !resolved_target.starts_with(&resolved_source)
             && !resolved_source.starts_with(&resolved_target),
-        "upstream source and Skill Expert target must be independent directories"
+        "upstream source and Agent 技能管家 target must be independent directories"
     );
     Ok(ValidatedPendingImport {
         import_id: import_id.to_string(),
@@ -689,11 +689,11 @@ fn attempt_pending_import(
         })?;
         if let Some(source_error) = source_validation_error {
             anyhow::bail!(
-                "restored the previous Skill Expert target from backup because source validation failed: {source_error}"
+                "restored the previous Agent 技能管家 target from backup because source validation failed: {source_error}"
             );
         }
         anyhow::bail!(
-            "import staging was incomplete after a stopped activation; restored the previous Skill Expert target from backup"
+            "import staging was incomplete after a stopped activation; restored the previous Agent 技能管家 target from backup"
         );
     }
 
@@ -724,7 +724,7 @@ fn attempt_pending_import(
     if had_target {
         fs::rename(target, backup).with_context(|| {
             format!(
-                "failed to preserve existing Skill Expert data at {}",
+                "failed to preserve existing Agent 技能管家 data at {}",
                 backup.display()
             )
         })?;
@@ -733,7 +733,7 @@ fn attempt_pending_import(
         if had_target {
             let _ = fs::rename(backup, target);
         }
-        return Err(err).context("failed to activate the imported Skill Expert library");
+        return Err(err).context("failed to activate the imported Agent 技能管家 library");
     }
 
     save_state(
@@ -890,7 +890,7 @@ fn rewrite_central_paths(
         let resolved_staged_candidate = resolve_with_nearest_existing_ancestor(&staged_candidate)?;
         anyhow::ensure!(
             resolved_staged_candidate.starts_with(&resolved_staging_root),
-            "upstream skill {id:?} would escape the Skill Expert target: {central_path}"
+            "upstream skill {id:?} would escape the Agent 技能管家 target: {central_path}"
         );
         updates.push((
             id,
@@ -996,14 +996,14 @@ fn record_choice(
                     validate_absolute_normal_path(&failed_target, "failed import target")?;
                     anyhow::ensure!(
                         failed_target == environment.target_base,
-                        "failed import target no longer matches Skill Expert's configured library"
+                        "failed import target no longer matches the configured Agent 技能管家 library"
                     );
                     let expected_backup =
                         sibling_artifact(&failed_target, "pre-import-backup", &import_id)?;
                     if let Some(backup_path) = backup_path {
                         anyhow::ensure!(
                             Path::new(&backup_path) == expected_backup,
-                            "failed import backup path is not a safe Skill Expert artifact"
+                            "failed import backup path is not a safe Agent 技能管家 artifact"
                         );
                     }
                     let source = PathBuf::from(source_path);
@@ -1055,11 +1055,11 @@ fn sibling_artifact(target: &Path, role: &str, import_id: &str) -> Result<PathBu
     validate_import_id(import_id)?;
     let parent = target
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("Skill Expert target has no parent directory"))?;
+        .ok_or_else(|| anyhow::anyhow!("Agent 技能管家 target has no parent directory"))?;
     let name = target
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Skill Expert target has no safe directory name"))?;
+        .ok_or_else(|| anyhow::anyhow!("Agent 技能管家 target has no safe directory name"))?;
     Ok(parent.join(format!(".{name}.{role}.{import_id}")))
 }
 
@@ -1276,10 +1276,10 @@ fn reject_symlink_or_reparse_root(path: &Path, label: &str) -> Result<()> {
 
 fn validate_source_and_target(source: &Path, target: &Path) -> Result<()> {
     validate_absolute_normal_path(source, "upstream source")?;
-    validate_absolute_normal_path(target, "Skill Expert target")?;
+    validate_absolute_normal_path(target, "Agent 技能管家 target")?;
     reject_symlink_or_reparse_root(source, "upstream source")?;
     if fs::symlink_metadata(target).is_ok() {
-        reject_symlink_or_reparse_root(target, "Skill Expert target")?;
+        reject_symlink_or_reparse_root(target, "Agent 技能管家 target")?;
     }
     anyhow::ensure!(
         upstream_database_is_usable(source),
@@ -1291,7 +1291,7 @@ fn validate_source_and_target(source: &Path, target: &Path) -> Result<()> {
         resolved_source != resolved_target
             && !resolved_target.starts_with(&resolved_source)
             && !resolved_source.starts_with(&resolved_target),
-        "upstream source and Skill Expert target must be independent directories"
+        "upstream source and Agent 技能管家 target must be independent directories"
     );
     Ok(())
 }
@@ -2555,7 +2555,7 @@ mod tests {
         assert_eq!(
             fs::read(environment.target_base.join("keep-me.txt")).unwrap(),
             b"target data",
-            "an unsafe source record must not replace the current Skill Expert target"
+            "an unsafe source record must not replace the current Agent 技能管家 target"
         );
         assert!(external.is_dir(), "the external source remains untouched");
     }
@@ -2686,7 +2686,10 @@ mod tests {
         let status = inspect_status(&environment).unwrap();
 
         assert_eq!(status.state, "failed");
-        assert!(status.error.unwrap().contains("safe Skill Expert artifact"));
+        assert!(status
+            .error
+            .unwrap()
+            .contains("safe Agent 技能管家 artifact"));
         assert_eq!(
             fs::read(forged_staging.join("must-survive.txt")).unwrap(),
             b"untouched"

@@ -49,7 +49,7 @@ before(() => {
   ]);
   signedMetadata = {
     version: '1.0.0',
-    notes: 'Skill Expert 1.0.0',
+    notes: 'Agent 技能管家 1.0.0',
     pub_date: '2026-08-25T00:00:00Z',
     platforms: {},
   };

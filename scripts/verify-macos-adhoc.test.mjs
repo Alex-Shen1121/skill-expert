@@ -19,11 +19,11 @@ const verifier = path.join(repositoryRoot, 'scripts/verify-macos-adhoc.mjs');
 function createSignedFixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'skill-expert-macos-adhoc-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const app = path.join(root, 'Skill Expert.app');
+  const app = path.join(root, 'Agent 技能管家.app');
   const contents = path.join(app, 'Contents');
-  const executable = path.join(contents, 'MacOS', 'Skill Expert');
+  const executable = path.join(contents, 'MacOS', 'skill-expert');
   const cli = path.join(root, 'skill-expert-cli');
-  const archive = path.join(root, 'Skill Expert.app.tar.gz');
+  const archive = path.join(root, 'Agent 技能管家.app.tar.gz');
 
   mkdirSync(path.dirname(executable), { recursive: true });
   copyFileSync('/usr/bin/true', executable);
@@ -33,9 +33,9 @@ function createSignedFixture(t) {
     `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>Skill Expert</string>
+  <key>CFBundleExecutable</key><string>skill-expert</string>
   <key>CFBundleIdentifier</key><string>com.codingshen.skill-expert.fixture</string>
-  <key>CFBundleName</key><string>Skill Expert</string>
+  <key>CFBundleName</key><string>Agent 技能管家</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.2.3</string>
 </dict></plist>

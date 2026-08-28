@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Skill Expert are documented in this file.
+All notable changes to Agent 技能管家 are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 将桌面应用显示名称统一改为“Agent 技能管家”。
 
 ### User-facing
--
+- 应用包、窗口、托盘、界面文案、诊断信息和发布标题统一显示“Agent 技能管家”。
 
 ### Developer & Governance
--
+- 仓库、CLI、包名、数据目录、Bundle ID、Updater 信任根和 Release 资产前缀继续保留 `skill-expert` 技术身份，避免破坏既有安装与自动更新兼容性。
 
 ## [1.0.5] - 2026-08-28
 

@@ -243,7 +243,7 @@ pub fn object_merge_pull_unlocked(store: &SkillStore, skills_dir: &Path) -> Resu
     }
     let sig = repo
         .signature()
-        .or_else(|_| git2::Signature::now("Skill Expert", "skill-expert@local"))?;
+        .or_else(|_| git2::Signature::now("Agent 技能管家", "skill-expert@local"))?;
     let ours_commit = repo.find_commit(ours)?;
     let theirs_commit = repo.find_commit(theirs)?;
     let merge_commit = repo.commit(
@@ -1040,7 +1040,7 @@ fn settle_worktree_from(repo: &Repository, expected_clean: Oid, target: Oid) -> 
     if !worktree_matches_tree(repo, &expected_tree, &target_tree)? {
         let sig = repo
             .signature()
-            .or_else(|_| git2::Signature::now("Skill Expert", "skill-expert@local"))?;
+            .or_else(|_| git2::Signature::now("Agent 技能管家", "skill-expert@local"))?;
         let mut index = repo.index()?;
         index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
         let rescue_tree = repo.find_tree(index.write_tree()?)?;
