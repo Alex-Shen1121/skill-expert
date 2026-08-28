@@ -17,6 +17,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ### Developer & Governance
 -
 
+## [1.0.5] - 2026-08-28
+
+### Release Overview
+- Complete the `main`-based production release path after correcting the GitHub `release` Environment branch policy.
+
+### User-facing
+- No additional application behavior changes; this patch publishes the maintenance changes originally prepared for v1.0.4.
+
+### Developer & Governance
+- Allow the exact `main` release commit to access production Updater signing secrets while retaining the historical `release` branch rule for audit compatibility.
+
 ## [1.0.4] - 2026-08-28
 
 ### Release Overview
