@@ -409,14 +409,14 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
         ToolAdapter {
             key: "kimi".into(),
             display_name: "Kimi Code CLI".into(),
-            relative_skills_dir: ".config/agents/skills".into(),
-            relative_detect_dir: ".kimi".into(),
+            relative_skills_dir: ".kimi-code/skills".into(),
+            relative_detect_dir: ".kimi-code".into(),
             additional_scan_dirs: vec![],
             override_skills_dir: None,
             category: ToolCategory::Coding,
             is_custom: false,
             recursive_scan: false,
-            project_relative_skills_dir: None,
+            project_relative_skills_dir: Some(".kimi-code/skills".into()),
         },
         ToolAdapter {
             key: "replit".into(),
@@ -1102,5 +1102,17 @@ mod tests {
         assert_eq!(adapter.relative_skills_dir, ".config/opencode/skills");
         // Project path under workspace: .opencode/skills
         assert_eq!(adapter.project_relative_skills_dir(), ".opencode/skills");
+    }
+
+    #[test]
+    fn kimi_code_uses_the_directories_read_by_the_current_cli() {
+        let adapter = default_tool_adapters()
+            .into_iter()
+            .find(|adapter| adapter.key == "kimi")
+            .expect("kimi adapter should exist");
+
+        assert_eq!(adapter.relative_skills_dir, ".kimi-code/skills");
+        assert_eq!(adapter.relative_detect_dir, ".kimi-code");
+        assert_eq!(adapter.project_relative_skills_dir(), ".kimi-code/skills");
     }
 }

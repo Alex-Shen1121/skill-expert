@@ -40,10 +40,37 @@ fn sync_active_scenario_to_tool(store: &SkillStore, tool_key: &str) {
 
 /// Remove all synced skill files and target records for a given tool.
 fn unsync_all_for_tool(store: &SkillStore, tool_key: &str) {
-    let targets = store.get_all_targets().unwrap_or_default();
-    for target in targets.iter().filter(|t| t.tool == tool_key) {
-        sync_engine::remove_target(&PathBuf::from(&target.target_path)).ok();
+    let Ok(all_targets) = store.get_all_targets() else {
+        return;
+    };
+    let removed_targets: Vec<_> = all_targets
+        .into_iter()
+        .filter(|target| target.tool == tool_key)
+        .collect();
+    for target in &removed_targets {
         store.delete_target(&target.skill_id, tool_key).ok();
+    }
+
+    // 删除记录后重新读取剩余声明；读取失败必须保守保留文件，不能把数据库
+    // 不确定性当成“无人使用”。同一路径仍被其他工具声明时也只移除当前记录。
+    let Ok(remaining_targets) = store.get_all_targets() else {
+        return;
+    };
+    for target in &removed_targets {
+        if remaining_targets
+            .iter()
+            .any(|remaining| remaining.target_path == target.target_path)
+        {
+            log::info!(
+                "Keeping {} because another tool still claims it",
+                target.target_path
+            );
+            continue;
+        }
+        let path = PathBuf::from(&target.target_path);
+        if let Err(e) = sync_engine::remove_recorded_target(&path, &target.mode) {
+            log::warn!("Failed to remove retired target {}: {e}", path.display());
+        }
     }
 }
 
@@ -452,7 +479,7 @@ pub fn migrate_legacy_tool_keys(store: &SkillStore) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::skill_store::{ScenarioRecord, SkillRecord};
+    use crate::core::skill_store::{ScenarioRecord, SkillRecord, SkillTargetRecord};
     use std::fs;
     use tempfile::tempdir;
 
@@ -647,5 +674,61 @@ mod tests {
         assert!(targets.iter().any(|target| {
             target.skill_id == "second" && target.target_path.ends_with("skill123-2")
         }));
+    }
+
+    #[test]
+    fn changing_a_tool_path_preserves_a_target_still_claimed_by_another_tool() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = write_skill_dir(&tmp.path().join("center"), "skill-a", "center");
+        let old_base = tmp.path().join("shared-agent");
+        let shared_target = old_base.join("skill-a");
+        fs::create_dir_all(&shared_target).unwrap();
+        fs::write(shared_target.join("SKILL.md"), "shared deployment").unwrap();
+        configure_single_custom_tool(&store, &old_base);
+        let mut disabled: Vec<String> = tool_adapters::default_tool_adapters()
+            .into_iter()
+            .map(|adapter| adapter.key)
+            .collect();
+        disabled.push("test_agent".to_string());
+        store
+            .set_setting("disabled_tools", &serde_json::to_string(&disabled).unwrap())
+            .unwrap();
+        store
+            .insert_skill(&sample_skill("skill-a", "skill-a", &source))
+            .unwrap();
+        for (id, tool) in [
+            ("target-test", "test_agent"),
+            ("target-other", "other_agent"),
+        ] {
+            store
+                .insert_target(&SkillTargetRecord {
+                    id: id.to_string(),
+                    skill_id: "skill-a".to_string(),
+                    tool: tool.to_string(),
+                    target_path: shared_target.to_string_lossy().to_string(),
+                    mode: "copy".to_string(),
+                    status: "ok".to_string(),
+                    synced_at: Some(1),
+                    last_error: None,
+                    source_hash: None,
+                })
+                .unwrap();
+        }
+
+        apply_tool_skills_dir(
+            &store,
+            "test_agent",
+            &tmp.path().join("new-agent").to_string_lossy(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(shared_target.join("SKILL.md")).unwrap(),
+            "shared deployment"
+        );
+        let targets = store.get_targets_for_skill("skill-a").unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].tool, "other_agent");
     }
 }

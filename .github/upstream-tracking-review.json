@@ -1,0 +1,24 @@
+{
+  "upstreamRepository": "xingkongliang/skills-manager",
+  "upstreamBranch": "main",
+  "upstreamSha": "6e32c3a5ae367ad71aa07f182b0c02653bb6d101",
+  "baseMainSha": "0761695be1538e2cf065cb6490e1c71c9222a082",
+  "conflicts": [],
+  "protectedChanges": [
+    ".github/workflows/release.yml",
+    "CHANGELOG-zh.md",
+    "CHANGELOG.md",
+    "README.md",
+    "README.zh-CN.md",
+    "assets/star-history.svg",
+    "package.json",
+    "src-tauri/Cargo.lock",
+    "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
+    "src/i18n/en.json",
+    "src/i18n/index.ts",
+    "src/i18n/zh-TW.json",
+    "src/i18n/zh.json",
+    "src/views/ProjectDetail.tsx"
+  ]
+}
