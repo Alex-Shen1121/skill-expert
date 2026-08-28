@@ -274,7 +274,7 @@
       "switchToAscending": "切換為升冪",
       "switchToDescending": "切換為降冪",
       "customDirectionUnavailable": "自訂順序沒有排序方向",
-      "filteredDragDisabled": "清除搜尋、來源和標籤篩選後可調整自訂順序。",
+      "filteredDragDisabled": "清除目前篩選後可調整自訂順序。",
       "loadingCustomOrder": "正在讀取自訂順序"
     },
     "delete": "刪除 Skill",
@@ -381,6 +381,13 @@
       "all": "全部",
       "enabled": "當前 Preset 已啟用",
       "available": "當前 Preset 未啟用"
+    },
+    "updateFilter": {
+      "available": "有可用更新"
+    },
+    "repositoryFilter": {
+      "label": "Git 倉庫",
+      "empty": "沒有可用倉庫"
     },
     "sourceType": "來源類型",
     "sourceFilter": {

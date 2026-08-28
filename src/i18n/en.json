@@ -274,7 +274,7 @@
       "switchToAscending": "Switch to ascending",
       "switchToDescending": "Switch to descending",
       "customDirectionUnavailable": "Custom order has no direction",
-      "filteredDragDisabled": "Clear search and source or tag filters to reorder the custom order.",
+      "filteredDragDisabled": "Clear the current filters to reorder the custom order.",
       "loadingCustomOrder": "Loading custom order"
     },
     "delete": "Delete skill",
@@ -412,6 +412,13 @@
       "all": "All",
       "enabled": "Enabled",
       "available": "Available"
+    },
+    "updateFilter": {
+      "available": "Updates available"
+    },
+    "repositoryFilter": {
+      "label": "Git repositories",
+      "empty": "No repositories available"
     },
     "sourceFilter": {
       "all": "All Sources",
