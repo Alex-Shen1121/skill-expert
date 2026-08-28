@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.1] - 2026-08-28
+
+### Release Overview
+- In a project with two agents, an edit made under the second one could not reach the Skills Center, and following the status the app then showed would overwrite that edit. Fixed, together with the cases where no push is safe at all.
+
+### User-facing
+- **An edit under any agent now reaches the center** (#327) — A project skill exists once per agent directory and the card aggregates them. The card lit "update to center" if *any* copy was edited, but pushed the copy whose agent name sorted first. Editing under Codex while Claude Code was also configured therefore pushed the untouched Claude copy: the toast said success, nothing of the edit arrived, and the freshly written center then read as newer — so following the card to "update to project" destroyed the edit. The copy that actually carries the edit is pushed now, and the others are realigned from the center afterwards so the card settles instead of flipping. Thanks to @enshulv. Fixes #322.
+- **When no copy can be shown to be safe, nothing is written** — If more than one copy of a skill is anything other than in sync with the center, the update is refused and the conflict is named, rather than picking one and silently stranding the rest. Only "in sync" proves a copy holds nothing of its own: it is a content match, while "center is newer" is decided by timestamp *after* the contents already differed, so such a copy can hold work that a pull would destroy. **This is stricter than before**: two agents each holding their own not-yet-imported copy of the same skill now have to be reconciled into one before the center will accept it.
+
+### Developer & Governance
+- `classify_sync_status` returns `center_newer` only after the content hashes differ, then picks a side by mtime — it is not proof that the project copy is redundant. The realign step treated it as proof, and the refusal threshold was drawn at "edited" rather than "not provably clean"; both let a copy holding unique content be overwritten by a later action the card itself offered.
+- Pushing rebuilds the center directory, moving its mtime to now, which is what turned every stranded copy into `center_newer` — a status whose only remaining card action overwrites all variants, and which the backend's guard does not refuse (it refuses `project_newer` only). That chain, not the push itself, was the data-loss path.
+- Sibling realignment runs serially. Two agents' skills roots can be symlinks onto one directory, and each realign rebuilds its target, so concurrent calls on one path failed for no real reason and the batch counted it as a failure.
+- Three rounds of cross-vendor review; the substantive defects stopped appearing after the second. Widening the refusal made the bookkeeping it was working around unreachable, so the change ends 38 lines shorter than its first draft.
+- Known and unfixed: if two agents' skills roots are symlinks onto one directory, one physical skill scans as two edited copies and the refusal cannot be resolved by editing files. Collapsing roots by canonical path is a scanner change, deliberately not made here.
+- These are frontend-only changes and the repo has no frontend test runner, so `test.yml` does not cover them. Verification was `lint`, `build`, and review.
+
 ## [1.35.0] - 2026-08-27
 
 ### Release Overview
