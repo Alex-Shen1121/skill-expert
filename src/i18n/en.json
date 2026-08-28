@@ -395,6 +395,13 @@
       "enabled": "Enabled",
       "available": "Available"
     },
+    "updateFilter": {
+      "available": "Updates available"
+    },
+    "viewMode": {
+      "grid": "Grid view",
+      "list": "List view"
+    },
     "sourceFilter": {
       "all": "All Sources",
       "local": "Local",
