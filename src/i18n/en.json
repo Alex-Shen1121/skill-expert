@@ -420,10 +420,6 @@
       "label": "Git repositories",
       "empty": "No repositories available"
     },
-    "viewMode": {
-      "grid": "Grid view",
-      "list": "List view"
-    },
     "sourceFilter": {
       "all": "All Sources",
       "local": "Local",
