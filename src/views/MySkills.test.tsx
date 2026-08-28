@@ -400,7 +400,7 @@ describe("MySkills Git 来源仓库筛选", () => {
     appState.managedSkills = repositoryFilterSkills;
   });
 
-  it("只在明确选择 Git 来源后显示可访问的仓库多选，并保守归组直接 Git 仓库", async () => {
+  it("只在明确选择 Git 来源后显示可访问的仓库多选，并保守归组来源仓库", async () => {
     const user = userEvent.setup();
     renderPage();
 
