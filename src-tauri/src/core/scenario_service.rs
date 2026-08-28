@@ -203,6 +203,7 @@ fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
 fn retire_retargeted_target(
     store: &SkillStore,
     all_targets: &[SkillTargetRecord],
+    retiring_targets: &HashSet<(String, String)>,
     target: &SkillTargetRecord,
     new_path: &Path,
 ) {
@@ -215,6 +216,7 @@ fn retire_retargeted_target(
     let old_key = ownership_key(&old_path, &mut memo);
     let claimed_by_another = all_targets.iter().any(|other| {
         (other.skill_id != target.skill_id || other.tool != target.tool)
+            && !retiring_targets.contains(&(other.skill_id.clone(), other.tool.clone()))
             && ownership_key(Path::new(&other.target_path), &mut memo) == old_key
     });
 
@@ -265,6 +267,15 @@ pub fn sync_desired_targets(
         .iter()
         .map(|target| ((target.skill_id.clone(), target.tool.clone()), target))
         .collect();
+    let retiring_targets: HashSet<(String, String)> = desired_targets
+        .iter()
+        .filter_map(|desired| {
+            let key = (desired.skill_id.clone(), desired.tool.clone());
+            existing_targets.get(&key).and_then(|existing| {
+                (Path::new(&existing.target_path) != desired.target.as_path()).then_some(key)
+            })
+        })
+        .collect();
 
     let mut synced_count = 0usize;
     let mut skipped_count = 0usize;
@@ -283,7 +294,13 @@ pub fn sync_desired_targets(
         if let Some(existing) = existing_targets.get(&key) {
             let target_path = PathBuf::from(&existing.target_path);
             if target_path != desired.target {
-                retire_retargeted_target(store, &all_existing_targets, existing, &desired.target);
+                retire_retargeted_target(
+                    store,
+                    &all_existing_targets,
+                    &retiring_targets,
+                    existing,
+                    &desired.target,
+                );
             } else if existing.status == "ok" {
                 if let Some(check_mode) = skip_check_mode(&existing.mode, desired.mode) {
                     if sync_engine::is_target_current(
@@ -506,6 +523,16 @@ pub fn sync_skill_to_active_scenario(
             let source = PathBuf::from(&skill.central_path);
             let target_name = sync_engine::target_dir_name(&source, &skill.name);
             let old_targets = store.get_all_targets().unwrap_or_default();
+            let retiring_targets: HashSet<(String, String)> = adapters
+                .iter()
+                .filter_map(|adapter| {
+                    let old = old_targets
+                        .iter()
+                        .find(|target| target.skill_id == skill_id && target.tool == adapter.key)?;
+                    (Path::new(&old.target_path) != adapter.skills_dir().join(&target_name))
+                        .then(|| (skill_id.to_string(), adapter.key.clone()))
+                })
+                .collect();
             for adapter in &adapters {
                 let target = adapter.skills_dir().join(&target_name);
                 let mut recorded_mode: Option<String> = None;
@@ -515,7 +542,13 @@ pub fn sync_skill_to_active_scenario(
                 {
                     let old_path = PathBuf::from(&old.target_path);
                     if old_path != target {
-                        retire_retargeted_target(store, &old_targets, old, &target);
+                        retire_retargeted_target(
+                            store,
+                            &old_targets,
+                            &retiring_targets,
+                            old,
+                            &target,
+                        );
                     } else {
                         recorded_mode = Some(old.mode.clone());
                     }
@@ -1471,6 +1504,85 @@ mod sync_desired_targets_tests {
             fs::read_to_string(new_target.join("SKILL.md")).unwrap(),
             "center source"
         );
+    }
+
+    #[test]
+    fn shared_path_is_removed_when_every_claimant_retargets_in_the_same_sync() {
+        let tmp = tempdir().unwrap();
+        let store = SkillStore::new(&tmp.path().join("test.db")).unwrap();
+        let source = tmp.path().join("center").join("skill-a");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "center source").unwrap();
+        let old_target = tmp.path().join("shared-old").join("skill-a");
+        fs::create_dir_all(&old_target).unwrap();
+        fs::write(old_target.join("SKILL.md"), "old deployment").unwrap();
+        store
+            .insert_skill(&SkillRecord {
+                id: "skill-a".to_string(),
+                name: "skill-a".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(source.to_string_lossy().to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: source.to_string_lossy().to_string(),
+                content_hash: Some("h1".to_string()),
+                enabled: true,
+                created_at: 1,
+                updated_at: 1,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+            })
+            .unwrap();
+        for (id, tool) in [("target-a", "agent_a"), ("target-b", "agent_b")] {
+            store
+                .insert_target(&SkillTargetRecord {
+                    id: id.to_string(),
+                    skill_id: "skill-a".to_string(),
+                    tool: tool.to_string(),
+                    target_path: old_target.to_string_lossy().to_string(),
+                    mode: "copy".to_string(),
+                    status: "ok".to_string(),
+                    synced_at: Some(1),
+                    last_error: None,
+                    source_hash: Some("h1".to_string()),
+                })
+                .unwrap();
+        }
+        let desired = [
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "agent_a".to_string(),
+                source: source.clone(),
+                target: tmp.path().join("new-a").join("skill-a"),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "agent_b".to_string(),
+                source,
+                target: tmp.path().join("new-b").join("skill-a"),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+        ];
+
+        sync_desired_targets(&store, &desired).unwrap();
+
+        assert!(!old_target.exists());
+        let targets = store.get_targets_for_skill("skill-a").unwrap();
+        assert_eq!(targets.len(), 2);
+        assert!(targets
+            .iter()
+            .all(|target| target.target_path != old_target.to_string_lossy()));
     }
 
     /// Issue #153 regression: when the existing target was written in
