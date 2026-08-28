@@ -398,6 +398,10 @@
     "updateFilter": {
       "available": "Updates available"
     },
+    "repositoryFilter": {
+      "label": "Git repositories",
+      "empty": "No repositories available"
+    },
     "viewMode": {
       "grid": "Grid view",
       "list": "List view"
