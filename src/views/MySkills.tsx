@@ -22,6 +22,8 @@ import {
   CircleSlash,
   Pencil,
   Trash2,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { useNavigate } from "react-router-dom";
@@ -129,6 +131,73 @@ function centralDirName(skill: ManagedSkill) {
   return skill.central_path.split(/[\\/]/).filter(Boolean).pop() || skill.name;
 }
 
+type SkillSortField = "custom" | "name" | "created" | "updated";
+type SortDirection = "asc" | "desc";
+interface SkillSortPreference {
+  field: SkillSortField;
+  direction: SortDirection;
+}
+
+const SKILL_SORT_PREFERENCE_KEY = "skill-expert:skill-library-sort";
+const DEFAULT_SKILL_SORT_PREFERENCE: SkillSortPreference = {
+  field: "custom",
+  direction: "asc",
+};
+const SKILL_SORT_OPTIONS: SkillSortPreference[] = [
+  { field: "custom", direction: "asc" },
+  { field: "name", direction: "asc" },
+  { field: "created", direction: "desc" },
+  { field: "updated", direction: "desc" },
+];
+const SKILL_SORT_FIELDS = SKILL_SORT_OPTIONS.map(({ field }) => field);
+const SORT_DIRECTIONS: SortDirection[] = ["asc", "desc"];
+let sessionSkillSortPreference = DEFAULT_SKILL_SORT_PREFERENCE;
+let preferSessionSkillSortPreference = false;
+
+const skillNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
+function defaultDirection(field: SkillSortField): SortDirection {
+  return SKILL_SORT_OPTIONS.find((option) => option.field === field)?.direction ?? "asc";
+}
+
+function readSkillSortPreference(): SkillSortPreference {
+  if (preferSessionSkillSortPreference) return sessionSkillSortPreference;
+
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(SKILL_SORT_PREFERENCE_KEY);
+  } catch {
+    preferSessionSkillSortPreference = true;
+    return sessionSkillSortPreference;
+  }
+  if (!raw) return sessionSkillSortPreference;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<SkillSortPreference>;
+    if (
+      !SKILL_SORT_FIELDS.includes(parsed.field as SkillSortField)
+      || !SORT_DIRECTIONS.includes(parsed.direction as SortDirection)
+    ) {
+      sessionSkillSortPreference = DEFAULT_SKILL_SORT_PREFERENCE;
+      preferSessionSkillSortPreference = false;
+      return DEFAULT_SKILL_SORT_PREFERENCE;
+    }
+    const field = parsed.field as SkillSortField;
+    sessionSkillSortPreference = {
+      field,
+      direction: field === "custom" ? "asc" : parsed.direction as SortDirection,
+    };
+    return sessionSkillSortPreference;
+  } catch {
+    sessionSkillSortPreference = DEFAULT_SKILL_SORT_PREFERENCE;
+    preferSessionSkillSortPreference = false;
+    return DEFAULT_SKILL_SORT_PREFERENCE;
+  }
+}
+
 export function MySkills() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -145,6 +214,8 @@ export function MySkills() {
     refreshProjects,
   } = useApp();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [sortPreference, setSortPreference] = useState<SkillSortPreference>(readSkillSortPreference);
+  const { field: sortField, direction: sortDirection } = sortPreference;
   const [filterMode, setFilterMode] = useState<"all" | "enabled" | "available">("all");
   const [sourceFilters, setSourceFilters] = useState<Set<string>>(new Set());
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
@@ -175,6 +246,18 @@ export function MySkills() {
   const tagInputRef = useRef<HTMLInputElement>(null);
 
   const [presetSkillOrder, setPresetSkillOrder] = useState<string[]>([]);
+  const [presetSkillOrderLoaded, setPresetSkillOrderLoaded] = useState(false);
+
+  useEffect(() => {
+    sessionSkillSortPreference = sortPreference;
+    try {
+      localStorage.setItem(SKILL_SORT_PREFERENCE_KEY, JSON.stringify(sortPreference));
+      preferSessionSkillSortPreference = false;
+    } catch {
+      preferSessionSkillSortPreference = true;
+      // 本机存储不可用时仍保留当前会话中的浏览偏好。
+    }
+  }, [sortPreference]);
 
   const viewedPresetName = viewedPreset?.name || t("mySkills.currentPresetFallback");
 
@@ -182,9 +265,25 @@ export function MySkills() {
   useEffect(() => {
     if (!viewedPreset) {
       setPresetSkillOrder([]);
+      setPresetSkillOrderLoaded(true);
       return;
     }
-    api.getPresetSkillOrder(viewedPreset.id).then(setPresetSkillOrder).catch(() => {});
+    let cancelled = false;
+    setPresetSkillOrderLoaded(false);
+    api.getPresetSkillOrder(viewedPreset.id)
+      .then((order) => {
+        if (cancelled) return;
+        setPresetSkillOrder(order);
+        setPresetSkillOrderLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPresetSkillOrder([]);
+        setPresetSkillOrderLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [viewedPreset, skills]);
 
   // Skills with an unresolved sync conflict get a "needs attention" badge
@@ -249,6 +348,8 @@ export function MySkills() {
     sourceFilters.size > 0 ||
     tagFilters.size > 0 ||
     filterMode !== "all";
+  const hasSubsetFilters =
+    search.trim() !== "" || sourceFilters.size > 0 || tagFilters.size > 0;
   const clearFilters = () => {
     setSearch("");
     setSourceFilters(new Set());
@@ -276,12 +377,13 @@ export function MySkills() {
   }, [skills]);
 
   const filtered = useMemo(() => {
+    const searchQuery = search.trim().toLowerCase();
     const result = skills.filter((skill) => {
       const displayName = skillDisplayNames.get(skill.id) || skill.name;
       const matchesSearch =
-        skill.name.toLowerCase().includes(search.toLowerCase()) ||
-        displayName.toLowerCase().includes(search.toLowerCase()) ||
-        (skill.description || "").toLowerCase().includes(search.toLowerCase());
+        skill.name.toLowerCase().includes(searchQuery) ||
+        displayName.toLowerCase().includes(searchQuery) ||
+        (skill.description || "").toLowerCase().includes(searchQuery);
       if (!matchesSearch) return false;
 
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
@@ -301,24 +403,59 @@ export function MySkills() {
       return true;
     });
 
-    // Always sort enabled skills first; within enabled group, use custom sort order
-    if (viewedPreset) {
-      result.sort((a, b) => {
+    const compareDisplayNames = (a: ManagedSkill, b: ManagedSkill) =>
+      skillNameCollator.compare(
+        skillDisplayNames.get(a.id) || a.name,
+        skillDisplayNames.get(b.id) || b.name,
+      );
+    const compareNamesAscending = (a: ManagedSkill, b: ManagedSkill) => {
+      const compared = compareDisplayNames(a, b);
+      if (compared !== 0) return compared;
+      return a.id.localeCompare(b.id);
+    };
+
+    result.sort((a, b) => {
+      if (viewedPreset) {
         const aEnabled = a.preset_ids.includes(viewedPreset.id) ? 0 : 1;
         const bEnabled = b.preset_ids.includes(viewedPreset.id) ? 0 : 1;
         if (aEnabled !== bEnabled) return aEnabled - bEnabled;
-        // Within same group, use preset sort order
+      }
+
+      if (sortField === "name") {
+        const compared = compareDisplayNames(a, b);
+        if (compared !== 0) {
+          return sortDirection === "asc" ? compared : -compared;
+        }
+        return a.id.localeCompare(b.id);
+      }
+
+      if (sortField === "custom") {
+        if (!viewedPreset) return compareNamesAscending(a, b);
         const aOrder = presetSkillOrder.indexOf(a.id);
         const bOrder = presetSkillOrder.indexOf(b.id);
         if (aOrder !== -1 && bOrder !== -1) return aOrder - bOrder;
         if (aOrder !== -1) return -1;
         if (bOrder !== -1) return 1;
-        return a.name.localeCompare(b.name);
-      });
-    }
+        return compareNamesAscending(a, b);
+      }
+
+      const aTime = sortField === "created" ? a.created_at : a.updated_at;
+      const bTime = sortField === "created" ? b.created_at : b.updated_at;
+      const aHasTime = Number.isFinite(aTime) && aTime > 0;
+      const bHasTime = Number.isFinite(bTime) && bTime > 0;
+      if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
+      if (aHasTime && bHasTime && aTime !== bTime) {
+        return sortDirection === "asc" ? aTime - bTime : bTime - aTime;
+      }
+      return compareNamesAscending(a, b);
+    });
 
     return result;
-  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, filterMode, viewedPreset, presetSkillOrder]);
+  }, [skills, skillDisplayNames, search, sourceFilters, tagFilters, filterMode, viewedPreset, presetSkillOrder, sortField, sortDirection]);
+
+  const handleSortFieldChange = (field: SkillSortField) => {
+    setSortPreference({ field, direction: defaultDirection(field) });
+  };
 
   const {
     isMultiSelect, setIsMultiSelect,
@@ -345,10 +482,17 @@ export function MySkills() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const canDragEnabledSkills =
+    sortField === "custom"
+    && !!viewedPreset
+    && presetSkillOrderLoaded
+    && !hasSubsetFilters
+    && filterMode !== "available";
+
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
-      if (!over || active.id === over.id || !viewedPreset) return;
+      if (!over || active.id === over.id || !viewedPreset || !canDragEnabledSkills) return;
 
       // Only reorder enabled skills (they are always at the front)
       const enabledSkills = filtered.filter((s) => s.preset_ids.includes(viewedPreset.id));
@@ -370,10 +514,8 @@ export function MySkills() {
         await api.getPresetSkillOrder(viewedPreset.id).then(setPresetSkillOrder).catch(() => {});
       }
     },
-    [filtered, viewedPreset]
+    [filtered, viewedPreset, canDragEnabledSkills]
   );
-
-  const canDrag = !!viewedPreset;
 
   const refreshGitStatus = useCallback(async () => {
     try {
@@ -1133,8 +1275,55 @@ export function MySkills() {
             <RotateCcw className={cn("h-3.5 w-3.5", batchUpdating && "animate-spin")} />
             {t("mySkills.updateActions.updateAvailable", { count: availableUpdateCount })}
           </button>
+          <label className="sr-only" htmlFor="skill-library-sort-field">
+            {t("mySkills.sorting.label")}
+          </label>
+          <select
+            id="skill-library-sort-field"
+            aria-label={t("mySkills.sorting.label")}
+            value={sortField}
+            onChange={(event) => handleSortFieldChange(event.target.value as SkillSortField)}
+            className="h-8 rounded-md border-0 bg-transparent px-2 text-[13px] font-medium text-muted outline-none transition-colors hover:bg-surface-hover hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {SKILL_SORT_OPTIONS.map(({ field }) => (
+              <option key={field} value={field}>
+                {t(`mySkills.sorting.fields.${field}`)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setSortPreference((current) => ({
+              ...current,
+              direction: current.direction === "asc" ? "desc" : "asc",
+            }))}
+            disabled={sortField === "custom"}
+            aria-label={
+              sortField === "custom"
+                ? t("mySkills.sorting.customDirectionUnavailable")
+                : sortDirection === "asc"
+                  ? t("mySkills.sorting.switchToDescending")
+                  : t("mySkills.sorting.switchToAscending")
+            }
+            title={
+              sortField === "custom"
+                ? t("mySkills.sorting.customDirectionUnavailable")
+                : sortDirection === "asc"
+                  ? t("mySkills.sorting.ascending")
+                  : t("mySkills.sorting.descending")
+            }
+            className="rounded-md p-2 text-muted outline-none transition-colors hover:bg-surface-hover hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {sortDirection === "asc" ? (
+              <ArrowUp className="h-4 w-4" />
+            ) : (
+              <ArrowDown className="h-4 w-4" />
+            )}
+          </button>
           <button
             onClick={() => setViewMode("grid")}
+            aria-label={t("mySkills.gridView")}
+            title={t("mySkills.gridView")}
             className={cn(
               "rounded-md p-2 transition-colors outline-none",
               viewMode === "grid" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
@@ -1144,6 +1333,8 @@ export function MySkills() {
           </button>
           <button
             onClick={() => setViewMode("list")}
+            aria-label={t("mySkills.listView")}
+            title={t("mySkills.listView")}
             className={cn(
               "rounded-md p-2 transition-colors outline-none",
               viewMode === "list" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
@@ -1228,6 +1419,12 @@ export function MySkills() {
         )}
       </div>
 
+      {sortField === "custom" && viewedPreset && hasSubsetFilters && (
+        <p className="px-1 text-[12px] text-muted">
+          {t("mySkills.sorting.filteredDragDisabled")}
+        </p>
+      )}
+
       {isMultiSelect && (
         <MultiSelectToolbar
           selectedCount={selectedIds.size}
@@ -1257,7 +1454,16 @@ export function MySkills() {
         />
       )}
 
-      {filtered.length === 0 ? (
+      {sortField === "custom" && viewedPreset && !presetSkillOrderLoaded ? (
+        <div
+          role="status"
+          aria-label={t("mySkills.sorting.loadingCustomOrder")}
+          className="flex flex-1 items-center justify-center pb-20 text-muted"
+        >
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="sr-only">{t("mySkills.sorting.loadingCustomOrder")}</span>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center pb-20 text-center">
           <Layers className="mb-4 h-12 w-12 text-faint" />
           <h3 className="mb-1.5 text-[14px] font-semibold text-tertiary">{t("mySkills.noSkills")}</h3>
@@ -1298,13 +1504,14 @@ export function MySkills() {
               skill.update_status === "source_missing"
               && (skill.source_type === "local" || skill.source_type === "import");
             const displayName = skillDisplayNames.get(skill.id) || skill.name;
+            const skillCanDrag = canDragEnabledSkills && enabledInPreset;
 
             if (viewMode === "grid") {
               return (
                 <SortableSkillItem
                   key={skill.id}
                   id={skill.id}
-                  disabled={!canDrag}
+                  disabled={!skillCanDrag}
                   className={
                     tagEditSkillId === skill.id || menuSkillId === skill.id
                       ? "relative z-30"
@@ -1341,7 +1548,7 @@ export function MySkills() {
                           <span
                             className={cn(
                               "h-2 w-2 rounded-full transition-opacity",
-                              canDrag && "group-hover:opacity-0",
+                              skillCanDrag && "group-hover:opacity-0",
                               enabledInPreset
                                 ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
                                 : "bg-surface-active"
@@ -1569,7 +1776,7 @@ export function MySkills() {
               <SortableSkillItem
                 key={skill.id}
                 id={skill.id}
-                disabled={!canDrag}
+                disabled={!skillCanDrag}
                 className={menuSkillId === skill.id ? "relative z-30" : undefined}
                 handleTitle={t("mySkills.dragToReorder")}
                 handleClassName="absolute inset-0 flex cursor-grab items-center justify-center rounded text-faint opacity-0 transition-opacity hover:text-muted group-hover:opacity-100 active:cursor-grabbing"
@@ -1600,7 +1807,7 @@ export function MySkills() {
                       <span
                         className={cn(
                           "h-2 w-2 rounded-full transition-opacity",
-                          canDrag && "group-hover:opacity-0",
+                          skillCanDrag && "group-hover:opacity-0",
                           enabledInPreset
                             ? "bg-accent-light shadow-[0_0_0_3px_var(--color-accent-bg)]"
                             : "bg-surface-active"
