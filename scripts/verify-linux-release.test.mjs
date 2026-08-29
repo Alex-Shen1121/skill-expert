@@ -3,8 +3,10 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  assertLinuxPackageIdentity,
   linuxAssetPaths,
   rpmExtractionInvocation,
+  verifyLinuxDesktopEntry,
   verifyLinuxBundleBinaries,
 } from './verify-linux-release.mjs';
 
@@ -84,4 +86,28 @@ test('相对资产目录在切换 AppImage 工作目录前解析为绝对路径'
     assert.equal(path.isAbsolute(assetPath), true, assetPath);
   }
   assert.match(assets.appImage, /skill-expert-v1\.0\.0-linux-x64\.AppImage$/);
+});
+
+test('DEB 与 RPM 技术包名必须保持 skill-expert', () => {
+  assert.doesNotThrow(() => assertLinuxPackageIdentity('DEB', 'skill-expert\n'));
+  assert.throws(
+    () => assertLinuxPackageIdentity('RPM', 'Agent 技能管家'),
+    /RPM.*skill-expert.*Agent 技能管家/,
+  );
+});
+
+test('三种 Linux 包的桌面入口必须保留中文显示名', () => {
+  const valid = [
+    '[Desktop Entry]',
+    'Exec=skill-expert',
+    'Icon=skill-expert',
+    'Name=Agent 技能管家',
+    'Type=Application',
+  ].join('\n');
+
+  assert.doesNotThrow(() => verifyLinuxDesktopEntry('AppImage', valid));
+  assert.throws(
+    () => verifyLinuxDesktopEntry('DEB', valid.replace('Agent 技能管家', 'skill-expert')),
+    /DEB.*Agent 技能管家/,
+  );
 });

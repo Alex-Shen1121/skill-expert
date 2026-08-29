@@ -43,6 +43,30 @@ function packagedBinary(root, label) {
 }
 
 const APPIMAGE_BUNDLE_MARKER = Buffer.from('__TAURI_BUNDLE_TYPE_VAR_APP');
+const LINUX_PACKAGE_NAME = 'skill-expert';
+const LINUX_DISPLAY_NAME = 'Agent 技能管家';
+
+export function assertLinuxPackageIdentity(label, actual) {
+  const normalized = actual.trim();
+  if (normalized !== LINUX_PACKAGE_NAME) {
+    throw new Error(
+      `${label} 技术包名不匹配：预期 ${LINUX_PACKAGE_NAME}，实际 ${normalized}`,
+    );
+  }
+}
+
+export function verifyLinuxDesktopEntry(label, content) {
+  const lines = new Set(content.split(/\r?\n/));
+  if (!lines.has(`Name=${LINUX_DISPLAY_NAME}`)) {
+    throw new Error(`${label} 桌面入口必须显示 ${LINUX_DISPLAY_NAME}`);
+  }
+  if (!lines.has(`Exec=${LINUX_PACKAGE_NAME}`)) {
+    throw new Error(`${label} 桌面入口必须执行 ${LINUX_PACKAGE_NAME}`);
+  }
+  if (!lines.has(`Icon=${LINUX_PACKAGE_NAME}`)) {
+    throw new Error(`${label} 桌面入口必须使用 ${LINUX_PACKAGE_NAME} 图标`);
+  }
+}
 
 export function rpmExtractionInvocation(rpmPath, directory) {
   return {
@@ -113,7 +137,12 @@ export function verifyLinuxRelease(directory, version) {
 
   fs.chmodSync(cli, fs.statSync(cli).mode | 0o111);
   verifyCliVersion(cli, version);
+  assertLinuxPackageIdentity('DEB', run('dpkg-deb', ['--field', deb, 'Package']));
   assertPackageVersion('DEB', run('dpkg-deb', ['--field', deb, 'Version']), version);
+  assertLinuxPackageIdentity(
+    'RPM',
+    run('rpm', ['-qp', '--queryformat', '%{NAME}', rpm]),
+  );
   assertPackageVersion('RPM', run('rpm', ['-qp', '--queryformat', '%{VERSION}', rpm]), version);
 
   const extractionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-expert-linux-release-'));
@@ -136,6 +165,17 @@ export function verifyLinuxRelease(directory, version) {
       path.join(appImageRoot, 'squashfs-root'),
       'AppImage',
     );
+    for (const [label, root] of [
+      ['DEB', debRoot],
+      ['RPM', rpmRoot],
+      ['AppImage', path.join(appImageRoot, 'squashfs-root')],
+    ]) {
+      const desktopEntry = requireFile(
+        path.join(root, 'usr', 'share', 'applications', 'skill-expert.desktop'),
+        `${label} 桌面入口`,
+      );
+      verifyLinuxDesktopEntry(label, fs.readFileSync(desktopEntry, 'utf8'));
+    }
     verifyLinuxBundleBinaries({
       deb: fs.readFileSync(debBinary),
       rpm: fs.readFileSync(rpmBinary),

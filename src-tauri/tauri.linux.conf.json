@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "skill-expert",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/agent-skills-manager.desktop.hbs"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/agent-skills-manager.desktop.hbs"
+      }
+    }
+  }
+}
