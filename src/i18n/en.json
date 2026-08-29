@@ -407,6 +407,26 @@
       "removalMessage": "Updating {{name}} will remove {{count}} file(s) that the new version does not have. If any of them are yours, move them somewhere outside the skill folder first — nothing has changed yet.",
       "removalConfirm": "Update anyway"
     },
+    "checkProgress": {
+      "title": "Skill Updates",
+      "skipped": "Skipped {{count}} item(s) that cannot be checked",
+      "progress": "Check progress",
+      "listLabel": "Skill check statuses",
+      "close": "Close Skill Updates",
+      "resultAvailable": "{{count}} Skill(s) have updates available",
+      "resultEmpty": "No updates available",
+      "showError": "Show error",
+      "status": {
+        "waiting": "Waiting",
+        "checking": "Checking",
+        "up_to_date": "Up to date",
+        "update_available": "Update available",
+        "unknown": "Unknown",
+        "local_only": "Local source",
+        "source_missing": "Source missing",
+        "error": "Check failed"
+      }
+    },
     "gitConfigEntry": "Sync Config",
     "filters": {
       "all": "All",

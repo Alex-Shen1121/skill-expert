@@ -8,6 +8,31 @@ import i18n, { i18nReady } from "../i18n";
 import type { ManagedSkill, Preset } from "../lib/tauri";
 import { MySkills } from "./MySkills";
 
+const eventMocks = vi.hoisted(() => ({
+  listeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
+  listen: vi.fn(async function listen(
+    eventName: string,
+    callback: (event: { payload: unknown }) => void,
+  ) {
+    const callbacks = eventMocks.listeners.get(eventName) ?? new Set();
+    callbacks.add(callback);
+    eventMocks.listeners.set(eventName, callbacks);
+    return () => callbacks.delete(callback);
+  }),
+  emit(eventName: string, payload: unknown) {
+    for (const callback of eventMocks.listeners.get(eventName) ?? []) {
+      callback({ payload });
+    }
+  },
+  reset() {
+    eventMocks.listeners.clear();
+  },
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: eventMocks.listen,
+}));
+
 const apiMocks = vi.hoisted(() => ({
   getSettings: vi.fn().mockResolvedValue(null),
   getPresetSkillOrder: vi.fn().mockResolvedValue([]),
@@ -83,6 +108,7 @@ type SkillFixture = {
   sourceBranch?: string | null;
   tags?: string[];
   presetIds?: string[];
+  canCheckUpdate?: boolean;
 };
 
 function createSkill({
@@ -96,6 +122,10 @@ function createSkill({
   sourceBranch = null,
   tags = [],
   presetIds = [],
+  canCheckUpdate =
+    sourceType === "git" ||
+    sourceType === "skillssh" ||
+    ((sourceType === "local" || sourceType === "import") && Boolean(sourceRef?.trim())),
 }: SkillFixture): ManagedSkill {
   return {
     id,
@@ -119,6 +149,7 @@ function createSkill({
     targets: [],
     preset_ids: presetIds,
     tags,
+    can_check_update: canCheckUpdate,
   };
 }
 
@@ -311,11 +342,17 @@ beforeEach(async () => {
   appState.managedSkills = updateContractSkills;
   appState.detailSkillId = null;
   localStorage.clear();
+  eventMocks.reset();
   vi.clearAllMocks();
   apiMocks.getPresetSkillOrder.mockResolvedValue([]);
   apiMocks.gitBackupPendingConflicts.mockResolvedValue([]);
   apiMocks.getAllTags.mockResolvedValue(["核心", "扩展"]);
   apiMocks.getSettings.mockResolvedValue(null);
+  apiMocks.checkAllSkillUpdates.mockImplementation(async (_force, batchId) => ({
+    batch_id: batchId,
+    skipped: 0,
+    items: [],
+  }));
   apiMocks.gitBackupStatus.mockResolvedValue(null);
   apiMocks.reorderPresetSkills.mockResolvedValue(undefined);
 });
@@ -463,6 +500,215 @@ describe("MySkills 有可用更新筛选", () => {
       expect(screen.getByRole("button", { name: label }).textContent).toBe(label);
       page.unmount();
     }
+  });
+});
+
+describe("MySkills 检查全部进度", () => {
+  it("立即展示不受页面筛选影响的完整可检查范围，并按名称稳定排序", async () => {
+    const user = userEvent.setup();
+    const pendingCheck = deferred<never>();
+    apiMocks.checkAllSkillUpdates.mockReturnValue(pendingCheck.promise);
+    appState.managedSkills = [
+      createSkill({
+        id: "zulu-git",
+        name: "Zulu Git",
+        sourceType: "git",
+        updateStatus: "unknown",
+      }),
+      createSkill({
+        id: "alpha-local",
+        name: "Alpha 本地",
+        sourceType: "local",
+        sourceRef: "/来源/Alpha",
+        updateStatus: "unknown",
+      }),
+      createSkill({
+        id: "missing-local",
+        name: "失去来源",
+        sourceType: "local",
+        sourceRef: "/已经消失的来源",
+        updateStatus: "up_to_date",
+        canCheckUpdate: false,
+      }),
+      createSkill({
+        id: "detached-copy",
+        name: "普通副本",
+        sourceType: "custom",
+        updateStatus: "local_only",
+      }),
+    ];
+    renderPage();
+
+    await user.type(
+      screen.getByPlaceholderText("搜索中央仓库中的 Skills..."),
+      "Zulu",
+    );
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(
+      within(dialog)
+        .getAllByTestId("check-progress-skill-name")
+        .map((element) => element.textContent),
+    ).toEqual(["Alpha 本地", "Zulu Git"]);
+    expect(within(dialog).getByText("已跳过 2 个不可检查项目")).not.toBeNull();
+    expect(within(dialog).getByText("0 / 2")).not.toBeNull();
+    expect(apiMocks.checkAllSkillUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("只消费当前批次事件，并逐项更新状态和完成进度", async () => {
+    const user = userEvent.setup();
+    const pendingCheck = deferred<never>();
+    apiMocks.checkAllSkillUpdates.mockReturnValue(pendingCheck.promise);
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "skillssh", updateStatus: "unknown" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+    await waitFor(() => expect(apiMocks.checkAllSkillUpdates).toHaveBeenCalledTimes(1));
+    const batchId = apiMocks.checkAllSkillUpdates.mock.calls[0]?.[1];
+    expect(batchId).toEqual(expect.any(String));
+
+    const alphaRow = screen
+      .getAllByTestId("check-progress-skill-name")
+      .find((element) => element.textContent === "Alpha")
+      ?.closest("li");
+    expect(alphaRow).not.toBeNull();
+    expect(within(alphaRow!).getByText("等待中")).not.toBeNull();
+
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: "old-batch",
+      skill_id: "alpha",
+      phase: "check",
+      status: "checking",
+      error: null,
+    });
+    expect(within(alphaRow!).getByText("等待中")).not.toBeNull();
+
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: batchId,
+      skill_id: "alpha",
+      phase: "check",
+      status: "checking",
+      error: null,
+    });
+    await waitFor(() => expect(within(alphaRow!).getByText("检查中")).not.toBeNull());
+    expect(screen.getByText("0 / 2")).not.toBeNull();
+
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: batchId,
+      skill_id: "alpha",
+      phase: "check",
+      status: "error",
+      error: "远端不可用",
+    });
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: batchId,
+      skill_id: "beta",
+      phase: "check",
+      status: "update_available",
+      error: null,
+    });
+
+    await waitFor(() => expect(screen.getByText("2 / 2")).not.toBeNull());
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(within(dialog).getByText("检查失败")).not.toBeNull();
+    expect(within(dialog).getByText("有可用更新")).not.toBeNull();
+    const errorDetails = within(alphaRow!).getByText("查看错误").closest("details");
+    expect(errorDetails?.open).toBe(false);
+    await user.click(within(alphaRow!).getByText("查看错误"));
+    expect(errorDetails?.open).toBe(true);
+    expect(within(alphaRow!).getByText("远端不可用")).not.toBeNull();
+  });
+
+  it("用结构化结果展示全部可用更新，并在完成后允许关闭", async () => {
+    const user = userEvent.setup();
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "skillssh", updateStatus: "unknown" }),
+    ];
+    apiMocks.checkAllSkillUpdates.mockImplementation(async (_force, batchId) => ({
+      batch_id: batchId,
+      skipped: 0,
+      items: [
+        { skill_id: "beta", name: "Beta", source_type: "skillssh", status: "update_available", error: null },
+        { skill_id: "alpha", name: "Alpha", source_type: "git", status: "up_to_date", error: null },
+      ],
+    }));
+    renderPage();
+
+    const checkButton = screen.getByRole("button", { name: "检查全部" });
+    await user.click(checkButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "Skill 更新" });
+    await waitFor(() => expect(within(dialog).getByText("1 个 Skill 有可用更新")).not.toBeNull());
+    expect(within(dialog).getByText("2 / 2")).not.toBeNull();
+    expect(
+      within(dialog)
+        .getAllByTestId("check-progress-skill-name")
+        .map((element) => element.textContent),
+    ).toEqual(["Alpha", "Beta"]);
+    expect(
+      within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled,
+    ).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "关闭 Skill 更新窗口" }));
+    expect(screen.queryByRole("dialog", { name: "Skill 更新" })).toBeNull();
+    expect(document.activeElement).toBe(checkButton);
+  });
+
+  it("检查结束且没有可用更新时展示明确空结果", async () => {
+    const user = userEvent.setup();
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+    ];
+    apiMocks.checkAllSkillUpdates.mockImplementation(async (_force, batchId) => ({
+      batch_id: batchId,
+      skipped: 0,
+      items: [
+        { skill_id: "alpha", name: "Alpha", source_type: "git", status: "up_to_date", error: null },
+      ],
+    }));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Skill 更新" });
+    await waitFor(() => expect(within(dialog).getByText("没有可用更新")).not.toBeNull());
+  });
+
+  it.each([
+    ["zh", "检查全部", "Skill 更新", "检查进度", "等待中", "关闭 Skill 更新窗口"],
+    ["zh-TW", "檢查全部", "Skill 更新", "檢查進度", "等待中", "關閉 Skill 更新視窗"],
+    ["en", "Check All", "Skill Updates", "Check progress", "Waiting", "Close Skill Updates"],
+  ])("在 %s 中提供可解析的状态文案并把焦点移入窗口", async (
+    language,
+    checkLabel,
+    dialogLabel,
+    progressLabel,
+    waitingLabel,
+    closeLabel,
+  ) => {
+    const user = userEvent.setup();
+    await i18n.changeLanguage(language);
+    const pendingCheck = deferred<never>();
+    apiMocks.checkAllSkillUpdates.mockReturnValue(pendingCheck.promise);
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: checkLabel }));
+
+    const dialog = screen.getByRole("dialog", { name: dialogLabel });
+    expect(document.activeElement).toBe(dialog);
+    expect(within(dialog).getByRole("progressbar", { name: progressLabel })).not.toBeNull();
+    expect(within(dialog).getByText(waitingLabel)).not.toBeNull();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: closeLabel }).disabled).toBe(true);
+    await user.tab();
+    expect(document.activeElement).toBe(dialog);
   });
 });
 

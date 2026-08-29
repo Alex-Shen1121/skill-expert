@@ -26,6 +26,7 @@ import {
   ArrowDown,
 } from "lucide-react";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -40,6 +41,10 @@ import { BatchTagDialog } from "../components/BatchTagDialog";
 import { SyncDots } from "../components/SyncDots";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { CardActionMenu } from "../components/CardActionMenu";
+import {
+  SkillUpdateProgressDialog,
+  type SkillCheckProgressItem,
+} from "../components/SkillUpdateProgressDialog";
 import * as api from "../lib/tauri";
 import { getTagActiveColor, getTagColor, pruneStaleTagFilters, UNTAGGED_FILTER } from "../lib/skillTags";
 import type {
@@ -275,6 +280,11 @@ export function MySkills() {
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<{
+    batchId: string;
+    items: SkillCheckProgressItem[];
+    skipped: number;
+  } | null>(null);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
   const [batchUpdating, setBatchUpdating] = useState(false);
@@ -977,13 +987,86 @@ export function MySkills() {
   };
 
   const handleCheckAllUpdates = async () => {
+    const batchId = globalThis.crypto?.randomUUID?.() ??
+      `check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const checkable = skills
+      .filter((skill) => skill.can_check_update)
+      .sort((left, right) => {
+        const compared = skillNameCollator.compare(
+          skillDisplayNames.get(left.id) || left.name,
+          skillDisplayNames.get(right.id) || right.name,
+        );
+        return compared !== 0 ? compared : left.id.localeCompare(right.id);
+      });
+    setCheckProgress({
+      batchId,
+      items: checkable.map((skill) => ({
+        id: skill.id,
+        name: skillDisplayNames.get(skill.id) || skill.name,
+        sourceType: skill.source_type,
+        status: "waiting",
+      })),
+      skipped: skills.length - checkable.length,
+    });
     setCheckingAll(true);
+    let unlisten: (() => void) | null = null;
     try {
-      await api.checkAllSkillUpdates(true);
-      toast.success(t("mySkills.updateActions.checkedAll"));
+      unlisten = await listen<api.SkillUpdateBatchProgress>(
+        "skill-update-batch-progress",
+        ({ payload }) => {
+          setCheckProgress((current) => {
+            if (!current || current.batchId !== payload.batch_id || payload.phase !== "check") {
+              return current;
+            }
+            return {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === payload.skill_id
+                  ? { ...item, status: payload.status, error: payload.error }
+                  : item,
+              ),
+            };
+          });
+        },
+      );
+      const result = await api.checkAllSkillUpdates(true, batchId);
+      if (result.batch_id === batchId) {
+        setCheckProgress((current) => {
+          if (!current || current.batchId !== batchId) return current;
+          const resultsById = new Map(result.items.map((item) => [item.skill_id, item]));
+          const existingIds = new Set(current.items.map((item) => item.id));
+          const updatedItems = current.items
+            .filter((item) => resultsById.has(item.id))
+            .map((item) => {
+              const checked = resultsById.get(item.id)!;
+              return {
+                ...item,
+                sourceType: checked.source_type,
+                status: checked.status,
+                error: checked.error,
+              };
+            });
+          for (const checked of result.items) {
+            if (existingIds.has(checked.skill_id)) continue;
+            updatedItems.push({
+              id: checked.skill_id,
+              name: checked.name,
+              sourceType: checked.source_type,
+              status: checked.status,
+              error: checked.error,
+            });
+          }
+          return {
+            ...current,
+            skipped: result.skipped,
+            items: updatedItems,
+          };
+        });
+      }
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, t("common.error")));
     } finally {
+      unlisten?.();
       await refreshManagedSkills();
       setCheckingAll(false);
     }
@@ -2161,6 +2244,14 @@ export function MySkills() {
         onToggleTool={handleToggleSkillTool}
         projects={projects}
         onProjectsChanged={refreshProjects}
+      />
+
+      <SkillUpdateProgressDialog
+        open={checkProgress !== null}
+        running={checkingAll}
+        items={checkProgress?.items ?? []}
+        skipped={checkProgress?.skipped ?? 0}
+        onClose={() => setCheckProgress(null)}
       />
 
       <ConfirmDialog

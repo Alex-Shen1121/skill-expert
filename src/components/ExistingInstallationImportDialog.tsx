@@ -1,8 +1,6 @@
 import {
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
-  useRef,
   useState,
 } from "react";
 import { DatabaseBackup } from "lucide-react";
@@ -10,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { getErrorMessage } from "../lib/error";
 import * as api from "../lib/tauri";
 import type { ExistingInstallationImportStatus } from "../lib/tauri";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 export type { ExistingInstallationImportStatus } from "../lib/tauri";
 
@@ -34,15 +33,6 @@ const defaultService: ExistingInstallationImportService = {
   restart: api.restartApp,
 };
 
-const FOCUSABLE_SELECTOR = [
-  "button:not([disabled])",
-  "a[href]",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(",");
-
 function StartupModalPanel({
   labelledBy,
   children,
@@ -50,52 +40,18 @@ function StartupModalPanel({
   labelledBy: string;
   children: ReactNode;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  const focusableElements = () =>
-    Array.from(
-      panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [],
-    );
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const first = focusableElements()[0];
-    (first ?? panelRef.current)?.focus();
-    return () => {
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
-    };
-  }, []);
-
-  const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Tab") return;
-    const focusable = focusableElements();
-    if (focusable.length === 0) {
-      event.preventDefault();
-      panelRef.current?.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || !panelRef.current?.contains(active))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || !panelRef.current?.contains(active))) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
+  const { containerRef, onKeyDown } = useModalFocusTrap<HTMLDivElement>();
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        ref={panelRef}
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        onKeyDown={trapFocus}
+        onKeyDown={onKeyDown}
         className="relative z-10 w-full max-w-lg rounded-xl border border-border bg-surface p-5 shadow-2xl"
       >
         {children}

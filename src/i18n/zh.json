@@ -407,6 +407,26 @@
       "removalMessage": "更新 {{name}} 会移除 {{count}} 个新版本里没有的文件。如果其中有你自己的东西，先把它移到 skill 文件夹以外——目前还没有任何改动。",
       "removalConfirm": "仍然更新"
     },
+    "checkProgress": {
+      "title": "Skill 更新",
+      "skipped": "已跳过 {{count}} 个不可检查项目",
+      "progress": "检查进度",
+      "listLabel": "Skill 检查状态",
+      "close": "关闭 Skill 更新窗口",
+      "resultAvailable": "{{count}} 个 Skill 有可用更新",
+      "resultEmpty": "没有可用更新",
+      "showError": "查看错误",
+      "status": {
+        "waiting": "等待中",
+        "checking": "检查中",
+        "up_to_date": "已是最新",
+        "update_available": "有可用更新",
+        "unknown": "未知",
+        "local_only": "本地来源",
+        "source_missing": "原路径丢失",
+        "error": "检查失败"
+      }
+    },
     "gitConfigEntry": "同步配置",
     "filters": {
       "all": "全部",

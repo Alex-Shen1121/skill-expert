@@ -39,6 +39,7 @@ export interface ManagedSkill {
   targets: SkillTarget[];
   preset_ids: string[];
   tags: string[];
+  can_check_update: boolean;
 }
 
 export interface SkillTarget {
@@ -306,9 +307,42 @@ export const checkSkillUpdate = (skillId: string, force?: boolean) =>
     force: force ?? false,
   });
 
-export const checkAllSkillUpdates = (force?: boolean) =>
-  invoke<void>("check_all_skill_updates", {
+export type SkillUpdateBatchProgressStatus =
+  | "waiting"
+  | "checking"
+  | "up_to_date"
+  | "update_available"
+  | "unknown"
+  | "local_only"
+  | "source_missing"
+  | "error";
+
+export interface SkillUpdateBatchProgress {
+  batch_id: string;
+  skill_id: string;
+  phase: "check";
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+}
+
+export interface CheckSkillUpdateItemResult {
+  skill_id: string;
+  name: string;
+  source_type: string;
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+}
+
+export interface CheckAllSkillUpdatesResult {
+  batch_id: string;
+  skipped: number;
+  items: CheckSkillUpdateItemResult[];
+}
+
+export const checkAllSkillUpdates = (force?: boolean, batchId?: string) =>
+  invoke<CheckAllSkillUpdatesResult>("check_all_skill_updates", {
     force: force ?? false,
+    batchId,
   });
 
 export interface UpdateSkillResult {
