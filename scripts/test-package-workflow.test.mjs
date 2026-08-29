@@ -30,3 +30,23 @@ test('手工入口只负责选择平台并调用测试包构建器', () => {
   assert.match(manual, /source_sha:\s*\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(manual, /candidate-build\.yml|formal-release/);
 });
+
+test('稳定文件名重新签名复用构建阶段生成的同一临时私钥', () => {
+  const builder = readFileSync(
+    path.join(repositoryRoot, '.github/workflows/test-package-build.yml'),
+    'utf8',
+  );
+  const signingStep = builder.slice(
+    builder.indexOf('- name: 整理稳定测试资产名'),
+    builder.indexOf('- name: 回验 Linux 测试安装包'),
+  );
+
+  assert.match(
+    signingStep,
+    /TAURI_SIGNING_PRIVATE_KEY:\s*\$\{\{ runner\.temp \}\}\/test-updater\.key/,
+  );
+  assert.match(
+    builder,
+    /echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$TEST_KEY_PASSWORD" >> "\$GITHUB_ENV"/,
+  );
+});
