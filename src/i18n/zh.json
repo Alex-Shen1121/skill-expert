@@ -429,10 +429,17 @@
       "completeTitle": "更新完成",
       "confirmItem": "单独确认 {{name}}",
       "confirmIndividually": "单独确认",
+      "stop": "停止后续任务",
+      "stoppingAction": "正在停止…",
+      "stopping": "正在停止，已开始的任务正在安全收尾…",
+      "stoppedTitle": "已停止",
+      "retryFailures": "重试失败项（{{count}}）",
       "summary": {
+        "completed": "已完成 {{count}}",
         "updated": "已更新 {{count}}",
         "unchanged": "内容未变化 {{count}}",
         "failed": "失败 {{count}}",
+        "notStarted": "未开始 {{count}}",
         "needsConfirmation": "需要单独确认 {{count}}"
       },
       "showError": "查看错误",
@@ -448,6 +455,7 @@
         "unknown": "未知",
         "local_only": "本地来源",
         "source_missing": "原路径丢失",
+        "not_started": "未开始",
         "error": "检查失败"
       },
       "updateStatus": {
@@ -456,6 +464,7 @@
         "updated": "已更新",
         "unchanged": "内容未变化",
         "needs_confirmation": "需要单独确认",
+        "not_started": "未开始",
         "error": "更新失败"
       }
     },

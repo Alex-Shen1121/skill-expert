@@ -31,6 +31,21 @@ impl InstallCancelRegistry {
         token
     }
 
+    /// 复用已存在的停止令牌，使早于任务注册到达的停止请求不会丢失。
+    pub fn register_or_get(&self, key: &str) -> Arc<AtomicBool> {
+        let mut tokens = self.tokens.lock().unwrap();
+        tokens
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+            .clone()
+    }
+
+    /// 设置停止令牌；任务尚未注册时先保留请求。
+    pub fn cancel_or_register(&self, key: &str) {
+        let token = self.register_or_get(key);
+        token.store(true, Ordering::SeqCst);
+    }
+
     /// Signal cancellation for the given operation.
     pub fn cancel(&self, key: &str) -> bool {
         if let Some(token) = self.tokens.lock().unwrap().get(key) {
@@ -102,5 +117,15 @@ mod tests {
         assert!(new.load(Ordering::SeqCst));
         // Old token is no longer tracked (but its Arc still exists)
         assert!(!old.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn pending_cancel_is_preserved_when_operation_registers_after_the_request() {
+        let registry = InstallCancelRegistry::new();
+
+        registry.cancel_or_register("batch-1");
+        let token = registry.register_or_get("batch-1");
+
+        assert!(token.load(Ordering::SeqCst));
     }
 }

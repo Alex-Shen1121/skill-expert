@@ -18,11 +18,13 @@ const FOCUSABLE_SELECTOR = [
 interface Options {
   active?: boolean;
   onEscape?: () => void;
+  focusContainerInitially?: boolean;
 }
 
 export function useModalFocusTrap<T extends HTMLElement>({
   active = true,
   onEscape,
+  focusContainerInitially = false,
 }: Options = {}) {
   const containerRef = useRef<T>(null);
 
@@ -38,11 +40,11 @@ export function useModalFocusTrap<T extends HTMLElement>({
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    (focusableElements()[0] ?? containerRef.current)?.focus();
+    (focusContainerInitially ? containerRef.current : focusableElements()[0] ?? containerRef.current)?.focus();
     return () => {
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [active, focusableElements]);
+  }, [active, focusContainerInitially, focusableElements]);
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<T>) => {
     if (event.key === "Escape") {

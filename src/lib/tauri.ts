@@ -319,6 +319,7 @@ export type SkillUpdateBatchProgressStatus =
   | "unknown"
   | "local_only"
   | "source_missing"
+  | "not_started"
   | "error";
 
 export interface SkillUpdateBatchProgress {
@@ -338,17 +339,27 @@ export interface CheckSkillUpdateItemResult {
   last_checked_at: number | null;
 }
 
-export interface CheckAllSkillUpdatesResult {
+export interface CheckSkillUpdatesBatchResult {
   batch_id: string;
+  stopped: boolean;
   skipped: number;
   items: CheckSkillUpdateItemResult[];
 }
 
 export const checkAllSkillUpdates = (force?: boolean, batchId?: string) =>
-  invoke<CheckAllSkillUpdatesResult>("check_all_skill_updates", {
+  invoke<CheckSkillUpdatesBatchResult>("check_all_skill_updates", {
     force: force ?? false,
     batchId,
   });
+
+export const retryFailedSkillUpdateChecks = (skillIds: string[], batchId: string) =>
+  invoke<CheckSkillUpdatesBatchResult>("retry_failed_skill_update_checks", {
+    skillIds,
+    batchId,
+  });
+
+export const stopSkillUpdateBatch = (batchId: string) =>
+  invoke<boolean>("stop_skill_update_batch", { batchId });
 
 export interface UpdateSkillResult {
   skill: ManagedSkill;
@@ -381,6 +392,7 @@ export const updateSkill = (skillId: string, approvedRemovals?: string | null) =
 
 export interface BatchUpdateSkillsResult {
   batch_id: string | null;
+  stopped: boolean;
   refreshed: number;
   unchanged: number;
   /** Skills left alone because updating would have removed files. */

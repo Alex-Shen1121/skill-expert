@@ -429,10 +429,17 @@
       "completeTitle": "Update complete",
       "confirmItem": "Confirm {{name}} individually",
       "confirmIndividually": "Confirm individually",
+      "stop": "Stop pending tasks",
+      "stoppingAction": "Stopping…",
+      "stopping": "Stopping; tasks already started are finishing safely…",
+      "stoppedTitle": "Stopped",
+      "retryFailures": "Retry failures ({{count}})",
       "summary": {
+        "completed": "Completed {{count}}",
         "updated": "Updated {{count}}",
         "unchanged": "Content unchanged {{count}}",
         "failed": "Failed {{count}}",
+        "notStarted": "Not started {{count}}",
         "needsConfirmation": "Needs individual confirmation {{count}}"
       },
       "showError": "Show error",
@@ -448,6 +455,7 @@
         "unknown": "Unknown",
         "local_only": "Local source",
         "source_missing": "Source missing",
+        "not_started": "Not started",
         "error": "Check failed"
       },
       "updateStatus": {
@@ -456,6 +464,7 @@
         "updated": "Updated",
         "unchanged": "Content unchanged",
         "needs_confirmation": "Needs individual confirmation",
+        "not_started": "Not started",
         "error": "Update failed"
       }
     },
