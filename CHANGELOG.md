@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.9] - 2026-08-29
+
+### Release Overview
 - 修复 macOS 上 CLI 拒绝待处理导入时的低概率进程锁释放竞态。
 
 ### User-facing
