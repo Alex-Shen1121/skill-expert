@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.36.0] - 2026-08-29
+
+### 发布概览
+- 这一版让你的编程 agent 能自己驱动 Skills Manager——替你安装、更新、部署 skill，走的是和应用完全相同的技能库与同步引擎。
+
+### 用户可见更新
+- **让你的 Agent 管理 Skills** —— Claude Code、Codex、Cursor 等现在可以替你装一个 skill、把它部署到另一个 agent，或者报告哪个 agent 有什么，做法是驱动 Skills Manager，而不是绕过它直接往 agent 目录里写。来源、preset 归属、更新追踪和各 agent 的部署状态都不会丢。Dashboard 上有一个一次性入口：勾选哪些 agent 可以这么做，应用就把 `manage-skills` 装进技能库并只部署给这些 agent。默认一个都不勾；这条提示在你用过或关掉之后就永久消失——之后它就是一个普通的库内 skill，增减 agent 走它自己卡片上的 agent 图标行。
+- **CLI 现在待在 agent 找得到的地方** —— 命令行工具一直随桌面应用分发，但 macOS 上它在 `.app` 内部、Windows 上在安装目录里，谁也够不着。现在应用会在每次启动时把它复制一份到 `~/.skills-manager/bin/`，agent 不需要你改 PATH 就能用。Linux 的 `.deb` 和 `.rpm` 本来就把它装在 PATH 上，这一点没变。
+- **部署被拒绝时，能说清是哪个目录挡路了** —— 当一次部署会覆盖不属于 Skills Manager 的内容时，它会拒绝，并且原封不动地保留你的东西。此前拒绝理由是一整句话，所以被你指派去做部署的 agent 只能把那句话原样念给你听。现在它带上了真实路径，你的 agent 就能指出是哪个目录、确认里面一个文件都没被删，并提议把它收进技能库或者挪到一边。
+
+### 开发者与治理更新
+- 新增 `core/cli_bridge.rs`，在启动时于主线程之外把 bundle 内的 CLI 发布到 `~/.skills-manager/bin/`。用复制而不是软链：AppImage 的挂载点是临时的，Windows 建软链默认需要管理员权限，而被挪走的 `.app` 会留下断链。位置取 home 目录而非可被用户 relocate 的 `central_repo::base_dir()`。
+- `.version` 标记最后写、最先删，并作为这份副本的开关：陈旧的 bridge 可能是 #363 修复之前的二进制，会删掉当前版本拒绝触碰的用户目录，而数据库自己的 `user_version` 闸门拦不住——这类修复不带 migration。失效动作有三级回退（unlink、截空、删除二进制本身），所以 Windows 上被锁或只读的标记文件无法让这对陈旧组合互相担保；三者皆无效时宁可放弃本次发布，也不带着一个说谎的标记继续。副本发布前会实际运行 `--version` 并做整 token 全等校验。
+- `AppError` 新增可选的 `details`（缺省时不出现在传输格式里）与 `ErrorKind::TargetConflict`，CLI 将其输出为携带 `conflicts[].path` 的 `TARGET_CONFLICT` 信封。只有归属拒绝会被这样分类：两个库内 skill 落到同一路径仍是 `InvalidInput`，无法探测的目标是 `Io`——让调用方去 adopt 或挪走一份可能根本不存在的内容，比不给建议更糟。拒绝文案现在只有一处定义，句子和结构化形式不会再各走各的。
+- 内置的 `manage-skills` skill 现在先解析 CLI，优先使用已发布的副本而不是 PATH 上的任何一个——手工安装的二进制常常落后好几个版本，却在写同一张数据库。解析的产物是一个供后续命令字面替换的路径而不是 shell 变量，因为 agent 执行的每条命令都是新进程。没有标记的二进制、或者没有二进制的标记，都会让它停下，而不是转头去找一个可能更旧的。
+- 两个 README 都加上了 skills.sh 徽章和 `npx skills add` 命令，让这个 skill 对从不打开应用的人也有一个入口。
+
 ## [1.35.1] - 2026-08-28
 
 ### 发布概览

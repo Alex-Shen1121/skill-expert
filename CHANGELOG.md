@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-08-29
+
+### Release Overview
+- Your coding agents can now drive Skills Manager themselves — installing, updating and deploying skills on your behalf, through the same library and sync engine the app uses.
+
+### User-facing
+- **Let your agents manage skills** — Claude Code, Codex, Cursor and the rest can now install a skill, deploy it to another agent, or report what is where, by driving Skills Manager rather than writing into an agent's folder behind its back. Sources, preset membership, update tracking and per-agent deployment state all stay intact. The Dashboard offers a one-time setup: pick which agents should be able to do it, and the app installs the `manage-skills` skill and deploys it to exactly those. Nothing is pre-selected, and the prompt disappears for good once you have acted on it or dismissed it — afterwards it is an ordinary library skill, managed from the agent badges on its own card.
+- **The CLI is where agents can find it** — The command-line tool has always shipped inside the desktop app, but on macOS it sat inside the `.app` and on Windows inside the install directory, where nothing could reach it. The app now keeps a copy at `~/.skills-manager/bin/`, refreshed on every launch, so agents can use it without anything being added to your PATH. On Linux the `.deb` and `.rpm` already placed it on PATH and still do.
+- **A refused deployment now says which directory is in the way** — When a deploy would overwrite something Skills Manager does not own, it refuses and leaves your content untouched. Until now the reason arrived as one long sentence, so an agent asked to do the deployment could only read it back to you. It now carries the actual path, which means your agent can name the directory, confirm nothing in it was deleted, and offer to import it into the library or move it aside.
+
+### Developer & Governance
+- New `core/cli_bridge.rs` publishes the bundled CLI to `~/.skills-manager/bin/` off the main thread at startup. A copy rather than a symlink: an AppImage is mounted at a temporary path, Windows reserves symlink creation for administrators, and a relocated `.app` would leave a dangling link. The location is the home directory rather than `central_repo::base_dir()`, which the user can move.
+- A `.version` stamp is written last and removed first, and gates the copy: a stale bridge can be a binary that predates the #363 fix and so deletes user directories a current one refuses to touch, which the database's own `user_version` gate cannot catch because such a fix carries no migration. Invalidation has three fallbacks — unlink, truncate, remove the binary itself — so a locked or read-only stamp on Windows cannot leave the pair vouching for itself; when none can take effect the publish is abandoned rather than run with a stamp that lies. The copy is verified by running `--version` with whole-token equality before it is published.
+- `AppError` gains an optional `details`, omitted from the wire format when absent, and an `ErrorKind::TargetConflict` that the CLI emits as a `TARGET_CONFLICT` envelope carrying `conflicts[].path`. Only an ownership refusal is classified that way: two library skills planning onto one path stays `InvalidInput`, and a target that cannot be inspected is `Io`, since telling a caller to adopt or move content that may not exist is worse than no advice. The refusal wording now has a single definition so the sentence and the structured form cannot drift.
+- The bundled `manage-skills` skill resolves the CLI before anything else, preferring the published copy over whatever is on PATH — a hand-installed binary is often several releases behind while writing the same database. Resolution yields a path to substitute into later commands rather than a shell variable, because each command an agent runs is a new process. An unstamped binary, or a stamp with no binary, stops the skill rather than sending it looking for something that may be older still.
+- Both READMEs now carry the skills.sh badge and the `npx skills add` line, so the skill has an entry point for people who never open the app.
+
 ## [1.35.1] - 2026-08-28
 
 ### Release Overview
