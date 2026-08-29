@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.8] - 2026-08-29
+
+### Release Overview
 - 修复中文桌面显示名称导致 Linux DEB 技术包名无效的问题。
 
 ### User-facing
