@@ -191,6 +191,24 @@ pub struct BatchUpdateSkillsResult {
 pub const SKILL_UPDATE_BATCH_PROGRESS_EVENT: &str = "skill-update-batch-progress";
 pub const DEFAULT_CHECK_CONCURRENCY: usize = 8;
 pub const DEFAULT_UPDATE_CONCURRENCY: usize = 4;
+const FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY: &str = "foreground_batch_check_concurrency";
+const FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY: &str = "foreground_batch_update_concurrency";
+
+fn foreground_batch_concurrency(store: &SkillStore, key: &str, fallback: usize) -> usize {
+    match store.get_setting(key) {
+        Ok(Some(value)) => match value.trim() {
+            "1" => 1,
+            "4" => 4,
+            "8" => 8,
+            _ => fallback,
+        },
+        Ok(None) => fallback,
+        Err(err) => {
+            log::warn!("读取前台批处理并发设置失败，使用默认值 {fallback}：{err}");
+            fallback
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1376,11 +1394,10 @@ pub async fn check_all_skill_updates(
     tauri::async_runtime::spawn_blocking(move || {
         let force_check = force.unwrap_or(false);
         if let Some(batch_id) = foreground_batch_id {
-            check_all_skill_updates_internal(
+            check_all_skill_updates_foreground_internal(
                 &store,
                 &batch_id,
                 force_check,
-                DEFAULT_CHECK_CONCURRENCY,
                 |key| {
                     git_fetcher::resolve_remote_revision(
                         &key.clone_url,
@@ -1670,6 +1687,27 @@ where
         skipped,
         items,
     })
+}
+
+/// 启动前台“检查全部”批次时读取一次并发偏好，然后把数值固定传入批处理契约。
+/// 设置在解析远端期间发生变化时，只会影响下一批任务。
+pub(crate) fn check_all_skill_updates_foreground_internal<R, E>(
+    store: &SkillStore,
+    batch_id: &str,
+    force_check: bool,
+    resolve: R,
+    emit: E,
+) -> Result<CheckAllSkillUpdatesResult, AppError>
+where
+    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    E: Fn(SkillUpdateBatchProgress) + Sync,
+{
+    let concurrency = foreground_batch_concurrency(
+        store,
+        FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
+        DEFAULT_CHECK_CONCURRENCY,
+    );
+    check_all_skill_updates_internal(store, batch_id, force_check, concurrency, resolve, emit)
 }
 
 /// A distinct remote to resolve once during a batch check. Several skills can
@@ -2053,6 +2091,27 @@ where
     })
 }
 
+/// 启动前台“全部更新”批次时读取一次并发偏好，然后把数值固定传入批处理契约。
+/// 运行期间的设置修改不会改变已经创建的工作队列。
+pub(crate) fn batch_update_skills_foreground_internal<U, E>(
+    store: &SkillStore,
+    batch_id: &str,
+    skill_ids: Vec<String>,
+    update: U,
+    emit: E,
+) -> Result<BatchUpdateSkillsResult, AppError>
+where
+    U: Fn(&SkillRecord) -> Result<BatchUpdateExecution, String> + Sync,
+    E: Fn(SkillUpdateBatchProgress) + Sync,
+{
+    let concurrency = foreground_batch_concurrency(
+        store,
+        FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
+        DEFAULT_UPDATE_CONCURRENCY,
+    );
+    batch_update_skills_internal(store, batch_id, skill_ids, concurrency, update, emit)
+}
+
 #[tauri::command]
 pub async fn batch_update_skills(
     skill_ids: Vec<String>,
@@ -2064,11 +2123,10 @@ pub async fn batch_update_skills(
     let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(batch_id) = batch_id.filter(|value| !value.trim().is_empty()) {
-            return batch_update_skills_internal(
+            return batch_update_skills_foreground_internal(
                 &store,
                 &batch_id,
                 skill_ids,
-                DEFAULT_UPDATE_CONCURRENCY,
                 |skill| execute_batch_update(&store, skill, proxy_url.as_deref()),
                 |event| {
                     if let Err(err) = app.emit(SKILL_UPDATE_BATCH_PROGRESS_EVENT, event) {
@@ -3651,6 +3709,7 @@ fn remove_path_if_exists(path: &Path) -> Result<(), AppError> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::{tempdir, TempDir};
 
     struct TestRepo {
@@ -3663,6 +3722,55 @@ mod tests {
         fn drop(&mut self) {
             central_repo::set_test_base_dir_override(None);
         }
+    }
+
+    struct ConcurrencyProbe {
+        first_operation_started: AtomicBool,
+        in_flight: AtomicUsize,
+        peak: AtomicUsize,
+    }
+
+    impl ConcurrencyProbe {
+        fn new() -> Self {
+            Self {
+                first_operation_started: AtomicBool::new(false),
+                in_flight: AtomicUsize::new(0),
+                peak: AtomicUsize::new(0),
+            }
+        }
+
+        fn observe<T>(&self, on_first: impl FnOnce(), output: T) -> T {
+            if !self.first_operation_started.swap(true, Ordering::SeqCst) {
+                on_first();
+            }
+            let current = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(current, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            output
+        }
+
+        fn peak(&self) -> usize {
+            self.peak.load(Ordering::SeqCst)
+        }
+    }
+
+    fn insert_concurrency_skills(
+        store: &SkillStore,
+        remote_name: &str,
+        count: usize,
+    ) -> Vec<String> {
+        (0..count)
+            .map(|index| {
+                let skill_id = format!("skill-{index:02}");
+                insert_git_skill(
+                    store,
+                    &skill_id,
+                    &format!("https://example.test/{remote_name}-{index}.git"),
+                );
+                skill_id
+            })
+            .collect()
     }
 
     fn test_repo() -> TestRepo {
@@ -4220,6 +4328,91 @@ mod tests {
     }
 
     #[test]
+    fn foreground_check_contract_snapshots_configured_concurrency_one_four_and_eight() {
+        for configured in [1usize, 4, 8] {
+            let repo = test_repo();
+            let skill_ids = insert_concurrency_skills(&repo.store, "check", 12);
+            repo.store
+                .set_setting(
+                    FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
+                    &configured.to_string(),
+                )
+                .unwrap();
+
+            let probe = ConcurrencyProbe::new();
+            let result = check_all_skill_updates_foreground_internal(
+                &repo.store,
+                &format!("check-{configured}"),
+                true,
+                |_key| {
+                    probe.observe(
+                        || {
+                            repo.store
+                                .set_setting(FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY, "8")
+                                .unwrap();
+                        },
+                        Ok("old-rev".to_string()),
+                    )
+                },
+                |_| {},
+            )
+            .unwrap();
+
+            assert_eq!(result.items.len(), skill_ids.len());
+            assert_eq!(
+                probe.peak(),
+                configured,
+                "前台检查批次必须固定使用启动时读取的并发数"
+            );
+        }
+    }
+
+    #[test]
+    fn foreground_concurrency_contract_uses_safe_defaults_for_missing_or_invalid_values() {
+        let repo = test_repo();
+
+        assert_eq!(
+            foreground_batch_concurrency(
+                &repo.store,
+                FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
+                DEFAULT_CHECK_CONCURRENCY,
+            ),
+            8
+        );
+        assert_eq!(
+            foreground_batch_concurrency(
+                &repo.store,
+                FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
+                DEFAULT_UPDATE_CONCURRENCY,
+            ),
+            4
+        );
+
+        repo.store
+            .set_setting(FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY, "32")
+            .unwrap();
+        repo.store
+            .set_setting(FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY, "invalid")
+            .unwrap();
+        assert_eq!(
+            foreground_batch_concurrency(
+                &repo.store,
+                FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
+                DEFAULT_CHECK_CONCURRENCY,
+            ),
+            8
+        );
+        assert_eq!(
+            foreground_batch_concurrency(
+                &repo.store,
+                FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
+                DEFAULT_UPDATE_CONCURRENCY,
+            ),
+            4
+        );
+    }
+
+    #[test]
     fn update_all_contract_uses_default_concurrency_four_and_isolates_each_result() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -4306,6 +4499,46 @@ mod tests {
                 && event.status == SkillUpdateBatchProgressStatus::Error
                 && event.error.as_deref() == Some("远端不可用")
         }));
+    }
+
+    #[test]
+    fn foreground_update_contract_snapshots_configured_concurrency_one_four_and_eight() {
+        for configured in [1usize, 4, 8] {
+            let repo = test_repo();
+            let skill_ids = insert_concurrency_skills(&repo.store, "update", 12);
+            repo.store
+                .set_setting(
+                    FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
+                    &configured.to_string(),
+                )
+                .unwrap();
+
+            let probe = ConcurrencyProbe::new();
+            let result = batch_update_skills_foreground_internal(
+                &repo.store,
+                &format!("update-{configured}"),
+                skill_ids.clone(),
+                |_skill| {
+                    probe.observe(
+                        || {
+                            repo.store
+                                .set_setting(FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY, "1")
+                                .unwrap();
+                        },
+                        Ok(BatchUpdateExecution::Updated),
+                    )
+                },
+                |_| {},
+            )
+            .unwrap();
+
+            assert_eq!(result.items.len(), skill_ids.len());
+            assert_eq!(
+                probe.peak(),
+                configured,
+                "前台更新批次必须固定使用启动时读取的并发数"
+            );
+        }
     }
 
     #[test]

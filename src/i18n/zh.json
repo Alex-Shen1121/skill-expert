@@ -758,7 +758,11 @@
       "applyLabel": "自动应用更新",
       "applyDesc": "开启后自动拉取并覆盖本地内容；关闭则仅在技能库标记，需手动更新。",
       "applyOff": "关闭（仅提示）",
-      "applyOn": "开启"
+      "applyOn": "开启",
+      "foregroundCheckConcurrencyLabel": "检查全部并发数",
+      "foregroundCheckConcurrencyDesc": "只控制前台“检查全部”；批次启动后，本次并发数保持不变。",
+      "foregroundUpdateConcurrencyLabel": "全部更新并发数",
+      "foregroundUpdateConcurrencyDesc": "只控制前台“全部更新”；后台自动更新、多选刷新和单项操作不受影响。"
     },
     "gitSyncConfig": "Git 同步配置",
     "gitSyncConfigDesc": "备份已移到独立的「备份」页面。这里保留为高级 Git URL 编辑入口。",

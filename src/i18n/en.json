@@ -758,7 +758,11 @@
       "applyLabel": "Apply updates automatically",
       "applyDesc": "When on, updates are pulled and applied automatically; when off, they are only flagged in the Library for manual update.",
       "applyOff": "Off (notify only)",
-      "applyOn": "On"
+      "applyOn": "On",
+      "foregroundCheckConcurrencyLabel": "Check All concurrency",
+      "foregroundCheckConcurrencyDesc": "Controls the foreground Check All action only. A running batch keeps the concurrency captured at startup.",
+      "foregroundUpdateConcurrencyLabel": "Update All concurrency",
+      "foregroundUpdateConcurrencyDesc": "Controls the foreground Update All action only. Background auto-update, multi-select refresh, and single-item actions are unchanged."
     },
     "gitSyncConfig": "Git Sync Configuration",
     "gitSyncConfigDesc": "Backup has moved to the dedicated Backup page. This legacy field is kept here for advanced Git URL edits.",

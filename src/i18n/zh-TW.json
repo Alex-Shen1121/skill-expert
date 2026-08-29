@@ -703,7 +703,11 @@
       "applyLabel": "自動套用更新",
       "applyDesc": "開啟後自動拉取並覆寫本地內容；關閉則僅在技能庫標記，需手動更新。",
       "applyOff": "關閉（僅提示）",
-      "applyOn": "開啟"
+      "applyOn": "開啟",
+      "foregroundCheckConcurrencyLabel": "檢查全部並行數",
+      "foregroundCheckConcurrencyDesc": "只控制前台「檢查全部」；批次啟動後，本次並行數保持不變。",
+      "foregroundUpdateConcurrencyLabel": "全部更新並行數",
+      "foregroundUpdateConcurrencyDesc": "只控制前台「全部更新」；背景自動更新、多選重新整理和單項操作不受影響。"
     },
     "gitSyncConfig": "Git 同步設定",
     "gitSyncConfigDesc": "備份已移到獨立的「備份」頁面。這裡保留為進階 Git URL 編輯入口。",

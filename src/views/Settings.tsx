@@ -73,6 +73,66 @@ const IS_MACOS = navigator.userAgent.includes("Mac");
 const CAN_INSTALL_IN_APP = IS_WINDOWS || IS_MACOS;
 
 const RESTART_TOAST_ID = "app-update-restart";
+const FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY = "foreground_batch_check_concurrency";
+const FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY = "foreground_batch_update_concurrency";
+const FOREGROUND_CONCURRENCY_OPTIONS = ["1", "4", "8"] as const;
+type ForegroundConcurrency = (typeof FOREGROUND_CONCURRENCY_OPTIONS)[number];
+type ForegroundConcurrencySettingKey =
+  | typeof FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY
+  | typeof FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY;
+
+function normalizeForegroundConcurrency(
+  value: string | null,
+  fallback: ForegroundConcurrency,
+): ForegroundConcurrency {
+  if (value === "1" || value === "4" || value === "8") return value;
+  return fallback;
+}
+
+interface ForegroundConcurrencySettingRowProps {
+  label: string;
+  description: string;
+  value: ForegroundConcurrency;
+  onChange: (value: ForegroundConcurrency) => Promise<void>;
+}
+
+function ForegroundConcurrencySettingRow({
+  label,
+  description,
+  value,
+  onChange,
+}: ForegroundConcurrencySettingRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+      <div className="min-w-0">
+        <h3 className="text-[14px] font-semibold text-primary">{label}</h3>
+        <p className="text-[12px] text-muted">{description}</p>
+      </div>
+      <div
+        role="group"
+        aria-label={label}
+        className="app-segmented flex-wrap bg-background"
+      >
+        {FOREGROUND_CONCURRENCY_OPTIONS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={value === option}
+            onClick={() => onChange(option)}
+            className={cn(
+              "app-segmented-button flex items-center gap-1.5",
+              value === option
+                ? "bg-surface-active text-secondary"
+                : "text-muted hover:text-tertiary",
+            )}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function compactHomePath(path: string) {
   return path
@@ -189,6 +249,10 @@ export function Settings() {
   const [autoUpdateInterval, setAutoUpdateInterval] = useState("off");
   const [autoUpdateApply, setAutoUpdateApply] = useState("off");
   const [autoUpdateLastRun, setAutoUpdateLastRun] = useState<string | null>(null);
+  const [foregroundCheckConcurrency, setForegroundCheckConcurrency] =
+    useState<ForegroundConcurrency>("8");
+  const [foregroundUpdateConcurrency, setForegroundUpdateConcurrency] =
+    useState<ForegroundConcurrency>("4");
   // Agent path editing
   const [editingPathKey, setEditingPathKey] = useState<string | null>(null);
   const [editingPathValue, setEditingPathValue] = useState("");
@@ -337,6 +401,12 @@ export function Settings() {
     api.getSettings("text_size").then((v) => { if (v) { setTextSize(v); applyTextSize(v); } });
     api.getSettings("auto_update_check_interval").then((v) => { if (v) setAutoUpdateInterval(v); });
     api.getSettings("auto_update_apply").then((v) => { if (v) setAutoUpdateApply(v); });
+    api.getSettings(FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY).then((v) => {
+      setForegroundCheckConcurrency(normalizeForegroundConcurrency(v, "8"));
+    });
+    api.getSettings(FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY).then((v) => {
+      setForegroundUpdateConcurrency(normalizeForegroundConcurrency(v, "4"));
+    });
     // The `skills-auto-updated` listener may populate this concurrently, so
     // keep whichever timestamp is newer rather than blindly overwriting.
     api.getSettings("auto_update_last_run_at").then((v) => {
@@ -437,6 +507,15 @@ export function Settings() {
   const handleAutoUpdateApplyChange = async (value: string) => {
     setAutoUpdateApply(value);
     await api.setSettings("auto_update_apply", value);
+  };
+
+  const handleForegroundConcurrencyChange = async (
+    key: ForegroundConcurrencySettingKey,
+    value: ForegroundConcurrency,
+    setValue: (next: ForegroundConcurrency) => void,
+  ) => {
+    setValue(value);
+    await api.setSettings(key, value);
   };
 
   // Keep the last-run timestamp in sync with both the background scheduler
@@ -1602,6 +1681,30 @@ export function Settings() {
                 ))}
               </div>
             </div>
+            <ForegroundConcurrencySettingRow
+              label={t("settings.autoUpdate.foregroundCheckConcurrencyLabel")}
+              description={t("settings.autoUpdate.foregroundCheckConcurrencyDesc")}
+              value={foregroundCheckConcurrency}
+              onChange={(value) =>
+                handleForegroundConcurrencyChange(
+                  FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
+                  value,
+                  setForegroundCheckConcurrency,
+                )
+              }
+            />
+            <ForegroundConcurrencySettingRow
+              label={t("settings.autoUpdate.foregroundUpdateConcurrencyLabel")}
+              description={t("settings.autoUpdate.foregroundUpdateConcurrencyDesc")}
+              value={foregroundUpdateConcurrency}
+              onChange={(value) =>
+                handleForegroundConcurrencyChange(
+                  FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
+                  value,
+                  setForegroundUpdateConcurrency,
+                )
+              }
+            />
           </div>
         </section>
 
