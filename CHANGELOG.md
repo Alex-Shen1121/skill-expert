@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.10] - 2026-08-29
+
+### Release Overview
 - 统一角色 App 图标，并把技能核心符号限制在系统状态区。
 - 将未来正式 Release 精简为 12 个应用分发与可信验证资产。
 
