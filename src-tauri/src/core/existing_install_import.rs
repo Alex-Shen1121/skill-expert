@@ -176,6 +176,7 @@ fn acquire_startup_process_lock_at(
                 // this short-lived CLI process exits.
                 if caller == ProcessCallerRole::Cli && fixed_import_state_is_pending_at(state_path)
                 {
+                    FileExt::unlock(&file).context("无法释放 CLI 启动阶段的临时进程锁")?;
                     anyhow::bail!(
                         "a pending import must be completed by restarting Agent 技能管家 via the GUI before using the CLI"
                     );
@@ -1528,16 +1529,21 @@ mod tests {
         .unwrap();
         let pending_bytes = fs::read(&environment.state_file).unwrap();
 
-        let error = acquire_startup_process_lock_at(
-            &lock_path,
-            &environment.state_file,
-            ProcessCallerRole::Cli,
-            std::time::Duration::from_millis(100),
-        )
-        .unwrap_err();
+        for _ in 0..100 {
+            let error = acquire_startup_process_lock_at(
+                &lock_path,
+                &environment.state_file,
+                ProcessCallerRole::Cli,
+                std::time::Duration::from_millis(100),
+            )
+            .unwrap_err();
 
-        assert!(error.to_string().contains("pending import"));
-        assert!(error.to_string().contains("GUI"));
+            assert!(error.to_string().contains("pending import"));
+            assert!(error.to_string().contains("GUI"));
+            let exclusive = try_acquire_process_lock_at(&lock_path, ProcessLockMode::Exclusive)
+                .expect("a rejected CLI startup must release its temporary shared lock");
+            drop(exclusive);
+        }
         assert_eq!(fs::read(&environment.state_file).unwrap(), pending_bytes);
         assert_eq!(
             fs::read(environment.target_base.join("keep-target.txt")).unwrap(),
@@ -1547,8 +1553,6 @@ mod tests {
             fs::read(staging.join("keep-staging.txt")).unwrap(),
             b"staging"
         );
-        try_acquire_process_lock_at(&lock_path, ProcessLockMode::Exclusive)
-            .expect("a rejected CLI startup must release its temporary shared lock");
     }
 
     fn test_environment(root: &std::path::Path) -> ImportEnvironment {

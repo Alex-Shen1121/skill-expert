@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复 macOS 上 CLI 拒绝待处理导入时的低概率进程锁释放竞态。
 
 ### User-facing
--
+- CLI 遇到必须由 GUI 完成的待处理导入时，会在返回提示前显式释放临时共享锁，不再短暂阻塞应用恢复。
 
 ### Developer & Governance
--
+- 待处理导入锁测试连续执行 100 次即时独占重获断言；本地使用 Rust 1.98.0 完成 511 项全量测试与 10 万次锁循环压力验证。
 
 ## [1.0.8] - 2026-08-29
 
