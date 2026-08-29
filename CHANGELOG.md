@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.6] - 2026-08-29
+
+### Release Overview
 - 将桌面应用显示名称统一改为“Agent 技能管家”。
 - 为技能库增加可记忆的自定义、名称、最近添加和最近更新排序。
 - Selectively incorporate the Kimi path correction and multi-agent data protection from upstream `6e32c3a` while retaining the independent product and four-platform release boundary.
