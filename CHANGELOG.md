@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复中文桌面显示名称导致 Linux DEB 技术包名无效的问题。
 
 ### User-facing
--
+- Linux DEB、RPM 与 AppImage 使用兼容的 `skill-expert` 技术包名，同时继续在应用窗口和桌面入口显示“Agent 技能管家”。
 
 ### Developer & Governance
--
+- 新增 Linux 平台专用 Tauri 配置与共享 desktop 模板，并在正式回验中锁定 DEB/RPM 包名、三种包的中文桌面显示名和技术执行入口。
 
 ## [1.0.7] - 2026-08-29
 
