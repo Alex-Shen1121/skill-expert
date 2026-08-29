@@ -43,8 +43,9 @@ test('稳定文件名重新签名复用构建阶段生成的同一临时私钥',
 
   assert.match(
     signingStep,
-    /TAURI_SIGNING_PRIVATE_KEY:\s*\$\{\{ runner\.temp \}\}\/test-updater\.key/,
+    /TAURI_SIGNING_PRIVATE_KEY_PATH:\s*\$\{\{ runner\.temp \}\}\/test-updater\.key/,
   );
+  assert.doesNotMatch(signingStep, /^\s*TAURI_SIGNING_PRIVATE_KEY:/m);
   assert.match(
     builder,
     /echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$TEST_KEY_PASSWORD" >> "\$GITHUB_ENV"/,

@@ -141,7 +141,7 @@ jobs:
         shell: bash
         env:
           BUILD_ROOT: src-tauri/target/${{ matrix.rust_target }}/release
-          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}/test-updater.key
+          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ runner.temp }}/test-updater.key
           TEST_PUBLIC_KEY_PATH: ${{ runner.temp }}/test-updater.key.pub
           TARGET_ID: ${{ matrix.target_id }}
         run: |
