@@ -310,6 +310,10 @@ export const checkSkillUpdate = (skillId: string, force?: boolean) =>
 export type SkillUpdateBatchProgressStatus =
   | "waiting"
   | "checking"
+  | "updating"
+  | "updated"
+  | "unchanged"
+  | "needs_confirmation"
   | "up_to_date"
   | "update_available"
   | "unknown"
@@ -320,7 +324,7 @@ export type SkillUpdateBatchProgressStatus =
 export interface SkillUpdateBatchProgress {
   batch_id: string;
   skill_id: string;
-  phase: "check";
+  phase: "check" | "update";
   status: SkillUpdateBatchProgressStatus;
   error: string | null;
 }
@@ -331,6 +335,7 @@ export interface CheckSkillUpdateItemResult {
   source_type: string;
   status: SkillUpdateBatchProgressStatus;
   error: string | null;
+  last_checked_at: number | null;
 }
 
 export interface CheckAllSkillUpdatesResult {
@@ -375,15 +380,27 @@ export const updateSkill = (skillId: string, approvedRemovals?: string | null) =
   });
 
 export interface BatchUpdateSkillsResult {
+  batch_id: string | null;
   refreshed: number;
   unchanged: number;
   /** Skills left alone because updating would have removed files. */
   held_back: string[];
   failed: string[];
+  items: BatchUpdateSkillItemResult[];
 }
 
-export const batchUpdateSkills = (skillIds: string[]) =>
-  invoke<BatchUpdateSkillsResult>("batch_update_skills", { skillIds });
+export interface BatchUpdateSkillItemResult {
+  skill_id: string;
+  name: string;
+  source_type: string;
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+  pending_removals: PendingRemoval[];
+  removal_approval: string | null;
+}
+
+export const batchUpdateSkills = (skillIds: string[], batchId?: string) =>
+  invoke<BatchUpdateSkillsResult>("batch_update_skills", { skillIds, batchId });
 
 export interface ReimportSkillResult {
   skill: ManagedSkill;
