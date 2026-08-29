@@ -408,6 +408,7 @@
       "removalConfirm": "仍然更新"
     },
     "gitConfigEntry": "同步配置",
+    "filtersLabel": "筛选当前 Preset",
     "filters": {
       "all": "全部",
       "enabled": "当前 Preset 已启用",
