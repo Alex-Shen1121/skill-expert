@@ -15,7 +15,33 @@ export interface SkillUpdateProgressItem {
   removalApproval?: string | null;
 }
 
-export type SkillUpdateDialogStage = "checking" | "check_result" | "select" | "updating" | "complete";
+export type SkillUpdateDialogStage = "checking" | "check_result" | "select" | "updating" | "complete" | "stopped";
+
+const RUNNING_STATUSES = new Set<SkillUpdateBatchProgressStatus>(["waiting", "checking", "updating"]);
+const FAILURE_STATUSES = new Set<SkillUpdateBatchProgressStatus>(["error", "source_missing"]);
+const STATUS_PRESENTATION: Record<SkillUpdateBatchProgressStatus, {
+  icon: typeof Clock3;
+  tone: string;
+  spin?: boolean;
+}> = {
+  waiting: { icon: Clock3, tone: "text-faint" },
+  checking: { icon: Loader2, tone: "text-accent-light", spin: true },
+  updating: { icon: Loader2, tone: "text-accent-light", spin: true },
+  updated: { icon: CheckCircle2, tone: "text-emerald-500" },
+  unchanged: { icon: CheckCircle2, tone: "text-emerald-500" },
+  needs_confirmation: { icon: CircleAlert, tone: "text-amber-500" },
+  up_to_date: { icon: CheckCircle2, tone: "text-emerald-500" },
+  update_available: { icon: CheckCircle2, tone: "text-amber-500" },
+  unknown: { icon: Clock3, tone: "text-faint" },
+  local_only: { icon: CheckCircle2, tone: "text-faint" },
+  source_missing: { icon: CircleAlert, tone: "text-red-500" },
+  not_started: { icon: Clock3, tone: "text-amber-500" },
+  error: { icon: CircleAlert, tone: "text-red-500" },
+};
+
+function isFinishedStatus(status: SkillUpdateBatchProgressStatus) {
+  return !RUNNING_STATUSES.has(status);
+}
 
 interface Props {
   open: boolean;
@@ -23,20 +49,15 @@ interface Props {
   items: SkillUpdateProgressItem[];
   skipped: number;
   selectedIds: Set<string>;
+  operation: "check" | "update";
+  stopRequested: boolean;
   onToggleSelected: (skillId: string) => void;
   onStartUpdate: () => void;
   onSelectAvailable: () => void;
   onConfirmRemoval: (item: SkillUpdateProgressItem) => void;
+  onStop: () => void;
+  onRetryFailures: () => void;
   onClose: () => void;
-}
-
-function statusIcon(status: SkillUpdateBatchProgressStatus) {
-  if (status === "checking" || status === "updating") return <Loader2 className="h-4 w-4 animate-spin" />;
-  if (status === "error" || status === "source_missing" || status === "needs_confirmation") {
-    return <CircleAlert className="h-4 w-4" />;
-  }
-  if (status === "waiting" || status === "unknown") return <Clock3 className="h-4 w-4" />;
-  return <CheckCircle2 className="h-4 w-4" />;
 }
 
 export function SkillUpdateProgressDialog({
@@ -45,10 +66,14 @@ export function SkillUpdateProgressDialog({
   items,
   skipped,
   selectedIds,
+  operation,
+  stopRequested,
   onToggleSelected,
   onStartUpdate,
   onSelectAvailable,
   onConfirmRemoval,
+  onStop,
+  onRetryFailures,
   onClose,
 }: Props) {
   const { t } = useTranslation();
@@ -56,21 +81,28 @@ export function SkillUpdateProgressDialog({
   const { containerRef, onKeyDown } = useModalFocusTrap<HTMLElement>({
     active: open,
     onEscape: running ? undefined : onClose,
+    focusContainerInitially: true,
   });
 
   if (!open) return null;
 
-  const completed = items.filter(
-    (item) => item.status !== "waiting" && item.status !== "checking" && item.status !== "updating",
-  ).length;
+  const finished = items.filter((item) => isFinishedStatus(item.status)).length;
   const available = items.filter((item) => item.status === "update_available").length;
+  const retryableFailures = items.filter((item) => item.status === "error").length;
   const summary = {
+    completed: items.filter((item) =>
+      isFinishedStatus(item.status) &&
+      item.status !== "not_started" &&
+      item.status !== "needs_confirmation" &&
+      !FAILURE_STATUSES.has(item.status)
+    ).length,
     updated: items.filter((item) => item.status === "updated").length,
     unchanged: items.filter((item) => item.status === "unchanged").length,
-    failed: items.filter((item) => item.status === "error").length,
+    failed: items.filter((item) => FAILURE_STATUSES.has(item.status)).length,
+    notStarted: items.filter((item) => item.status === "not_started").length,
     needsConfirmation: items.filter((item) => item.status === "needs_confirmation").length,
   };
-  const progress = items.length === 0 ? 100 : Math.round((completed / items.length) * 100);
+  const progress = items.length === 0 ? 100 : Math.round((finished / items.length) * 100);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-5 backdrop-blur-sm">
@@ -88,7 +120,11 @@ export function SkillUpdateProgressDialog({
             <h2 id="skill-update-progress-title" className="text-[15px] font-semibold text-primary">
               {t("mySkills.checkProgress.title")}
             </h2>
-            {stage === "select" ? (
+            {stopRequested ? (
+              <p className="mt-1 text-[12px] text-muted" aria-live="polite">
+                {t("mySkills.checkProgress.stopping")}
+              </p>
+            ) : stage === "select" ? (
               <p className="mt-1 text-[12px] text-muted">
                 {t("mySkills.checkProgress.selectTitle")}
               </p>
@@ -99,6 +135,10 @@ export function SkillUpdateProgressDialog({
             ) : stage === "complete" ? (
               <p className="mt-1 text-[12px] text-muted">
                 {t("mySkills.checkProgress.completeTitle")}
+              </p>
+            ) : stage === "stopped" ? (
+              <p className="mt-1 text-[12px] text-muted">
+                {t("mySkills.checkProgress.stoppedTitle")}
               </p>
             ) : (
               <p className="mt-1 text-[12px] text-muted">
@@ -119,15 +159,15 @@ export function SkillUpdateProgressDialog({
 
         {stage !== "select" && <div className="border-b border-border-subtle px-5 py-4">
           <div className="mb-2 flex items-center justify-between text-[12px] text-muted">
-            <span>{t(stage === "updating" || stage === "complete" ? "mySkills.checkProgress.updateProgress" : "mySkills.checkProgress.progress")}</span>
-            <span aria-live="polite">{completed} / {items.length}</span>
+            <span>{t(operation === "update" ? "mySkills.checkProgress.updateProgress" : "mySkills.checkProgress.progress")}</span>
+            <span aria-live="polite">{finished} / {items.length}</span>
           </div>
           <div
             role="progressbar"
-            aria-label={t(stage === "updating" || stage === "complete" ? "mySkills.checkProgress.updateProgress" : "mySkills.checkProgress.progress")}
+            aria-label={t(operation === "update" ? "mySkills.checkProgress.updateProgress" : "mySkills.checkProgress.progress")}
             aria-valuemin={0}
             aria-valuemax={items.length}
-            aria-valuenow={completed}
+            aria-valuenow={finished}
             className="h-2 overflow-hidden rounded-full bg-surface-active"
           >
             <div
@@ -142,13 +182,15 @@ export function SkillUpdateProgressDialog({
           aria-label={t(
             stage === "select"
               ? "mySkills.checkProgress.selectionListLabel"
-              : stage === "updating" || stage === "complete"
+              : operation === "update"
                 ? "mySkills.checkProgress.updateListLabel"
                 : "mySkills.checkProgress.listLabel",
           )}
         >
-          {items.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 rounded-lg px-2 py-2.5">
+          {items.map((item) => {
+            const presentation = STATUS_PRESENTATION[item.status];
+            const StatusIcon = presentation.icon;
+            return <li key={item.id} className="flex items-start gap-3 rounded-lg px-2 py-2.5">
               {stage === "select" ? (
                 <input
                   type="checkbox"
@@ -159,17 +201,10 @@ export function SkillUpdateProgressDialog({
                 />
               ) : (
                 <span
-                  className={cn(
-                    "shrink-0 text-faint",
-                    (item.status === "checking" || item.status === "updating") && "text-accent-light",
-                    item.status === "update_available" && "text-amber-500",
-                    item.status === "needs_confirmation" && "text-amber-500",
-                    (item.status === "error" || item.status === "source_missing") && "text-red-500",
-                    (item.status === "up_to_date" || item.status === "updated" || item.status === "unchanged") && "text-emerald-500",
-                  )}
+                  className={cn("shrink-0", presentation.tone)}
                   aria-hidden="true"
                 >
-                  {statusIcon(item.status)}
+                  <StatusIcon className={cn("h-4 w-4", presentation.spin && "animate-spin")} />
                 </span>
               )}
               <div className="min-w-0 flex-1">
@@ -196,7 +231,7 @@ export function SkillUpdateProgressDialog({
                     <p className="mt-1 break-words text-muted">{item.error}</p>
                   </details>
                 )}
-                {stage === "complete" && item.status === "needs_confirmation" && (
+                {(stage === "complete" || stage === "stopped") && item.status === "needs_confirmation" && (
                   <button
                     type="button"
                     onClick={() => onConfirmRemoval(item)}
@@ -210,14 +245,14 @@ export function SkillUpdateProgressDialog({
               {stage !== "select" && (
                 <span className="shrink-0 text-[12px] text-muted">
                   {t(
-                    stage === "updating" || stage === "complete"
+                    operation === "update"
                       ? `mySkills.checkProgress.updateStatus.${item.status}`
                       : `mySkills.checkProgress.status.${item.status}`,
                   )}
                 </span>
               )}
-            </li>
-          ))}
+            </li>;
+          })}
         </ul>
         {stage === "check_result" && (
           <div className="flex items-center justify-between gap-3 border-t border-border-subtle px-5 py-4 text-[13px] font-medium text-secondary" aria-live="polite">
@@ -226,11 +261,18 @@ export function SkillUpdateProgressDialog({
                 ? t("mySkills.checkProgress.resultAvailable", { count: available })
                 : t("mySkills.checkProgress.resultEmpty")}
             </span>
-            {available > 0 && (
-              <button type="button" onClick={onSelectAvailable} className="app-button-primary">
-                {t("mySkills.checkProgress.selectAvailable", { count: available })}
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {retryableFailures > 0 && (
+                <button type="button" onClick={onRetryFailures} className="app-button-secondary">
+                  {t("mySkills.checkProgress.retryFailures", { count: retryableFailures })}
+                </button>
+              )}
+              {available > 0 && (
+                <button type="button" onClick={onSelectAvailable} className="app-button-primary">
+                  {t("mySkills.checkProgress.selectAvailable", { count: available })}
+                </button>
+              )}
+            </div>
           </div>
         )}
         {stage === "select" && (
@@ -248,17 +290,41 @@ export function SkillUpdateProgressDialog({
             </button>
           </div>
         )}
-        {stage === "complete" && (
+        {(stage === "complete" || stage === "stopped") && (
           <div className="border-t border-border-subtle px-5 py-4">
             <p className="text-[13px] font-semibold text-secondary">
-              {t("mySkills.checkProgress.completeTitle")}
+              {t(stage === "stopped" ? "mySkills.checkProgress.stoppedTitle" : "mySkills.checkProgress.completeTitle")}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted" aria-live="polite">
-              <span>{t("mySkills.checkProgress.summary.updated", { count: summary.updated })}</span>
-              <span>{t("mySkills.checkProgress.summary.unchanged", { count: summary.unchanged })}</span>
+              {stage === "stopped" ? (
+                <span>{t("mySkills.checkProgress.summary.completed", { count: summary.completed })}</span>
+              ) : <>
+                <span>{t("mySkills.checkProgress.summary.updated", { count: summary.updated })}</span>
+                <span>{t("mySkills.checkProgress.summary.unchanged", { count: summary.unchanged })}</span>
+              </>}
               <span>{t("mySkills.checkProgress.summary.failed", { count: summary.failed })}</span>
+              {stage === "stopped" && (
+                <span>{t("mySkills.checkProgress.summary.notStarted", { count: summary.notStarted })}</span>
+              )}
               <span>{t("mySkills.checkProgress.summary.needsConfirmation", { count: summary.needsConfirmation })}</span>
             </div>
+            {retryableFailures > 0 && (
+              <button type="button" onClick={onRetryFailures} className="app-button-secondary mt-3">
+                {t("mySkills.checkProgress.retryFailures", { count: retryableFailures })}
+              </button>
+            )}
+          </div>
+        )}
+        {running && (
+          <div className="flex justify-end border-t border-border-subtle px-5 py-4">
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopRequested}
+              className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t(stopRequested ? "mySkills.checkProgress.stoppingAction" : "mySkills.checkProgress.stop")}
+            </button>
           </div>
         )}
       </section>

@@ -292,7 +292,9 @@ export function MySkills() {
   const [checkingAll, setCheckingAll] = useState(false);
   const [skillUpdateProgress, setSkillUpdateProgress] = useState<{
     batchId: string;
+    operation: "check" | "update";
     stage: SkillUpdateDialogStage;
+    stopRequested: boolean;
     items: SkillUpdateProgressItem[];
     skipped: number;
     selectedIds: Set<string>;
@@ -969,7 +971,9 @@ export function MySkills() {
       `update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setSkillUpdateProgress({
       batchId,
+      operation: "update",
       stage: "select",
+      stopRequested: false,
       skipped: 0,
       selectedIds: new Set(updatableSkills.map((skill) => skill.id)),
       items: updatableSkills.map((skill) => ({
@@ -982,41 +986,55 @@ export function MySkills() {
     });
   };
 
-  const handleStartSelectedUpdates = async () => {
-    if (!skillUpdateProgress || skillUpdateProgress.stage !== "select") return;
-    const batchId = skillUpdateProgress.batchId;
-    const selectedIds = [...skillUpdateProgress.selectedIds];
-    if (selectedIds.length === 0) return;
-
-    setSkillUpdateProgress((current) => current?.batchId === batchId
-      ? {
-          ...current,
-          stage: "updating",
-          items: current.items
-            .filter((item) => current.selectedIds.has(item.id))
-            .map((item) => ({ ...item, status: "waiting", error: null })),
+  const listenToSkillUpdateBatch = (
+    batchId: string,
+    operation: "check" | "update",
+  ) => listen<api.SkillUpdateBatchProgress>(
+    "skill-update-batch-progress",
+    ({ payload }) => {
+      setSkillUpdateProgress((current) => {
+        if (
+          !current ||
+          current.batchId !== batchId ||
+          payload.batch_id !== batchId ||
+          payload.phase !== operation
+        ) {
+          return current;
         }
-      : current);
+        return {
+          ...current,
+          items: current.items.map((item) => item.id === payload.skill_id
+            ? { ...item, status: payload.status, error: payload.error }
+            : item),
+        };
+      });
+    },
+  );
+
+  const runSelectedUpdates = async (
+    batchId: string,
+    selectedItems: SkillUpdateProgressItem[],
+  ) => {
+    const selectedIds = selectedItems.map((item) => item.id);
+    if (selectedIds.length === 0) return;
+    const selectedIdSet = new Set(selectedIds);
+
+    setSkillUpdateProgress({
+      batchId,
+      operation: "update",
+      stage: "updating",
+      stopRequested: false,
+      skipped: 0,
+      selectedIds: selectedIdSet,
+      items: selectedItems.map((item) => ({ ...item, status: "waiting", error: null })),
+    });
     setBatchUpdating(true);
     let unlisten: (() => void) | null = null;
+    let stopped = false;
     try {
-      unlisten = await listen<api.SkillUpdateBatchProgress>(
-        "skill-update-batch-progress",
-        ({ payload }) => {
-          setSkillUpdateProgress((current) => {
-            if (!current || current.batchId !== payload.batch_id || payload.phase !== "update") {
-              return current;
-            }
-            return {
-              ...current,
-              items: current.items.map((item) => item.id === payload.skill_id
-                ? { ...item, status: payload.status, error: payload.error }
-                : item),
-            };
-          });
-        },
-      );
+      unlisten = await listenToSkillUpdateBatch(batchId, "update");
       const result = await api.batchUpdateSkills(selectedIds, batchId);
+      stopped = result.stopped;
       if (result.batch_id === batchId) {
         const resultsById = new Map(result.items.map((item) => [item.skill_id, item]));
         setSkillUpdateProgress((current) => current?.batchId === batchId
@@ -1056,9 +1074,16 @@ export function MySkills() {
       await refreshManagedSkills();
       setBatchUpdating(false);
       setSkillUpdateProgress((current) => current?.batchId === batchId
-        ? { ...current, stage: "complete" }
+        ? { ...current, stage: stopped ? "stopped" : "complete", stopRequested: false }
         : current);
     }
+  };
+
+  const handleStartSelectedUpdates = async () => {
+    if (!skillUpdateProgress || skillUpdateProgress.stage !== "select") return;
+    const selectedItems = skillUpdateProgress.items
+      .filter((item) => skillUpdateProgress.selectedIds.has(item.id));
+    await runSelectedUpdates(skillUpdateProgress.batchId, selectedItems);
   };
 
   const handleTogglePreset = async (skill: ManagedSkill) => {
@@ -1074,46 +1099,30 @@ export function MySkills() {
     await Promise.all([refreshManagedSkills(), refreshPresets()]);
   };
 
-  const handleCheckAllUpdates = async () => {
-    const batchId = globalThis.crypto?.randomUUID?.() ??
-      `check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const checkable = skills
-      .filter((skill) => skill.can_check_update)
-      .sort(compareSkillsByDisplayName);
+  const runSkillChecks = async (
+    batchId: string,
+    checkItems: SkillUpdateProgressItem[],
+    skipped: number,
+    requestedSkillIds?: string[],
+  ) => {
     setSkillUpdateProgress({
       batchId,
+      operation: "check",
       stage: "checking",
-      items: checkable.map((skill) => ({
-        id: skill.id,
-        name: skillDisplayNames.get(skill.id) || skill.name,
-        sourceType: skill.source_type,
-        status: "waiting",
-      })),
-      skipped: skills.length - checkable.length,
+      stopRequested: false,
+      items: checkItems.map((item) => ({ ...item, status: "waiting", error: null })),
+      skipped,
       selectedIds: new Set(),
     });
     setCheckingAll(true);
     let unlisten: (() => void) | null = null;
+    let stopped = false;
     try {
-      unlisten = await listen<api.SkillUpdateBatchProgress>(
-        "skill-update-batch-progress",
-        ({ payload }) => {
-          setSkillUpdateProgress((current) => {
-            if (!current || current.batchId !== payload.batch_id || payload.phase !== "check") {
-              return current;
-            }
-            return {
-              ...current,
-              items: current.items.map((item) =>
-                item.id === payload.skill_id
-                  ? { ...item, status: payload.status, error: payload.error }
-                  : item,
-              ),
-            };
-          });
-        },
-      );
-      const result = await api.checkAllSkillUpdates(true, batchId);
+      unlisten = await listenToSkillUpdateBatch(batchId, "check");
+      const result = requestedSkillIds
+        ? await api.retryFailedSkillUpdateChecks(requestedSkillIds, batchId)
+        : await api.checkAllSkillUpdates(true, batchId);
+      stopped = result.stopped;
       if (result.batch_id === batchId) {
         setSkillUpdateProgress((current) => {
           if (!current || current.batchId !== batchId) return current;
@@ -1156,8 +1165,65 @@ export function MySkills() {
       await refreshManagedSkills();
       setCheckingAll(false);
       setSkillUpdateProgress((current) => current?.batchId === batchId
-        ? { ...current, stage: "check_result" }
+        ? { ...current, stage: stopped ? "stopped" : "check_result", stopRequested: false }
         : current);
+    }
+  };
+
+  const handleCheckAllUpdates = async () => {
+    const batchId = globalThis.crypto?.randomUUID?.() ??
+      `check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const checkable = skills
+      .filter((skill) => skill.can_check_update)
+      .sort(compareSkillsByDisplayName);
+    await runSkillChecks(
+      batchId,
+      checkable.map((skill) => ({
+        id: skill.id,
+        name: skillDisplayNames.get(skill.id) || skill.name,
+        sourceType: skill.source_type,
+        status: "waiting",
+      })),
+      skills.length - checkable.length,
+    );
+  };
+
+  const handleStopSkillUpdateBatch = async () => {
+    const current = skillUpdateProgress;
+    if (!current || current.stopRequested || (current.stage !== "checking" && current.stage !== "updating")) {
+      return;
+    }
+    setSkillUpdateProgress((value) => value?.batchId === current.batchId
+      ? { ...value, stopRequested: true }
+      : value);
+    try {
+      const accepted = await api.stopSkillUpdateBatch(current.batchId);
+      if (!accepted) {
+        setSkillUpdateProgress((value) => value?.batchId === current.batchId
+          ? { ...value, stopRequested: false }
+          : value);
+      }
+    } catch (error: unknown) {
+      setSkillUpdateProgress((value) => value?.batchId === current.batchId
+        ? { ...value, stopRequested: false }
+        : value);
+      toast.error(getErrorMessage(error, t("common.error")));
+    }
+  };
+
+  const handleRetrySkillUpdateFailures = async () => {
+    const current = skillUpdateProgress;
+    if (!current || current.stage === "checking" || current.stage === "updating") return;
+    const failedItems = current.items.filter(
+      (item) => item.status === "error",
+    );
+    if (failedItems.length === 0) return;
+    const batchId = globalThis.crypto?.randomUUID?.() ??
+      `retry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    if (current.operation === "check") {
+      await runSkillChecks(batchId, failedItems, 0, failedItems.map((item) => item.id));
+    } else {
+      await runSelectedUpdates(batchId, failedItems);
     }
   };
 
@@ -2363,6 +2429,8 @@ export function MySkills() {
         items={skillUpdateProgress?.items ?? []}
         skipped={skillUpdateProgress?.skipped ?? 0}
         selectedIds={skillUpdateProgress?.selectedIds ?? new Set()}
+        operation={skillUpdateProgress?.operation ?? "check"}
+        stopRequested={skillUpdateProgress?.stopRequested ?? false}
         onToggleSelected={(skillId) => setSkillUpdateProgress((current) => {
           if (!current || current.stage !== "select") return current;
           const selectedIds = new Set(current.selectedIds);
@@ -2391,6 +2459,8 @@ export function MySkills() {
             batchSkillId: item.id,
           });
         }}
+        onStop={handleStopSkillUpdateBatch}
+        onRetryFailures={handleRetrySkillUpdateFailures}
         onClose={() => setSkillUpdateProgress(null)}
       />
 
