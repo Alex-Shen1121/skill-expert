@@ -376,6 +376,26 @@
       "removalMessage": "更新 {{name}} 會移除 {{count}} 個新版本裡沒有的檔案。如果其中有你自己的東西，先把它移到 skill 資料夾以外——目前還沒有任何改動。",
       "removalConfirm": "仍然更新"
     },
+    "checkProgress": {
+      "title": "Skill 更新",
+      "skipped": "已略過 {{count}} 個不可檢查項目",
+      "progress": "檢查進度",
+      "listLabel": "Skill 檢查狀態",
+      "close": "關閉 Skill 更新視窗",
+      "resultAvailable": "{{count}} 個 Skill 有可用更新",
+      "resultEmpty": "沒有可用更新",
+      "showError": "查看錯誤",
+      "status": {
+        "waiting": "等待中",
+        "checking": "檢查中",
+        "up_to_date": "已是最新",
+        "update_available": "有可用更新",
+        "unknown": "未知",
+        "local_only": "本機來源",
+        "source_missing": "原路徑遺失",
+        "error": "檢查失敗"
+      }
+    },
     "gitConfigEntry": "同步設定",
     "filtersLabel": "篩選當前 Preset",
     "filters": {
