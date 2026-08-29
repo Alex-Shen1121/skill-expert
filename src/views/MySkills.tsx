@@ -43,7 +43,8 @@ import { ToggleSwitch } from "../components/ToggleSwitch";
 import { CardActionMenu } from "../components/CardActionMenu";
 import {
   SkillUpdateProgressDialog,
-  type SkillCheckProgressItem,
+  type SkillUpdateDialogStage,
+  type SkillUpdateProgressItem,
 } from "../components/SkillUpdateProgressDialog";
 import * as api from "../lib/tauri";
 import { getTagActiveColor, getTagColor, pruneStaleTagFilters, UNTAGGED_FILTER } from "../lib/skillTags";
@@ -153,6 +154,15 @@ type RepositoryOption = {
   identity: string;
   label: string;
 };
+
+type SkillRefreshOutcome =
+  | { status: "updated" | "unchanged" }
+  | {
+      status: "needs_confirmation";
+      pendingRemovals: api.PendingRemoval[];
+      removalApproval: string | null;
+    }
+  | { status: "error"; error: string };
 
 function normalizeRepositoryIdentity(source: string | null) {
   const trimmed = source?.trim().replace(/\/+$/, "") || "";
@@ -280,10 +290,12 @@ export function MySkills() {
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
-  const [checkProgress, setCheckProgress] = useState<{
+  const [skillUpdateProgress, setSkillUpdateProgress] = useState<{
     batchId: string;
-    items: SkillCheckProgressItem[];
+    stage: SkillUpdateDialogStage;
+    items: SkillUpdateProgressItem[];
     skipped: number;
+    selectedIds: Set<string>;
   } | null>(null);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
@@ -456,6 +468,14 @@ export function MySkills() {
     }
     return displayNames;
   }, [skills]);
+
+  const compareSkillsByDisplayName = useCallback((left: ManagedSkill, right: ManagedSkill) => {
+    const compared = skillNameCollator.compare(
+      skillDisplayNames.get(left.id) || left.name,
+      skillDisplayNames.get(right.id) || right.name,
+    );
+    return compared !== 0 ? compared : left.id.localeCompare(right.id);
+  }, [skillDisplayNames]);
 
   const repositoryOptions = useMemo<RepositoryOption[]>(() => {
     const identities = new Set<string>();
@@ -936,40 +956,108 @@ export function MySkills() {
     skill: ManagedSkill;
     removals: api.PendingRemoval[];
     approval: string | null;
+    batchSkillId?: string;
     /** Set when the pending replacement is a relink, so confirming re-uses the
      *  directory the user already chose instead of asking for it again. */
     relinkSource?: string;
   } | null>(null);
 
-  const handleUpdateAvailableSkills = async () => {
-    const updatableSkills = skills.filter(hasAvailableUpdate);
+  const handleUpdateAvailableSkills = () => {
+    const updatableSkills = skills.filter(hasAvailableUpdate).sort(compareSkillsByDisplayName);
     if (updatableSkills.length === 0) return;
+    const batchId = globalThis.crypto?.randomUUID?.() ??
+      `update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setSkillUpdateProgress({
+      batchId,
+      stage: "select",
+      skipped: 0,
+      selectedIds: new Set(updatableSkills.map((skill) => skill.id)),
+      items: updatableSkills.map((skill) => ({
+        id: skill.id,
+        name: skillDisplayNames.get(skill.id) || skill.name,
+        sourceType: skill.source_type,
+        status: "update_available",
+        lastCheckedAt: skill.last_checked_at,
+      })),
+    });
+  };
 
+  const handleStartSelectedUpdates = async () => {
+    if (!skillUpdateProgress || skillUpdateProgress.stage !== "select") return;
+    const batchId = skillUpdateProgress.batchId;
+    const selectedIds = [...skillUpdateProgress.selectedIds];
+    if (selectedIds.length === 0) return;
+
+    setSkillUpdateProgress((current) => current?.batchId === batchId
+      ? {
+          ...current,
+          stage: "updating",
+          items: current.items
+            .filter((item) => current.selectedIds.has(item.id))
+            .map((item) => ({ ...item, status: "waiting", error: null })),
+        }
+      : current);
     setBatchUpdating(true);
+    let unlisten: (() => void) | null = null;
     try {
-      const result = await api.batchUpdateSkills(updatableSkills.map((skill) => skill.id));
-      if (result.refreshed > 0) {
-        toast.success(t("mySkills.batchUpdated", { count: result.refreshed }));
-      }
-      if (result.unchanged > 0) {
-        toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
-      }
-      if (result.held_back.length > 0) {
-        toast.warning(
-          t("mySkills.batchHeldBack", {
-            count: result.held_back.length,
-            names: result.held_back.slice(0, 3).join("、"),
-          })
-        );
-      }
-      if (result.failed.length > 0) {
-        toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
+      unlisten = await listen<api.SkillUpdateBatchProgress>(
+        "skill-update-batch-progress",
+        ({ payload }) => {
+          setSkillUpdateProgress((current) => {
+            if (!current || current.batchId !== payload.batch_id || payload.phase !== "update") {
+              return current;
+            }
+            return {
+              ...current,
+              items: current.items.map((item) => item.id === payload.skill_id
+                ? { ...item, status: payload.status, error: payload.error }
+                : item),
+            };
+          });
+        },
+      );
+      const result = await api.batchUpdateSkills(selectedIds, batchId);
+      if (result.batch_id === batchId) {
+        const resultsById = new Map(result.items.map((item) => [item.skill_id, item]));
+        setSkillUpdateProgress((current) => current?.batchId === batchId
+          ? {
+              ...current,
+              items: current.items.map((item) => {
+                const updated = resultsById.get(item.id);
+                return updated
+                  ? {
+                      ...item,
+                      sourceType: updated.source_type,
+                      status: updated.status,
+                      error: updated.error,
+                      pendingRemovals: updated.pending_removals,
+                      removalApproval: updated.removal_approval,
+                    }
+                  : item;
+              }),
+            }
+          : current);
       }
     } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      const message = getErrorMessage(error, t("common.error"));
+      setSkillUpdateProgress((current) => current?.batchId === batchId
+        ? {
+            ...current,
+            items: current.items.map((item) =>
+              item.status === "waiting" || item.status === "updating"
+                ? { ...item, status: "error", error: message }
+                : item,
+            ),
+          }
+        : current);
+      toast.error(message);
     } finally {
+      unlisten?.();
       await refreshManagedSkills();
       setBatchUpdating(false);
+      setSkillUpdateProgress((current) => current?.batchId === batchId
+        ? { ...current, stage: "complete" }
+        : current);
     }
   };
 
@@ -991,15 +1079,10 @@ export function MySkills() {
       `check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const checkable = skills
       .filter((skill) => skill.can_check_update)
-      .sort((left, right) => {
-        const compared = skillNameCollator.compare(
-          skillDisplayNames.get(left.id) || left.name,
-          skillDisplayNames.get(right.id) || right.name,
-        );
-        return compared !== 0 ? compared : left.id.localeCompare(right.id);
-      });
-    setCheckProgress({
+      .sort(compareSkillsByDisplayName);
+    setSkillUpdateProgress({
       batchId,
+      stage: "checking",
       items: checkable.map((skill) => ({
         id: skill.id,
         name: skillDisplayNames.get(skill.id) || skill.name,
@@ -1007,6 +1090,7 @@ export function MySkills() {
         status: "waiting",
       })),
       skipped: skills.length - checkable.length,
+      selectedIds: new Set(),
     });
     setCheckingAll(true);
     let unlisten: (() => void) | null = null;
@@ -1014,7 +1098,7 @@ export function MySkills() {
       unlisten = await listen<api.SkillUpdateBatchProgress>(
         "skill-update-batch-progress",
         ({ payload }) => {
-          setCheckProgress((current) => {
+          setSkillUpdateProgress((current) => {
             if (!current || current.batchId !== payload.batch_id || payload.phase !== "check") {
               return current;
             }
@@ -1031,7 +1115,7 @@ export function MySkills() {
       );
       const result = await api.checkAllSkillUpdates(true, batchId);
       if (result.batch_id === batchId) {
-        setCheckProgress((current) => {
+        setSkillUpdateProgress((current) => {
           if (!current || current.batchId !== batchId) return current;
           const resultsById = new Map(result.items.map((item) => [item.skill_id, item]));
           const existingIds = new Set(current.items.map((item) => item.id));
@@ -1044,6 +1128,7 @@ export function MySkills() {
                 sourceType: checked.source_type,
                 status: checked.status,
                 error: checked.error,
+                lastCheckedAt: checked.last_checked_at,
               };
             });
           for (const checked of result.items) {
@@ -1054,6 +1139,7 @@ export function MySkills() {
               sourceType: checked.source_type,
               status: checked.status,
               error: checked.error,
+              lastCheckedAt: checked.last_checked_at,
             });
           }
           return {
@@ -1069,6 +1155,9 @@ export function MySkills() {
       unlisten?.();
       await refreshManagedSkills();
       setCheckingAll(false);
+      setSkillUpdateProgress((current) => current?.batchId === batchId
+        ? { ...current, stage: "check_result" }
+        : current);
     }
   };
 
@@ -1085,9 +1174,13 @@ export function MySkills() {
     }
   };
 
-  const handleRefreshSkill = async (skill: ManagedSkill, approvedRemovals?: string) => {
+  const handleRefreshSkill = async (
+    skill: ManagedSkill,
+    approvedRemovals?: string,
+  ): Promise<SkillRefreshOutcome> => {
     setUpdatingSkillId(skill.id);
     try {
+      let status: "updated" | "unchanged" = "updated";
       if (skill.source_type === "local" || skill.source_type === "import") {
         const result = await api.reimportLocalSkill(skill.id, approvedRemovals);
         if (result.pending_removals.length > 0) {
@@ -1096,7 +1189,11 @@ export function MySkills() {
             removals: result.pending_removals,
             approval: result.removal_approval,
           });
-          return;
+          return {
+            status: "needs_confirmation",
+            pendingRemovals: result.pending_removals,
+            removalApproval: result.removal_approval,
+          };
         }
         toast.success(t("mySkills.updateActions.reimported"));
       } else {
@@ -1109,18 +1206,26 @@ export function MySkills() {
             removals: result.pending_removals,
             approval: result.removal_approval,
           });
-          return;
+          return {
+            status: "needs_confirmation",
+            pendingRemovals: result.pending_removals,
+            removalApproval: result.removal_approval,
+          };
         }
         if (result.content_changed) {
           toast.success(t("mySkills.updateActions.updated"));
         } else {
+          status = "unchanged";
           toast.info(t("mySkills.updateActions.alreadyUpToDate"));
         }
       }
       await refreshManagedSkills();
+      return { status };
     } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      const message = getErrorMessage(error, t("common.error"));
+      toast.error(message);
       await refreshManagedSkills();
+      return { status: "error", error: message };
     } finally {
       setUpdatingSkillId(null);
     }
@@ -2253,11 +2358,40 @@ export function MySkills() {
       />
 
       <SkillUpdateProgressDialog
-        open={checkProgress !== null}
-        running={checkingAll}
-        items={checkProgress?.items ?? []}
-        skipped={checkProgress?.skipped ?? 0}
-        onClose={() => setCheckProgress(null)}
+        open={skillUpdateProgress !== null && pendingRemoval === null}
+        stage={skillUpdateProgress?.stage ?? "checking"}
+        items={skillUpdateProgress?.items ?? []}
+        skipped={skillUpdateProgress?.skipped ?? 0}
+        selectedIds={skillUpdateProgress?.selectedIds ?? new Set()}
+        onToggleSelected={(skillId) => setSkillUpdateProgress((current) => {
+          if (!current || current.stage !== "select") return current;
+          const selectedIds = new Set(current.selectedIds);
+          if (selectedIds.has(skillId)) selectedIds.delete(skillId);
+          else selectedIds.add(skillId);
+          return { ...current, selectedIds };
+        })}
+        onStartUpdate={handleStartSelectedUpdates}
+        onSelectAvailable={() => setSkillUpdateProgress((current) => {
+          if (!current || current.stage !== "check_result") return current;
+          const items = current.items.filter((item) => item.status === "update_available");
+          return {
+            ...current,
+            stage: "select",
+            items,
+            selectedIds: new Set(items.map((item) => item.id)),
+          };
+        })}
+        onConfirmRemoval={(item) => {
+          const skill = skills.find((candidate) => candidate.id === item.id);
+          if (!skill || !item.pendingRemovals?.length) return;
+          setPendingRemoval({
+            skill,
+            removals: item.pendingRemovals,
+            approval: item.removalApproval ?? null,
+            batchSkillId: item.id,
+          });
+        }}
+        onClose={() => setSkillUpdateProgress(null)}
       />
 
       <ConfirmDialog
@@ -2279,12 +2413,33 @@ export function MySkills() {
           const target = pendingRemoval?.skill;
           const approval = pendingRemoval?.approval ?? undefined;
           const relinkSource = pendingRemoval?.relinkSource;
+          const batchSkillId = pendingRemoval?.batchSkillId;
           setPendingRemoval(null);
           if (!target) return;
           if (relinkSource) {
             await handleRelinkSource(target, relinkSource, approval);
           } else {
-            await handleRefreshSkill(target, approval);
+            const outcome = await handleRefreshSkill(target, approval);
+            if (batchSkillId) {
+              setSkillUpdateProgress((current) => current
+                ? {
+                    ...current,
+                    items: current.items.map((item) => item.id === batchSkillId
+                      ? {
+                          ...item,
+                          status: outcome.status,
+                          error: outcome.status === "error" ? outcome.error : null,
+                          pendingRemovals: outcome.status === "needs_confirmation"
+                            ? outcome.pendingRemovals
+                            : [],
+                          removalApproval: outcome.status === "needs_confirmation"
+                            ? outcome.removalApproval
+                            : null,
+                        }
+                      : item),
+                  }
+                : current);
+            }
           }
         }}
       />

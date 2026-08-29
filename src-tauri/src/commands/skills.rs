@@ -177,6 +177,7 @@ impl Drop for StagedPathGuard<'_> {
 
 #[derive(Debug, Serialize)]
 pub struct BatchUpdateSkillsResult {
+    pub batch_id: Option<String>,
     pub refreshed: usize,
     pub unchanged: usize,
     pub failed: Vec<String>,
@@ -184,15 +185,18 @@ pub struct BatchUpdateSkillsResult {
     /// version does not have. Named so the user can go and look, rather than
     /// wondering why the badge did not clear.
     pub held_back: Vec<String>,
+    pub items: Vec<BatchUpdateSkillItemResult>,
 }
 
 pub const SKILL_UPDATE_BATCH_PROGRESS_EVENT: &str = "skill-update-batch-progress";
 pub const DEFAULT_CHECK_CONCURRENCY: usize = 8;
+pub const DEFAULT_UPDATE_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillUpdateBatchPhase {
     Check,
+    Update,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -200,6 +204,10 @@ pub enum SkillUpdateBatchPhase {
 pub enum SkillUpdateBatchProgressStatus {
     Waiting,
     Checking,
+    Updating,
+    Updated,
+    Unchanged,
+    NeedsConfirmation,
     UpToDate,
     UpdateAvailable,
     Unknown,
@@ -224,6 +232,7 @@ pub struct CheckSkillUpdateItemResult {
     pub source_type: String,
     pub status: SkillUpdateBatchProgressStatus,
     pub error: Option<String>,
+    pub last_checked_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -231,6 +240,26 @@ pub struct CheckAllSkillUpdatesResult {
     pub batch_id: String,
     pub skipped: usize,
     pub items: Vec<CheckSkillUpdateItemResult>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchUpdateSkillItemResult {
+    pub skill_id: String,
+    pub name: String,
+    pub source_type: String,
+    pub status: SkillUpdateBatchProgressStatus,
+    pub error: Option<String>,
+    pub pending_removals: Vec<PendingRemoval>,
+    pub removal_approval: Option<String>,
+}
+
+pub(crate) enum BatchUpdateExecution {
+    Updated,
+    Unchanged,
+    NeedsConfirmation {
+        pending_removals: Vec<PendingRemoval>,
+        removal_approval: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1609,11 +1638,20 @@ where
             );
         }
         let checked = apply_prefetched_skill_check(store, skill, force_check, &remote_revisions);
-        let (status, error) = match checked {
-            Ok(dto) => check_progress_status(&dto.update_status, dto.last_check_error),
+        let (status, error, last_checked_at) = match checked {
+            Ok(dto) => {
+                let last_checked_at = dto.last_checked_at;
+                let (status, error) =
+                    check_progress_status(&dto.update_status, dto.last_check_error);
+                (status, error, last_checked_at)
+            }
             Err(message) => {
                 log::warn!("check all: {} failed: {}", skill.id, message);
-                (SkillUpdateBatchProgressStatus::Error, Some(message))
+                (
+                    SkillUpdateBatchProgressStatus::Error,
+                    Some(message),
+                    skill.last_checked_at,
+                )
             }
         };
         emit_check_progress(&emit, batch_id, &skill.id, status, error.clone());
@@ -1623,6 +1661,7 @@ where
             source_type: skill.source_type.clone(),
             status,
             error,
+            last_checked_at,
         });
     }
 
@@ -1798,14 +1837,247 @@ pub async fn reimport_local_skill(
     .await?
 }
 
+fn execute_batch_update(
+    store: &SkillStore,
+    skill: &SkillRecord,
+    proxy_url: Option<&str>,
+) -> Result<BatchUpdateExecution, String> {
+    match skill.source_type.as_str() {
+        "git" | "skillssh" => {
+            let outcome = update_git_skill_internal(store, &skill.id, proxy_url, None, None);
+            log_update_outcome(store, &skill.id, "git", outcome.as_ref());
+            match outcome {
+                Ok(result) if !result.pending_removals.is_empty() => {
+                    Ok(BatchUpdateExecution::NeedsConfirmation {
+                        pending_removals: result.pending_removals,
+                        removal_approval: result.removal_approval,
+                    })
+                }
+                Ok(result) if result.content_changed => Ok(BatchUpdateExecution::Updated),
+                Ok(_) => Ok(BatchUpdateExecution::Unchanged),
+                Err(err) => Err(err.message),
+            }
+        }
+        "local" | "import" => {
+            let outcome = reimport_local_skill_internal(store, &skill.id, None);
+            log_reimport_outcome(store, &skill.id, outcome.as_ref());
+            match outcome {
+                Ok(result) if !result.pending_removals.is_empty() => {
+                    Ok(BatchUpdateExecution::NeedsConfirmation {
+                        pending_removals: result.pending_removals,
+                        removal_approval: result.removal_approval,
+                    })
+                }
+                Ok(_) => Ok(BatchUpdateExecution::Updated),
+                Err(err) => Err(err.message),
+            }
+        }
+        _ => Err("来源类型不支持刷新".to_string()),
+    }
+}
+
+fn emit_update_progress<E>(
+    emit: &E,
+    batch_id: &str,
+    skill_id: &str,
+    status: SkillUpdateBatchProgressStatus,
+    error: Option<String>,
+) where
+    E: Fn(SkillUpdateBatchProgress) + Sync,
+{
+    emit(SkillUpdateBatchProgress {
+        batch_id: batch_id.to_string(),
+        skill_id: skill_id.to_string(),
+        phase: SkillUpdateBatchPhase::Update,
+        status,
+        error,
+    });
+}
+
+/// “全部更新”的前台公开批处理契约。每个任务可以并发完成联网、下载和准备，
+/// 真实更新函数内部仍通过既有仓库锁串行保护中央技能库关键写入。
+pub(crate) fn batch_update_skills_internal<U, E>(
+    store: &SkillStore,
+    batch_id: &str,
+    skill_ids: Vec<String>,
+    concurrency: usize,
+    update: U,
+    emit: E,
+) -> Result<BatchUpdateSkillsResult, AppError>
+where
+    U: Fn(&SkillRecord) -> Result<BatchUpdateExecution, String> + Sync,
+    E: Fn(SkillUpdateBatchProgress) + Sync,
+{
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mut seen = HashSet::new();
+    let mut skills = Vec::new();
+    let mut items = Vec::new();
+    for skill_id in skill_ids {
+        if !seen.insert(skill_id.clone()) {
+            continue;
+        }
+        match store.get_skill_by_id(&skill_id).map_err(AppError::db)? {
+            Some(skill) => skills.push(skill),
+            None => items.push(BatchUpdateSkillItemResult {
+                skill_id: skill_id.clone(),
+                name: skill_id.clone(),
+                source_type: String::new(),
+                status: SkillUpdateBatchProgressStatus::Error,
+                error: Some("未找到 Skill".to_string()),
+                pending_removals: Vec::new(),
+                removal_approval: None,
+            }),
+        }
+    }
+    skills.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    for skill in &skills {
+        emit_update_progress(
+            &emit,
+            batch_id,
+            &skill.id,
+            SkillUpdateBatchProgressStatus::Waiting,
+            None,
+        );
+    }
+
+    let next = AtomicUsize::new(0);
+    let completed = Mutex::new(Vec::<BatchUpdateSkillItemResult>::with_capacity(
+        skills.len(),
+    ));
+    let worker_count = concurrency.max(1).min(skills.len().max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            scope.spawn(|| loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(skill) = skills.get(index) else {
+                    break;
+                };
+                emit_update_progress(
+                    &emit,
+                    batch_id,
+                    &skill.id,
+                    SkillUpdateBatchProgressStatus::Updating,
+                    None,
+                );
+                let (status, error, pending_removals, removal_approval) = match update(skill) {
+                    Ok(BatchUpdateExecution::Updated) => (
+                        SkillUpdateBatchProgressStatus::Updated,
+                        None,
+                        Vec::new(),
+                        None,
+                    ),
+                    Ok(BatchUpdateExecution::Unchanged) => (
+                        SkillUpdateBatchProgressStatus::Unchanged,
+                        None,
+                        Vec::new(),
+                        None,
+                    ),
+                    Ok(BatchUpdateExecution::NeedsConfirmation {
+                        pending_removals,
+                        removal_approval,
+                    }) => (
+                        SkillUpdateBatchProgressStatus::NeedsConfirmation,
+                        None,
+                        pending_removals,
+                        removal_approval,
+                    ),
+                    Err(message) => (
+                        SkillUpdateBatchProgressStatus::Error,
+                        Some(message),
+                        Vec::new(),
+                        None,
+                    ),
+                };
+                emit_update_progress(&emit, batch_id, &skill.id, status, error.clone());
+                completed.lock().unwrap().push(BatchUpdateSkillItemResult {
+                    skill_id: skill.id.clone(),
+                    name: skill.name.clone(),
+                    source_type: skill.source_type.clone(),
+                    status,
+                    error,
+                    pending_removals,
+                    removal_approval,
+                });
+            });
+        }
+    });
+    items.extend(completed.into_inner().unwrap_or_default());
+    items.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.skill_id.cmp(&right.skill_id))
+    });
+
+    let refreshed = items
+        .iter()
+        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Updated)
+        .count();
+    let unchanged = items
+        .iter()
+        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Unchanged)
+        .count();
+    let failed = items
+        .iter()
+        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Error)
+        .map(|item| {
+            format!(
+                "{}: {}",
+                item.name,
+                item.error.as_deref().unwrap_or("未知错误")
+            )
+        })
+        .collect();
+    let held_back = items
+        .iter()
+        .filter(|item| item.status == SkillUpdateBatchProgressStatus::NeedsConfirmation)
+        .map(|item| item.name.clone())
+        .collect();
+
+    Ok(BatchUpdateSkillsResult {
+        batch_id: Some(batch_id.to_string()),
+        refreshed,
+        unchanged,
+        failed,
+        held_back,
+        items,
+    })
+}
+
 #[tauri::command]
 pub async fn batch_update_skills(
     skill_ids: Vec<String>,
+    batch_id: Option<String>,
+    app: tauri::AppHandle,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<BatchUpdateSkillsResult, AppError> {
     let store = store.inner().clone();
     let proxy_url = store.proxy_url();
     tauri::async_runtime::spawn_blocking(move || {
+        if let Some(batch_id) = batch_id.filter(|value| !value.trim().is_empty()) {
+            return batch_update_skills_internal(
+                &store,
+                &batch_id,
+                skill_ids,
+                DEFAULT_UPDATE_CONCURRENCY,
+                |skill| execute_batch_update(&store, skill, proxy_url.as_deref()),
+                |event| {
+                    if let Err(err) = app.emit(SKILL_UPDATE_BATCH_PROGRESS_EVENT, event) {
+                        log::warn!("全部更新：发送进度事件失败：{err}");
+                    }
+                },
+            );
+        }
+
         let mut refreshed = 0usize;
         let mut unchanged = 0usize;
         let mut failed = Vec::new();
@@ -1815,58 +2087,27 @@ pub async fn batch_update_skills(
             let skill = match store.get_skill_by_id(&skill_id).map_err(AppError::db)? {
                 Some(skill) => skill,
                 None => {
-                    failed.push(format!("{skill_id}: Skill not found"));
+                    failed.push(format!("{skill_id}: 未找到 Skill"));
                     continue;
                 }
             };
-
-            match skill.source_type.as_str() {
-                "git" | "skillssh" => {
-                    let outcome = update_git_skill_internal(
-                        &store,
-                        &skill_id,
-                        proxy_url.as_deref(),
-                        None,
-                        None,
-                    );
-                    log_update_outcome(&store, &skill_id, "git", outcome.as_ref());
-                    match outcome {
-                        Ok(result) if !result.pending_removals.is_empty() => {
-                            // Held back rather than applied: it would have taken
-                            // away files the new version does not have, and a
-                            // batch has nobody to ask.
-                            held_back.push(skill.name.clone());
-                        }
-                        Ok(result) => {
-                            if result.content_changed {
-                                refreshed += 1;
-                            } else {
-                                unchanged += 1;
-                            }
-                        }
-                        Err(err) => failed.push(format!("{}: {}", skill.name, err.message)),
-                    }
+            match execute_batch_update(&store, &skill, proxy_url.as_deref()) {
+                Ok(BatchUpdateExecution::Updated) => refreshed += 1,
+                Ok(BatchUpdateExecution::Unchanged) => unchanged += 1,
+                Ok(BatchUpdateExecution::NeedsConfirmation { .. }) => {
+                    held_back.push(skill.name.clone());
                 }
-                "local" | "import" => {
-                    let outcome = reimport_local_skill_internal(&store, &skill_id, None);
-                    log_reimport_outcome(&store, &skill_id, outcome.as_ref());
-                    match outcome {
-                        Ok(result) if !result.pending_removals.is_empty() => {
-                            held_back.push(skill.name.clone());
-                        }
-                        Ok(_) => refreshed += 1,
-                        Err(err) => failed.push(format!("{}: {}", skill.name, err.message)),
-                    }
-                }
-                _ => failed.push(format!("{}: Source type cannot be refreshed", skill.name)),
+                Err(message) => failed.push(format!("{}: {message}", skill.name)),
             }
         }
 
         Ok(BatchUpdateSkillsResult {
+            batch_id: None,
             refreshed,
             unchanged,
             failed,
             held_back,
+            items: Vec::new(),
         })
     })
     .await?
@@ -3976,6 +4217,95 @@ mod tests {
         );
         assert!(peak.load(Ordering::SeqCst) <= DEFAULT_CHECK_CONCURRENCY);
         assert!(peak.load(Ordering::SeqCst) >= 2, "不同远端应并发解析");
+    }
+
+    #[test]
+    fn update_all_contract_uses_default_concurrency_four_and_isolates_each_result() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let repo = test_repo();
+        for index in 0..7 {
+            insert_git_skill(
+                &repo.store,
+                &format!("skill-{index}"),
+                &format!("https://example.test/update-{index}.git"),
+            );
+        }
+        let skill_ids = (0..7).map(|index| format!("skill-{index}")).collect();
+        let in_flight = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let events = Mutex::new(Vec::<SkillUpdateBatchProgress>::new());
+
+        let result = batch_update_skills_internal(
+            &repo.store,
+            "update-batch-42",
+            skill_ids,
+            DEFAULT_UPDATE_CONCURRENCY,
+            |skill| {
+                let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(current, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                match skill.id.as_str() {
+                    "skill-1" => Ok(BatchUpdateExecution::Unchanged),
+                    "skill-2" => Ok(BatchUpdateExecution::NeedsConfirmation {
+                        pending_removals: vec![PendingRemoval {
+                            location: LIBRARY_LOCATION.to_string(),
+                            path: "notes.md".to_string(),
+                        }],
+                        removal_approval: Some("exact-approval".to_string()),
+                    }),
+                    "skill-3" => Err("远端不可用".to_string()),
+                    _ => Ok(BatchUpdateExecution::Updated),
+                }
+            },
+            |event| events.lock().unwrap().push(event),
+        )
+        .unwrap();
+
+        assert_eq!(DEFAULT_UPDATE_CONCURRENCY, 4);
+        assert!(peak.load(Ordering::SeqCst) <= 4);
+        assert!(
+            peak.load(Ordering::SeqCst) >= 2,
+            "前台更新准备阶段应并发执行"
+        );
+        assert_eq!(result.batch_id.as_deref(), Some("update-batch-42"));
+        assert_eq!(result.refreshed, 4);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.failed, vec!["skill-3: 远端不可用"]);
+        assert_eq!(result.held_back, vec!["skill-2"]);
+        assert_eq!(result.items.len(), 7);
+        assert_eq!(
+            result.items[1].status,
+            SkillUpdateBatchProgressStatus::Unchanged
+        );
+        assert_eq!(
+            result.items[2].status,
+            SkillUpdateBatchProgressStatus::NeedsConfirmation
+        );
+        assert_eq!(result.items[2].pending_removals[0].path, "notes.md");
+        assert_eq!(
+            result.items[2].removal_approval.as_deref(),
+            Some("exact-approval")
+        );
+        assert_eq!(
+            result.items[3].status,
+            SkillUpdateBatchProgressStatus::Error
+        );
+
+        let events = events.into_inner().unwrap();
+        assert!(events.iter().all(|event| {
+            event.batch_id == "update-batch-42" && event.phase == SkillUpdateBatchPhase::Update
+        }));
+        assert!(events.iter().any(|event| {
+            event.skill_id == "skill-2"
+                && event.status == SkillUpdateBatchProgressStatus::NeedsConfirmation
+        }));
+        assert!(events.iter().any(|event| {
+            event.skill_id == "skill-3"
+                && event.status == SkillUpdateBatchProgressStatus::Error
+                && event.error.as_deref() == Some("远端不可用")
+        }));
     }
 
     #[test]

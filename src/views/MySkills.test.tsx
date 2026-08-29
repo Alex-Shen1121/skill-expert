@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { i18nReady } from "../i18n";
-import type { ManagedSkill, Preset } from "../lib/tauri";
+import type { BatchUpdateSkillsResult, ManagedSkill, Preset } from "../lib/tauri";
 import { MySkills } from "./MySkills";
 
 const eventMocks = vi.hoisted(() => ({
@@ -353,6 +353,20 @@ beforeEach(async () => {
     skipped: 0,
     items: [],
   }));
+  apiMocks.batchUpdateSkills.mockResolvedValue({
+    batch_id: null,
+    refreshed: 0,
+    unchanged: 0,
+    held_back: [],
+    failed: [],
+    items: [],
+  });
+  apiMocks.updateSkill.mockResolvedValue({
+    skill: createSkill({ id: "updated", name: "已更新", sourceType: "git", updateStatus: "up_to_date" }),
+    content_changed: true,
+    pending_removals: [],
+    removal_approval: null,
+  });
   apiMocks.gitBackupStatus.mockResolvedValue(null);
   apiMocks.reorderPresetSkills.mockResolvedValue(undefined);
 });
@@ -723,6 +737,49 @@ describe("MySkills 检查全部进度", () => {
     await waitFor(() => expect(within(dialog).getByText("没有可用更新")).not.toBeNull());
   });
 
+  it("把检查结果中的可用更新转入同一窗口的默认全选阶段", async () => {
+    const user = userEvent.setup();
+    const checkedAt = 1_700_000_000_000;
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "skillssh", updateStatus: "unknown" }),
+    ];
+    apiMocks.checkAllSkillUpdates.mockImplementation(async (_force, batchId) => ({
+      batch_id: batchId,
+      skipped: 0,
+      items: [
+        {
+          skill_id: "alpha",
+          name: "Alpha",
+          source_type: "git",
+          status: "up_to_date",
+          error: null,
+          last_checked_at: checkedAt,
+        },
+        {
+          skill_id: "beta",
+          name: "Beta",
+          source_type: "skillssh",
+          status: "update_available",
+          error: null,
+          last_checked_at: checkedAt,
+        },
+      ],
+    }));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+    const dialog = await screen.findByRole("dialog", { name: "Skill 更新" });
+    const continueButton = await within(dialog).findByRole("button", { name: "选择并更新（1）" });
+    await user.click(continueButton);
+
+    expect(within(dialog).queryByText("Alpha")).toBeNull();
+    expect(within(dialog).getByRole<HTMLInputElement>("checkbox", { name: "选择 Beta" }).checked).toBe(true);
+    expect(within(dialog).getByText(`最近检查：${new Date(checkedAt).toLocaleString()}`)).not.toBeNull();
+    expect(apiMocks.checkAllSkillUpdates).toHaveBeenCalledTimes(1);
+    expect(apiMocks.batchUpdateSkills).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["zh", "检查全部", "Skill 更新", "检查进度", "等待中", "关闭 Skill 更新窗口"],
     ["zh-TW", "檢查全部", "Skill 更新", "檢查進度", "等待中", "關閉 Skill 更新視窗"],
@@ -753,6 +810,402 @@ describe("MySkills 检查全部进度", () => {
     expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: closeLabel }).disabled).toBe(true);
     await user.tab();
     expect(document.activeElement).toBe(dialog);
+  });
+});
+
+describe("MySkills 全部更新进度", () => {
+  it("只读取缓存的可用更新并按名称展示默认全选与最近检查时间", async () => {
+    const user = userEvent.setup();
+    const checkedAt = 1_700_000_000_000;
+    appState.managedSkills = [
+      {
+        ...createSkill({
+          id: "zulu",
+          name: "Zulu",
+          sourceType: "skillssh",
+          updateStatus: "update_available",
+        }),
+        last_checked_at: checkedAt,
+      },
+      createSkill({
+        id: "current",
+        name: "已经最新",
+        sourceType: "git",
+        updateStatus: "up_to_date",
+      }),
+      {
+        ...createSkill({
+          id: "alpha",
+          name: "Alpha",
+          sourceType: "git",
+          updateStatus: "update_available",
+        }),
+        last_checked_at: checkedAt,
+      },
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（2）" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(within(dialog).getByText("选择要更新的 Skill")).not.toBeNull();
+    const checkboxes = within(dialog).getAllByRole<HTMLInputElement>("checkbox");
+    expect(checkboxes.map((checkbox) => checkbox.getAttribute("aria-label"))).toEqual([
+      "选择 Alpha",
+      "选择 Zulu",
+    ]);
+    expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
+    expect(within(dialog).getAllByText(`最近检查：${new Date(checkedAt).toLocaleString()}`)).toHaveLength(2);
+    expect(within(dialog).queryByText("已经最新")).toBeNull();
+    expect(apiMocks.checkAllSkillUpdates).not.toHaveBeenCalled();
+    expect(apiMocks.batchUpdateSkills).not.toHaveBeenCalled();
+  });
+
+  it("允许取消选择，空选择禁用确认，并只提交确认后的项目", async () => {
+    const user = userEvent.setup();
+    const pendingUpdate = deferred<never>();
+    apiMocks.batchUpdateSkills.mockReturnValue(pendingUpdate.promise);
+    appState.managedSkills = [
+      createSkill({
+        id: "alpha",
+        name: "Alpha",
+        sourceType: "git",
+        updateStatus: "update_available",
+      }),
+      createSkill({
+        id: "zulu",
+        name: "Zulu",
+        sourceType: "skillssh",
+        updateStatus: "update_available",
+      }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    const alpha = within(dialog).getByRole<HTMLInputElement>("checkbox", { name: "选择 Alpha" });
+    const zulu = within(dialog).getByRole<HTMLInputElement>("checkbox", { name: "选择 Zulu" });
+    const start = within(dialog).getByRole<HTMLButtonElement>("button", { name: "开始更新" });
+
+    await user.click(alpha);
+    expect(alpha.checked).toBe(false);
+    expect(start.disabled).toBe(false);
+    await user.click(zulu);
+    expect(start.disabled).toBe(true);
+    expect(apiMocks.batchUpdateSkills).not.toHaveBeenCalled();
+
+    await user.click(zulu);
+    await user.click(start);
+
+    expect(apiMocks.batchUpdateSkills).toHaveBeenCalledTimes(1);
+    expect(apiMocks.batchUpdateSkills.mock.calls[0]?.[0]).toEqual(["zulu"]);
+    expect(apiMocks.batchUpdateSkills.mock.calls[0]?.[1]).toEqual(expect.any(String));
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
+    expect(within(dialog).getByText("正在更新所选 Skill")).not.toBeNull();
+    expect(within(dialog).getByText("等待中")).not.toBeNull();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled).toBe(true);
+  });
+
+  it("只消费当前更新批次事件，并隔离展示已更新、未变化、失败与删除保护", async () => {
+    const user = userEvent.setup();
+    const pendingUpdate = deferred<BatchUpdateSkillsResult>();
+    apiMocks.batchUpdateSkills.mockReturnValue(pendingUpdate.promise);
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "update_available" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "git", updateStatus: "update_available" }),
+      createSkill({ id: "gamma", name: "Gamma", sourceType: "git", updateStatus: "update_available" }),
+      createSkill({ id: "delta", name: "Delta", sourceType: "git", updateStatus: "update_available" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（4）" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "开始更新" }));
+    const batchId = apiMocks.batchUpdateSkills.mock.calls[0]?.[1];
+
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: "旧批次",
+      skill_id: "alpha",
+      phase: "update",
+      status: "updating",
+      error: null,
+    });
+    expect(within(dialog).getAllByText("等待中")).toHaveLength(4);
+    eventMocks.emit("skill-update-batch-progress", {
+      batch_id: batchId,
+      skill_id: "alpha",
+      phase: "update",
+      status: "updating",
+      error: null,
+    });
+    await waitFor(() => expect(within(dialog).getByText("更新中")).not.toBeNull());
+
+    pendingUpdate.resolve({
+      batch_id: batchId,
+      refreshed: 1,
+      unchanged: 1,
+      failed: ["Delta: 远端不可用"],
+      held_back: ["Gamma"],
+      items: [
+        {
+          skill_id: "alpha",
+          name: "Alpha",
+          source_type: "git",
+          status: "updated",
+          error: null,
+          pending_removals: [],
+          removal_approval: null,
+        },
+        {
+          skill_id: "beta",
+          name: "Beta",
+          source_type: "git",
+          status: "unchanged",
+          error: null,
+          pending_removals: [],
+          removal_approval: null,
+        },
+        {
+          skill_id: "gamma",
+          name: "Gamma",
+          source_type: "git",
+          status: "needs_confirmation",
+          error: null,
+          pending_removals: [{ location: "library", path: "notes.md" }],
+          removal_approval: "exact-approval",
+        },
+        {
+          skill_id: "delta",
+          name: "Delta",
+          source_type: "git",
+          status: "error",
+          error: "远端不可用",
+          pending_removals: [],
+          removal_approval: null,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(within(dialog).getAllByText("更新完成")).toHaveLength(2));
+    expect(within(dialog).getByText("已更新 1")).not.toBeNull();
+    expect(within(dialog).getByText("内容未变化 1")).not.toBeNull();
+    expect(within(dialog).getByText("失败 1")).not.toBeNull();
+    expect(within(dialog).getByText("需要单独确认 1")).not.toBeNull();
+    const deltaRow = within(dialog)
+      .getAllByTestId("check-progress-skill-name")
+      .find((element) => element.textContent === "Delta")
+      ?.closest("li");
+    expect(deltaRow).not.toBeNull();
+    expect(within(deltaRow!).getByText("更新失败")).not.toBeNull();
+    expect(within(dialog).getByRole("button", { name: "单独确认 Gamma" })).not.toBeNull();
+    expect(appState.refreshManagedSkills).toHaveBeenCalled();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled).toBe(false);
+  });
+
+  it("把需要删除的项目交给既有明细与精确授权流程", async () => {
+    const user = userEvent.setup();
+    const gamma = createSkill({
+      id: "gamma",
+      name: "Gamma",
+      sourceType: "git",
+      updateStatus: "update_available",
+    });
+    appState.managedSkills = [gamma];
+    apiMocks.batchUpdateSkills.mockImplementation(async (_skillIds, batchId) => ({
+      batch_id: batchId,
+      refreshed: 0,
+      unchanged: 0,
+      failed: [],
+      held_back: ["Gamma"],
+      items: [{
+        skill_id: "gamma",
+        name: "Gamma",
+        source_type: "git",
+        status: "needs_confirmation",
+        error: null,
+        pending_removals: [
+          { location: "library", path: "notes.md" },
+          { location: "codex", path: "generated/output.txt" },
+        ],
+        removal_approval: "exact-approval",
+      }],
+    }));
+    apiMocks.updateSkill.mockResolvedValue({
+      skill: { ...gamma, update_status: "up_to_date" },
+      content_changed: true,
+      pending_removals: [],
+      removal_approval: null,
+    });
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（1）" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "开始更新" }));
+    const confirmOne = await within(dialog).findByRole("button", { name: "单独确认 Gamma" });
+    await user.click(confirmOne);
+
+    expect(screen.queryByRole("dialog", { name: "Skill 更新" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "这次更新会删除文件" })).not.toBeNull();
+    expect(screen.getByText("notes.md")).not.toBeNull();
+    expect(screen.getByText("codex: generated/output.txt")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "仍然更新" }));
+
+    await waitFor(() => expect(apiMocks.updateSkill).toHaveBeenCalledWith("gamma", "exact-approval"));
+    const completed = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(within(completed).queryByRole("button", { name: "单独确认 Gamma" })).toBeNull();
+    const gammaRow = within(completed)
+      .getAllByTestId("check-progress-skill-name")
+      .find((element) => element.textContent === "Gamma")
+      ?.closest("li");
+    expect(gammaRow).not.toBeNull();
+    expect(within(gammaRow!).getByText("已更新")).not.toBeNull();
+  });
+
+  it("取消一个删除确认后保留完成结果与其他逐项入口", async () => {
+    const user = userEvent.setup();
+    appState.managedSkills = [
+      createSkill({ id: "gamma", name: "Gamma", sourceType: "git", updateStatus: "update_available" }),
+      createSkill({ id: "delta", name: "Delta", sourceType: "git", updateStatus: "update_available" }),
+    ];
+    apiMocks.batchUpdateSkills.mockImplementation(async (_skillIds, batchId) => ({
+      batch_id: batchId,
+      refreshed: 0,
+      unchanged: 0,
+      failed: [],
+      held_back: ["Delta", "Gamma"],
+      items: ["gamma", "delta"].map((skillId) => ({
+        skill_id: skillId,
+        name: skillId === "gamma" ? "Gamma" : "Delta",
+        source_type: "git",
+        status: "needs_confirmation" as const,
+        error: null,
+        pending_removals: [{ location: "library", path: `${skillId}.md` }],
+        removal_approval: `${skillId}-approval`,
+      })),
+    }));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "开始更新" }));
+    await user.click(await within(dialog).findByRole("button", { name: "单独确认 Gamma" }));
+    expect(screen.queryByRole("dialog", { name: "Skill 更新" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    const restored = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(within(restored).getByRole("button", { name: "单独确认 Delta" })).not.toBeNull();
+    expect(within(restored).getByRole("button", { name: "单独确认 Gamma" })).not.toBeNull();
+  });
+
+  it("精确授权失效后使用新清单再次确认并回写原批次", async () => {
+    const user = userEvent.setup();
+    const gamma = createSkill({
+      id: "gamma",
+      name: "Gamma",
+      sourceType: "git",
+      updateStatus: "update_available",
+    });
+    appState.managedSkills = [gamma];
+    apiMocks.batchUpdateSkills.mockImplementation(async (_skillIds, batchId) => ({
+      batch_id: batchId,
+      refreshed: 0,
+      unchanged: 0,
+      failed: [],
+      held_back: ["Gamma"],
+      items: [{
+        skill_id: "gamma",
+        name: "Gamma",
+        source_type: "git",
+        status: "needs_confirmation",
+        error: null,
+        pending_removals: [{ location: "library", path: "old.md" }],
+        removal_approval: "old-approval",
+      }],
+    }));
+    apiMocks.updateSkill
+      .mockResolvedValueOnce({
+        skill: gamma,
+        content_changed: false,
+        pending_removals: [{ location: "library", path: "new.md" }],
+        removal_approval: "new-approval",
+      })
+      .mockResolvedValueOnce({
+        skill: { ...gamma, update_status: "up_to_date" },
+        content_changed: true,
+        pending_removals: [],
+        removal_approval: null,
+      });
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（1）" }));
+    let dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "开始更新" }));
+    await user.click(await within(dialog).findByRole("button", { name: "单独确认 Gamma" }));
+    await user.click(screen.getByRole("button", { name: "仍然更新" }));
+
+    dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "单独确认 Gamma" }));
+    expect(screen.getByText("new.md")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "仍然更新" }));
+
+    await waitFor(() => expect(apiMocks.updateSkill).toHaveBeenLastCalledWith("gamma", "new-approval"));
+    dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    expect(within(dialog).queryByRole("button", { name: "单独确认 Gamma" })).toBeNull();
+    expect(within(dialog).getByText("已更新")).not.toBeNull();
+  });
+
+  it("整批调用异常时把仍未完成的项目逐项标为更新失败", async () => {
+    const user = userEvent.setup();
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "update_available" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "git", updateStatus: "update_available" }),
+    ];
+    apiMocks.batchUpdateSkills.mockRejectedValue(new Error("批处理通道断开"));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "全部更新（2）" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    await user.click(within(dialog).getByRole("button", { name: "开始更新" }));
+
+    await waitFor(() => expect(within(dialog).getByText("失败 2")).not.toBeNull());
+    expect(within(dialog).getAllByText("更新失败")).toHaveLength(2);
+    expect(within(dialog).getAllByText("批处理通道断开")).toHaveLength(2);
+  });
+
+  it.each([
+    ["zh", "全部更新（1）", "Skill 更新", "选择 Alpha", "开始更新", "更新进度", "等待中", "关闭 Skill 更新窗口"],
+    ["zh-TW", "全部更新（1）", "Skill 更新", "選擇 Alpha", "開始更新", "更新進度", "等待中", "關閉 Skill 更新視窗"],
+    ["en", "Update All (1)", "Skill Updates", "Select Alpha", "Start update", "Update progress", "Waiting", "Close Skill Updates"],
+  ])("在 %s 中提供可访问的选择、确认和运行状态", async (
+    language,
+    updateAllLabel,
+    dialogLabel,
+    selectLabel,
+    startLabel,
+    progressLabel,
+    waitingLabel,
+    closeLabel,
+  ) => {
+    const user = userEvent.setup();
+    await i18n.changeLanguage(language);
+    const pendingUpdate = deferred<never>();
+    apiMocks.batchUpdateSkills.mockReturnValue(pendingUpdate.promise);
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "update_available" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: updateAllLabel }));
+    const dialog = screen.getByRole("dialog", { name: dialogLabel });
+    expect(within(dialog).getByRole<HTMLInputElement>("checkbox", { name: selectLabel }).checked).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: startLabel }));
+
+    expect(within(dialog).getByRole("progressbar", { name: progressLabel })).not.toBeNull();
+    expect(within(dialog).getByText(waitingLabel)).not.toBeNull();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: closeLabel }).disabled).toBe(true);
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: dialogLabel })).not.toBeNull();
   });
 });
 
