@@ -27,6 +27,10 @@
 </p>
 
 <p align="center">
+  <a href="https://skills.sh/xingkongliang/skills-manager"><img src="https://skills.sh/b/xingkongliang/skills-manager" alt="skills.sh 上的 manage-skills" /></a>
+</p>
+
+<p align="center">
   <img src="assets/demo/library.png" width="800" alt="Skills Manager 技能库" />
 </p>
 
@@ -202,6 +206,12 @@ npm run -s cli -- --skills-root /path/to/my-skills --json skills list
 Claude Code、Codex、Cursor 等可以替你完成上面这些事——装一个 skill、部署到另一个 agent、查哪个 agent 有什么——通过仓库自带的 [`manage-skills`](skills/manage-skills/SKILL.md) skill。走 Skills Manager 而不是直接往 agent 目录里写，是为了保住来源元数据、preset 归属、更新能力和跨 agent 的部署状态。
 
 首次启动时 Dashboard 会给出一次性的启用入口：勾选哪些 agent 可以这么做，应用就把这个 skill 装进库并只部署给这些 agent。之后增减 agent 走 skill 卡片上的 agent 图标行，和其他 skill 一样。
+
+它就是一个正常发布的 skill，不装应用也能直接装：
+
+```bash
+npx skills add xingkongliang/skills-manager
+```
 
 桌面应用会在启动时把自己那份 CLI 复制到 `~/.skills-manager/bin/skills-manager-cli`，这样 agent 不需要你改 PATH 就能找到它，而且这份副本的版本永远等于正在运行的应用。旁边的 `.version` 标记只在副本校验通过后才写、每次重新发布前先删——所以一次失败的复制（比如 Windows 上二进制正被占用）绝不会被当成可用的。
 

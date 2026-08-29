@@ -31,6 +31,10 @@
 </p>
 
 <p align="center">
+  <a href="https://skills.sh/xingkongliang/skills-manager"><img src="https://skills.sh/b/xingkongliang/skills-manager" alt="manage-skills on skills.sh" /></a>
+</p>
+
+<p align="center">
   <img src="assets/demo/library.png" width="800" alt="Skills Manager Library" />
 </p>
 
@@ -252,6 +256,12 @@ npm run -s cli -- --skills-root /path/to/my-skills --json skills list
 Claude Code, Codex, Cursor and the rest can drive all of the above for you — installing a skill, deploying it to another agent, checking what is where — through the bundled [`manage-skills`](skills/manage-skills/SKILL.md) skill. Going through Skills Manager rather than writing into an agent's folder directly is what keeps source metadata, preset membership, updates and cross-agent deployment state intact.
 
 The Dashboard offers a one-time setup for this on first launch: pick the agents that should be able to do it, and the app installs the skill and deploys it to exactly those. Afterwards, adding or removing an agent is the agent badge row on the skill's own card, like any other skill.
+
+It is an ordinary published skill, so it can also be installed without the app:
+
+```bash
+npx skills add xingkongliang/skills-manager
+```
 
 The desktop app publishes a copy of its own CLI to `~/.skills-manager/bin/skills-manager-cli` at startup, so agents can find it without anything being added to your PATH. That copy is always the same version as the running app. A `.version` stamp next to it is written only after the copy is verified and removed before each republish, so a copy that failed — a binary held open on Windows, say — is never presented as usable.
 
