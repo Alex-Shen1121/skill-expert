@@ -359,11 +359,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare-release.outputs.tag }}
+          TARGET_ID: ${{ matrix.target_id }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
           set -euo pipefail
-          gh release upload "$TAG" \
-            --repo "$REPO" \
-            "release-assets/${{ matrix.target_id }}/"*
+          node scripts/package-assets.mjs draft-upload \
+            --version "$VERSION" \
+            --target "$TARGET_ID" |
+            while IFS= read -r ASSET_NAME; do
+              [ -n "$ASSET_NAME" ] || continue
+              gh release upload "$TAG" \
+                --repo "$REPO" \
+                "release-assets/${TARGET_ID}/${ASSET_NAME}"
+            done
 
   release-metadata:
     name: 生成 Updater 元数据与校验和
@@ -419,6 +427,23 @@ jobs:
             --repo "$REPO" \
             release-assets/latest.json \
             release-assets/SHA256SUMS
+
+      - name: 清理 Draft 临时资产
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release-assets.mjs draft-only --version "$VERSION" |
+            while IFS= read -r ASSET_NAME; do
+              [ -n "$ASSET_NAME" ] || continue
+              gh release delete-asset "$TAG" "$ASSET_NAME" \
+                --repo "$REPO" \
+                --yes
+            done
 
   release-provenance:
     name: 生成正式构建来源证明
@@ -562,7 +587,7 @@ jobs:
           set -euo pipefail
           bash scripts/download-draft-release-assets.sh release-assets
 
-      - name: 验证 DMG、Updater archive 与 CLI 的 ad-hoc 签名
+      - name: 验证 DMG 与 Updater archive 的 ad-hoc 签名
         env:
           VERSION: ${{ needs.release-provenance.outputs.version }}
           TARGET_ID: ${{ matrix.target_id }}
@@ -609,7 +634,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y rpm libarchive-tools binutils
 
-      - name: 回验 Linux CLI 与三种桌面包版本
+      - name: 回验 Linux 三种桌面包版本
         if: runner.os == 'Linux'
         env:
           VERSION: ${{ needs.release-provenance.outputs.version }}
@@ -618,7 +643,7 @@ jobs:
           --version "$VERSION"
           --directory release-assets
 
-      - name: 回验 Windows CLI、NSIS 与 MSI 版本
+      - name: 回验 Windows NSIS 与 MSI 版本
         if: runner.os == 'Windows'
         shell: pwsh
         env:

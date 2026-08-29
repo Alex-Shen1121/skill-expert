@@ -38,27 +38,15 @@ class TrayBuildFixture:
             macos_icon=bundle_dir / "icon.icns",
         )
 
-    def run(self, *, patch_macos_bundle: bool = False) -> subprocess.CompletedProcess[str]:
+    def run(self) -> subprocess.CompletedProcess[str]:
         command = [
             sys.executable,
             str(TRAY_BUILDER),
             "--output-dir",
             str(self.tray_dir),
-            "--public-icon",
-            str(self.public_icon),
             "--symbol-output",
             str(self.symbol_source),
-            "--bundle-icon-32",
-            str(self.linux_icon_32),
-            "--windows-tile-30",
-            str(self.windows_tile_30),
-            "--ico-output",
-            str(self.windows_icon),
-            "--icns-output",
-            str(self.macos_icon),
         ]
-        if not patch_macos_bundle:
-            command.append("--skip-icns")
         return subprocess.run(
             command,
             capture_output=True,
@@ -104,28 +92,147 @@ class MacOSIconBuilderTests(unittest.TestCase):
                 self.assertEqual(edge_pixel[:3], source_color[:3])
                 self.assertGreater(edge_pixel[3], 250)
 
+    def test_all_app_identity_assets_match_character_icon_generator(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            master = temp / "character-app-icon.png"
+            master_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(MACOS_BUILDER),
+                    "--source",
+                    str(REPO / "src-tauri" / "icons" / "icon-source.png"),
+                    "--output",
+                    str(master),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=REPO,
+            )
+            self.assertEqual(master_result.returncode, 0, master_result.stderr)
+
+            generated = temp / "generated"
+            icon_result = subprocess.run(
+                [
+                    "npx",
+                    "tauri",
+                    "icon",
+                    str(master),
+                    "--output",
+                    str(generated),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=REPO,
+            )
+
+            self.assertEqual(icon_result.returncode, 0, icon_result.stderr)
+            tracked_root = REPO / "src-tauri" / "icons"
+            generated_files = sorted(path for path in generated.rglob("*") if path.is_file())
+            self.assertGreater(len(generated_files), 10)
+            for expected in generated_files:
+                relative = expected.relative_to(generated)
+                actual = tracked_root / relative
+                self.assertTrue(actual.is_file(), f"缺少角色 App 图标资产：{relative}")
+                if expected.suffix == ".png":
+                    with Image.open(actual) as actual_image, Image.open(expected) as expected_image:
+                        self.assertEqual(actual_image.size, expected_image.size, str(relative))
+                        self.assertEqual(
+                            list(actual_image.convert("RGBA").getdata()),
+                            list(expected_image.convert("RGBA").getdata()),
+                            f"产品身份图标没有使用角色母版：{relative}",
+                        )
+                elif expected.suffix == ".ico":
+                    with Image.open(actual) as actual_image, Image.open(expected) as expected_image:
+                        self.assertEqual(actual_image.ico.sizes(), expected_image.ico.sizes())
+                        for size in sorted(expected_image.ico.sizes()):
+                            self.assertEqual(
+                                list(actual_image.ico.getimage(size).convert("RGBA").getdata()),
+                                list(expected_image.ico.getimage(size).convert("RGBA").getdata()),
+                                f"Windows 产品身份图标帧没有使用角色母版：{size}",
+                            )
+                elif expected.suffix == ".icns":
+                    with Image.open(actual) as actual_image, Image.open(expected) as expected_image:
+                        self.assertEqual(actual_image.info["sizes"], expected_image.info["sizes"])
+                        for size in expected_image.info["sizes"]:
+                            self.assertEqual(
+                                list(actual_image.icns.getimage(size).convert("RGBA").getdata()),
+                                list(expected_image.icns.getimage(size).convert("RGBA").getdata()),
+                                f"macOS 产品身份图标帧没有使用角色母版：{size}",
+                            )
+                else:
+                    self.assertEqual(
+                        actual.read_bytes(),
+                        expected.read_bytes(),
+                        f"产品身份图标没有使用角色母版：{relative}",
+                    )
+
+            with (
+                Image.open(REPO / "public" / "icons" / "32x32.png") as actual_brand,
+                Image.open(generated / "32x32.png") as expected_brand,
+            ):
+                self.assertEqual(
+                    list(actual_brand.convert("RGBA").getdata()),
+                    list(expected_brand.convert("RGBA").getdata()),
+                    "应用内品牌 Logo 与 favicon 必须使用角色 App 图标",
+                )
+            with (
+                Image.open(REPO / "assets" / "icon.png") as actual_readme,
+                Image.open(generated / "icon.png") as expected_readme,
+            ):
+                self.assertEqual(
+                    list(actual_readme.convert("RGBA").getdata()),
+                    list(expected_readme.convert("RGBA").getdata()),
+                    "README 品牌图必须使用角色 App 图标",
+                )
+
 
 class TrayIconBuilderTests(unittest.TestCase):
-    def test_cli_builds_skill_core_symbol_icons_for_small_surfaces(self) -> None:
+    def test_cli_only_builds_skill_core_symbol_for_system_status_area(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = TrayBuildFixture.under(Path(temp_dir))
             fixture.windows_icon.parent.mkdir(parents=True)
-            Image.new("RGBA", (64, 64), (167, 91, 72, 255)).save(
+            fixture.public_icon.parent.mkdir(parents=True)
+            Image.new("RGBA", (32, 32), (167, 91, 72, 255)).save(
+                fixture.public_icon
+            )
+            Image.new("RGBA", (32, 32), (167, 91, 72, 255)).save(
+                fixture.linux_icon_32
+            )
+            Image.new("RGBA", (30, 30), (167, 91, 72, 255)).save(
+                fixture.windows_tile_30
+            )
+            Image.new("RGBA", (256, 256), (167, 91, 72, 255)).save(
                 fixture.windows_icon,
                 format="ICO",
-                sizes=[(16, 16), (32, 32), (64, 64)],
+                sizes=[(16, 16), (32, 32), (64, 64), (256, 256)],
             )
+            Image.new("RGBA", (1024, 1024), (167, 91, 72, 255)).save(
+                fixture.macos_icon,
+                format="ICNS",
+            )
+            app_identity_assets = (
+                fixture.public_icon,
+                fixture.linux_icon_32,
+                fixture.windows_tile_30,
+                fixture.windows_icon,
+                fixture.macos_icon,
+            )
+            original_bytes = {path: path.read_bytes() for path in app_identity_assets}
 
             result = fixture.run()
 
             self.assertEqual(result.returncode, 0, result.stderr)
             with Image.open(fixture.symbol_source) as symbol:
                 self.assertEqual(symbol.size, (1024, 1024))
-            with Image.open(fixture.public_icon) as sidebar_icon:
-                self.assertEqual(sidebar_icon.size, (32, 32))
-            with Image.open(fixture.windows_tile_30) as tile:
-                self.assertEqual(tile.size, (30, 30))
-                self.assertGreater(len(set(tile.convert("RGBA").getdata())), 4)
+            for path in app_identity_assets:
+                self.assertEqual(
+                    path.read_bytes(),
+                    original_bytes[path],
+                    f"系统状态区生成器不应改写角色 App 图标：{path}",
+                )
 
             for size in (16, 20, 24, 32):
                 with (
@@ -170,108 +277,6 @@ class TrayIconBuilderTests(unittest.TestCase):
                         self.assertGreater(
                             clearly_visible, len(contrast_scores) * 0.25
                         )
-
-    def test_cli_uses_skill_core_symbol_for_small_desktop_app_icons(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fixture = TrayBuildFixture.under(Path(temp_dir))
-
-            legacy_character = Image.new("RGBA", (256, 256), (167, 91, 72, 255))
-            fixture.windows_icon.parent.mkdir(parents=True)
-            legacy_character.save(
-                fixture.windows_icon,
-                format="ICO",
-                sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)],
-            )
-
-            result = fixture.run()
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            with (
-                Image.open(fixture.public_icon) as sidebar_icon,
-                Image.open(fixture.linux_icon_32) as bundle_icon,
-            ):
-                self.assertEqual(list(bundle_icon.getdata()), list(sidebar_icon.getdata()))
-            with Image.open(fixture.windows_tile_30) as tile:
-                self.assertEqual(tile.size, (30, 30))
-                self.assertGreater(len(set(tile.convert("RGBA").getdata())), 4)
-
-            with Image.open(fixture.windows_icon) as ico:
-                for size in (16, 24, 32):
-                    small_frame = ico.ico.getimage((size, size)).convert("RGBA")
-                    self.assertGreater(len(set(small_frame.getdata())), 4)
-                    center_pixel = small_frame.getpixel((size // 2, size // 2))[:3]
-                    self.assertNotEqual(center_pixel, (167, 91, 72))
-
-                character_frame = ico.ico.getimage((64, 64)).convert("RGBA")
-                self.assertEqual(character_frame.getpixel((32, 32))[:3], (167, 91, 72))
-
-    @unittest.skipUnless(sys.platform == "darwin", "iconutil 仅在 macOS 上可用")
-    def test_cli_uses_skill_core_symbol_for_small_macos_app_icons(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            fixture = TrayBuildFixture.under(temp)
-            legacy_color = (167, 91, 72, 255)
-            iconset = temp / "legacy.iconset"
-            iconset.mkdir()
-            iconset_sizes = {
-                "icon_16x16.png": 16,
-                "icon_16x16@2x.png": 32,
-                "icon_32x32.png": 32,
-                "icon_32x32@2x.png": 64,
-                "icon_128x128.png": 128,
-                "icon_128x128@2x.png": 256,
-                "icon_256x256.png": 256,
-                "icon_256x256@2x.png": 512,
-                "icon_512x512.png": 512,
-                "icon_512x512@2x.png": 1024,
-            }
-            for name, size in iconset_sizes.items():
-                Image.new("RGBA", (size, size), legacy_color).save(iconset / name)
-
-            fixture.macos_icon.parent.mkdir(parents=True)
-            subprocess.run(
-                [
-                    "iconutil",
-                    "-c",
-                    "icns",
-                    str(iconset),
-                    "-o",
-                    str(fixture.macos_icon),
-                ],
-                check=True,
-                capture_output=True,
-            )
-
-            Image.new("RGBA", (256, 256), legacy_color).save(
-                fixture.windows_icon,
-                format="ICO",
-                sizes=[(16, 16), (32, 32), (64, 64), (256, 256)],
-            )
-            result = fixture.run(patch_macos_bundle=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-
-            audited_iconset = temp / "audited.iconset"
-            subprocess.run(
-                [
-                    "iconutil",
-                    "-c",
-                    "iconset",
-                    str(fixture.macos_icon),
-                    "-o",
-                    str(audited_iconset),
-                ],
-                check=True,
-                capture_output=True,
-            )
-            for name in ("icon_16x16.png", "icon_16x16@2x.png", "icon_32x32.png"):
-                with Image.open(audited_iconset / name) as small_frame:
-                    center = small_frame.size[0] // 2
-                    center_pixel = small_frame.getpixel((center, center))[:3]
-                    self.assertNotEqual(center_pixel, legacy_color[:3])
-
-            with Image.open(audited_iconset / "icon_32x32@2x.png") as character_frame:
-                self.assertEqual(character_frame.getpixel((32, 32))[:3], legacy_color[:3])
-
 
 if __name__ == "__main__":
     unittest.main()

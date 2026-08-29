@@ -223,8 +223,6 @@ npm run cli:install
 
 This drops the binary at `~/.cargo/bin/skill-expert-cli`. Re-run after pulling updates to refresh it.
 
-Official releases also publish standalone CLI binaries for macOS arm64/x64, Windows x64, and Linux x64. Download the matching `skill-expert-cli-*` asset, make it executable on macOS/Linux, and place it on PATH.
-
 #### Concurrent use with the desktop app
 
 The CLI and desktop app share the same SQLite database and repository lock. The app's filesystem watcher normally refreshes after CLI metadata or deployment changes. If the app was suspended while a command ran, trigger one manual refresh.

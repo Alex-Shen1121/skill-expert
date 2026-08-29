@@ -9,13 +9,16 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 统一角色 App 图标，并把技能核心符号限制在系统状态区。
+- 将未来正式 Release 精简为 12 个应用分发与可信验证资产。
 
 ### User-facing
--
+- Finder、Dock、应用列表、窗口品牌标识、安装包及全平台应用资产在所有尺寸下使用同一角色图标；macOS 菜单栏和 Windows/Linux 系统托盘继续使用技能核心符号。
+- GitHub Release 不再提供独立 CLI 和单独 `.sig` 下载，同时保留四平台应用内更新、SHA-256 完整性清单和正式构建来源证明。
 
 ### Developer & Governance
--
+- 图标契约从角色源图重新生成桌面与移动端资产，并逐帧验证 ICO、ICNS 和应用内品牌 Logo，防止小尺寸图标再次混入技能核心符号。
+- 正式工作流继续在 runner 内构建并验证 CLI，但不再上传；四个平台实际更新入口的签名作为 Draft 临时资产生成元数据后删除，再对最终 12 个公开资产执行来源证明和下载回验。
 
 ## [1.0.9] - 2026-08-29
 

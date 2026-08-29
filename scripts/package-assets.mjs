@@ -14,6 +14,7 @@ const targetContracts = {
       ['bundle/dmg', '.dmg', '.dmg'],
     ],
     cliSuffix: '',
+    updaterArtifactSuffix: '.app.tar.gz',
   },
   'macos-x64': {
     artifacts: [
@@ -22,6 +23,7 @@ const targetContracts = {
       ['bundle/dmg', '.dmg', '.dmg'],
     ],
     cliSuffix: '',
+    updaterArtifactSuffix: '.app.tar.gz',
   },
   'windows-x64': {
     artifacts: [
@@ -31,6 +33,7 @@ const targetContracts = {
       ['bundle/msi', '.msi.sig', '.msi.sig'],
     ],
     cliSuffix: '.exe',
+    updaterArtifactSuffix: '-setup.exe',
   },
   'linux-x64': {
     artifacts: [
@@ -40,6 +43,7 @@ const targetContracts = {
       ['bundle/rpm', '.rpm', '.rpm'],
     ],
     cliSuffix: '',
+    updaterArtifactSuffix: '.AppImage',
   },
 };
 
@@ -61,6 +65,22 @@ export function expectedPackageAssets(version, target) {
     `skill-expert-cli-v${version}-${target}${contract.cliSuffix}`,
     ...contract.artifacts.map(([, , targetSuffix]) => `${desktopPrefix}${targetSuffix}`),
   ].sort();
+}
+
+export function expectedDraftUploadAssets(version, target) {
+  const updaterSignatures = new Set(expectedUpdaterSignatureAssets(version, target));
+  return expectedPackageAssets(version, target)
+    .filter((filename) => !filename.startsWith('skill-expert-cli-'))
+    .filter((filename) => !filename.endsWith('.sig') || updaterSignatures.has(filename));
+}
+
+export function expectedUpdaterArtifact(version, target) {
+  const contract = contractFor(version, target);
+  return `skill-expert-v${version}-${target}${contract.updaterArtifactSuffix}`;
+}
+
+export function expectedUpdaterSignatureAssets(version, target) {
+  return [`${expectedUpdaterArtifact(version, target)}.sig`];
 }
 
 function findUniqueArtifact(buildRoot, relativeDirectory, suffix) {
@@ -135,6 +155,10 @@ function main() {
     console.log(expectedPackageAssets(options.version, options.target).join('\n'));
     return;
   }
+  if (command === 'draft-upload') {
+    console.log(expectedDraftUploadAssets(options.version, options.target).join('\n'));
+    return;
+  }
   if (command === 'verify') {
     if (!options.directory) throw new Error('verify 需要 --directory');
     const inventory = verifyPackageAssets(options.directory, options.version, options.target);
@@ -157,7 +181,7 @@ function main() {
     return;
   }
   throw new Error(
-    '用法：package-assets.mjs <expected|verify|stage> --version x.y.z --target <target>',
+    '用法：package-assets.mjs <expected|draft-upload|verify|stage> --version x.y.z --target <target>',
   );
 }
 

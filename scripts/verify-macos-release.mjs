@@ -6,7 +6,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { verifyAdHocSignature } from './verify-macos-adhoc.mjs';
-import { verifyCliVersion } from './release-binary-version.mjs';
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const targets = ['macos-arm64', 'macos-x64'];
@@ -131,20 +130,14 @@ export function verifyMacosRelease(directory, version, target) {
     const prefix = `skill-expert-v${version}-${selectedTarget}`;
     const archive = path.join(directory, `${prefix}.app.tar.gz`);
     const dmg = path.join(directory, `${prefix}.dmg`);
-    const cli = path.join(directory, `skill-expert-cli-v${version}-${selectedTarget}`);
     for (const [label, filePath] of [
       ['Updater archive', archive],
       ['DMG', dmg],
-      ['CLI', cli],
     ]) {
       if (!fs.statSync(filePath).isFile()) throw new Error(`${selectedTarget} ${label} 不是普通文件`);
     }
-    fs.chmodSync(cli, fs.statSync(cli).mode | 0o111);
     verifyArchive(archive, version, selectedTarget);
     verifyDmg(dmg, version, selectedTarget);
-    verifySignature(`${selectedTarget} CLI`, cli);
-    verifyCliVersion(cli, version);
-    console.log(`${selectedTarget} CLI：ad-hoc 签名与版本验证通过`);
   }
 }
 

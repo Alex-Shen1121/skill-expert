@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/release.yml');
 const workflow = readFileSync(workflowPath, 'utf8');
+const linuxVerifier = readFileSync(
+  path.join(repositoryRoot, 'scripts/verify-linux-release.mjs'),
+  'utf8',
+);
+const windowsVerifier = readFileSync(
+  path.join(repositoryRoot, 'scripts/verify-windows-release.ps1'),
+  'utf8',
+);
 
 test('正式发布只能手动绑定精确 main SHA', () => {
   assert.match(workflow, /^\s{2}workflow_dispatch:\n\s{4}inputs:\n\s{6}release_sha:/m);
@@ -65,6 +73,28 @@ test('正式发布只构建一次四平台生产包并运行跨平台 Rust 测�
   assert.match(workflow, /cargo test --manifest-path src-tauri\/Cargo\.toml/);
   assert.match(workflow, /environment:\s*release/);
   assert.match(workflow, /TAURI_SIGNING_PRIVATE_KEY/);
+});
+
+test('正式发布保留 CLI 构建但不上传 CLI，并在公开前清理四个 Draft 临时资产', () => {
+  assert.match(workflow, /--bin skill-expert-cli/);
+  assert.match(workflow, /sign-release-updater\.mjs/);
+  assert.match(
+    workflow,
+    /上传到同一 Draft Release[^]*?package-assets\.mjs draft-upload[^]*?gh release upload/,
+  );
+  assert.match(
+    workflow,
+    /上传元数据与完整性清单[^]*?清理 Draft 临时资产[^]*?release-assets\.mjs draft-only[^]*?gh release delete-asset/,
+  );
+  assert.doesNotMatch(workflow, /release-assets\/\$\{\{ matrix\.target_id \}\}\/"\*/);
+  assert.match(workflow, /release-provenance:[^]*?needs: release-metadata/);
+});
+
+test('最终原生回验只要求公开的应用安装包', () => {
+  assert.doesNotMatch(linuxVerifier, /verifyCliVersion|assetPaths\.cli|\bCLI\b/);
+  assert.doesNotMatch(windowsVerifier, /skill-expert-cli|\$Cli|CLI/);
+  assert.match(windowsVerifier, /-setup\.exe/);
+  assert.match(windowsVerifier, /\.msi/);
 });
 
 test('正式发布保留不可变 tag、Draft 回验、来源证明和原子公开', () => {

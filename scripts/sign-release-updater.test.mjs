@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -95,7 +96,7 @@ function verify(artifactPath, publicKeyPath) {
   );
 }
 
-test('稳定重命名后重新签署全部 Windows Updater 资产并绑定最终文件名', (t) => {
+test('稳定重命名后只重新签署进入更新元数据的 Windows NSIS', (t) => {
   const root = mkdtempSync(path.join(tmpdir(), 'skill-expert-release-sign-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const directory = path.join(root, 'assets');
@@ -105,18 +106,18 @@ test('稳定重命名后重新签署全部 Windows Updater 资产并绑定最终
     `skill-expert-v${version}-windows-x64-setup.exe`,
     `skill-expert-v${version}-windows-x64.msi`,
   ];
+  const oldSignature = '旧文件名对应的签名\n';
   for (const artifact of artifacts) {
     writeFileSync(path.join(directory, artifact), `正式资产：${artifact}\n`);
-    writeFileSync(path.join(directory, `${artifact}.sig`), '旧文件名对应的签名\n');
+    writeFileSync(path.join(directory, `${artifact}.sig`), oldSignature);
   }
 
   const result = runSigner(directory, 'windows-x64', keyPair);
 
   assert.equal(result.status, 0, result.stderr);
-  for (const artifact of artifacts) {
-    const verification = verify(path.join(directory, artifact), keyPair.publicKeyPath);
-    assert.equal(verification.status, 0, verification.stderr);
-  }
+  const nsisVerification = verify(path.join(directory, artifacts[0]), keyPair.publicKeyPath);
+  assert.equal(nsisVerification.status, 0, nsisVerification.stderr);
+  assert.equal(readFileSync(path.join(directory, `${artifacts[1]}.sig`), 'utf8'), oldSignature);
 });
 
 test('正式私钥与产品公钥不匹配时在上传前失败', (t) => {

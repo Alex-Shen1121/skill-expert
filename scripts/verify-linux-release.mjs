@@ -9,7 +9,6 @@ import {
   assertPackageVersion,
   normalizeTauriBundleBinary,
   requireStableVersion,
-  verifyCliVersion,
 } from './release-binary-version.mjs';
 
 function run(command, args, options = {}) {
@@ -87,7 +86,6 @@ export function linuxAssetPaths(directory, version) {
   const assetDirectory = path.resolve(directory);
   const prefix = `skill-expert-v${version}-linux-x64`;
   return {
-    cli: path.join(assetDirectory, `skill-expert-cli-v${version}-linux-x64`),
     appImage: path.join(assetDirectory, `${prefix}.AppImage`),
     deb: path.join(assetDirectory, `${prefix}.deb`),
     rpm: path.join(assetDirectory, `${prefix}.rpm`),
@@ -130,13 +128,10 @@ export function verifyLinuxRelease(directory, version) {
   if (process.platform !== 'linux') throw new Error('Linux 正式资产回验需要 Linux runner');
   requireStableVersion(version);
   const assetPaths = linuxAssetPaths(directory, version);
-  const cli = requireFile(assetPaths.cli, 'CLI');
   const appImage = requireFile(assetPaths.appImage, 'AppImage');
   const deb = requireFile(assetPaths.deb, 'DEB');
   const rpm = requireFile(assetPaths.rpm, 'RPM');
 
-  fs.chmodSync(cli, fs.statSync(cli).mode | 0o111);
-  verifyCliVersion(cli, version);
   assertLinuxPackageIdentity('DEB', run('dpkg-deb', ['--field', deb, 'Package']));
   assertPackageVersion('DEB', run('dpkg-deb', ['--field', deb, 'Version']), version);
   assertLinuxPackageIdentity(

@@ -107,11 +107,17 @@ const releaseVerifiers = [
   'scripts/verify-linux-release.mjs',
   'scripts/verify-windows-release.ps1',
 ];
+expect(
+  '正式发布仅构建 CLI',
+  releaseWorkflow.includes(`--bin ${expectedCommand}`) &&
+    releaseWorkflow.includes('verify-macos-adhoc.mjs'),
+  `正式工作流必须继续构建并验证 ${expectedCommand}，但不得上传独立 CLI`,
+);
 for (const verifier of releaseVerifiers) {
   expect(
-    `release verifier ${verifier}`,
-    releaseWorkflow.includes(path.basename(verifier)) && read(verifier).includes(expectedCommand),
-    `release workflow must call ${verifier} and verify ${expectedCommand}`,
+    `正式公开资产回验器 ${verifier}`,
+    releaseWorkflow.includes(path.basename(verifier)) && !read(verifier).includes(expectedCommand),
+    `正式工作流必须调用 ${verifier}，且公开资产回验器不得要求 ${expectedCommand}`,
   );
 }
 expect(

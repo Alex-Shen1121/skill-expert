@@ -25,8 +25,6 @@ function createAssets(t) {
   const app = path.join(imageSource, 'Agent 技能管家.app');
   const contents = path.join(app, 'Contents');
   const executable = path.join(contents, 'MacOS', 'skill-expert');
-  const cli = path.join(root, 'skill-expert-cli');
-  const cliSource = path.join(root, 'skill-expert-cli.c');
   const archive = path.join(root, 'Agent 技能管家.app.tar.gz');
   const dmg = path.join(root, 'Agent 技能管家.dmg');
 
@@ -48,21 +46,6 @@ function createAssets(t) {
 `,
   );
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', app]);
-  writeFileSync(
-    cliSource,
-    `#include <stdio.h>
-#include <string.h>
-int main(int argc, char **argv) {
-  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-    puts("skill-expert-cli ${version}");
-    return 0;
-  }
-  return 2;
-}
-`,
-  );
-  execFileSync('clang', [cliSource, '-o', cli]);
-  execFileSync('codesign', ['--force', '--sign', '-', cli]);
   execFileSync('tar', ['-czf', archive, '-C', imageSource, path.basename(app)]);
   execFileSync('hdiutil', [
     'create',
@@ -79,13 +62,12 @@ int main(int argc, char **argv) {
   for (const target of ['macos-arm64', 'macos-x64']) {
     copyFileSync(archive, path.join(assets, `skill-expert-v${version}-${target}.app.tar.gz`));
     copyFileSync(dmg, path.join(assets, `skill-expert-v${version}-${target}.dmg`));
-    copyFileSync(cli, path.join(assets, `skill-expert-cli-v${version}-${target}`));
   }
   return assets;
 }
 
 test(
-  '从下载的两个 macOS 正式包回验 archive、DMG 与 CLI 的 ad-hoc 签名和版本',
+  '从下载的两个 macOS 正式包回验 archive 与 DMG 的 ad-hoc 签名和版本',
   { skip: process.platform !== 'darwin' },
   (t) => {
     const directory = createAssets(t);
@@ -98,49 +80,7 @@ test(
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /macos-arm64.*Updater archive.*验证通过/s);
     assert.match(result.stdout, /macos-arm64.*DMG.*验证通过/s);
-    assert.match(result.stdout, /macos-x64.*CLI.*验证通过/s);
+    assert.doesNotMatch(result.stdout, /CLI/);
     assert.doesNotMatch(result.stdout + result.stderr, /spctl|notari[sz]/i);
-  },
-);
-
-test(
-  '下载后的 CLI 实际版本错误时拒绝公开',
-  { skip: process.platform !== 'darwin' },
-  (t) => {
-    const directory = createAssets(t);
-    const cli = path.join(directory, `skill-expert-cli-v${version}-macos-x64`);
-    const source = path.join(path.dirname(directory), 'wrong-version.c');
-    writeFileSync(
-      source,
-      '#include <stdio.h>\nint main(void) { puts("skill-expert-cli 9.9.9"); return 0; }\n',
-    );
-    execFileSync('clang', [source, '-o', cli]);
-    execFileSync('codesign', ['--force', '--sign', '-', cli]);
-    const result = spawnSync(
-      process.execPath,
-      [verifier, '--version', version, '--directory', directory],
-      { encoding: 'utf8' },
-    );
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /CLI 版本不匹配/);
-  },
-);
-
-test(
-  '下载后的 CLI 签名被移除时拒绝公开',
-  { skip: process.platform !== 'darwin' },
-  (t) => {
-    const directory = createAssets(t);
-    const cli = path.join(directory, `skill-expert-cli-v${version}-macos-x64`);
-    execFileSync('codesign', ['--remove-signature', cli]);
-    const result = spawnSync(
-      process.execPath,
-      [verifier, '--version', version, '--directory', directory],
-      { encoding: 'utf8' },
-    );
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /macos-x64 CLI.*签名验证失败/);
   },
 );

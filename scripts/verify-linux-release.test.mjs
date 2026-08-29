@@ -82,6 +82,7 @@ test('RPM 由单进程 libarchive 直接解包且不恢复归档属主', () => {
 test('相对资产目录在切换 AppImage 工作目录前解析为绝对路径', () => {
   const assets = linuxAssetPaths('package-assets/linux-x64', '1.0.0');
 
+  assert.deepEqual(Object.keys(assets).sort(), ['appImage', 'deb', 'rpm']);
   for (const assetPath of Object.values(assets)) {
     assert.equal(path.isAbsolute(assetPath), true, assetPath);
   }
