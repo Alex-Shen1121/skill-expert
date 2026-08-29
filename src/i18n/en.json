@@ -408,6 +408,7 @@
       "removalConfirm": "Update anyway"
     },
     "gitConfigEntry": "Sync Config",
+    "filtersLabel": "Filter by current preset",
     "filters": {
       "all": "All",
       "enabled": "Enabled",

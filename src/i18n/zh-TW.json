@@ -377,6 +377,7 @@
       "removalConfirm": "仍然更新"
     },
     "gitConfigEntry": "同步設定",
+    "filtersLabel": "篩選當前 Preset",
     "filters": {
       "all": "全部",
       "enabled": "當前 Preset 已啟用",

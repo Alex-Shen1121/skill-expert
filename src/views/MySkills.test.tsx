@@ -329,6 +329,50 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("MySkills Preset 分段筛选器", () => {
+  it("在三种界面语言中提供分组名称、选中状态和键盘操作", async () => {
+    const cases = [
+      {
+        language: "zh",
+        groupLabel: "筛选当前 Preset",
+        labels: ["全部", "当前 Preset 已启用", "当前 Preset 未启用"],
+      },
+      {
+        language: "zh-TW",
+        groupLabel: "篩選當前 Preset",
+        labels: ["全部", "當前 Preset 已啟用", "當前 Preset 未啟用"],
+      },
+      {
+        language: "en",
+        groupLabel: "Filter by current preset",
+        labels: ["All", "Enabled", "Available"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      await i18n.changeLanguage(testCase.language);
+      const user = userEvent.setup();
+      const page = renderPage();
+      const group = screen.getByRole("group", { name: testCase.groupLabel });
+      const [all, enabled, available] = testCase.labels.map((label) =>
+        within(group).getByRole<HTMLButtonElement>("button", { name: label }),
+      );
+
+      expect(all.getAttribute("aria-pressed")).toBe("true");
+      expect(enabled.getAttribute("aria-pressed")).toBe("false");
+      expect(available.getAttribute("aria-pressed")).toBe("false");
+
+      enabled.focus();
+      await user.keyboard("{Enter}");
+
+      expect(all.getAttribute("aria-pressed")).toBe("false");
+      expect(enabled.getAttribute("aria-pressed")).toBe("true");
+      expect(document.activeElement).toBe(enabled);
+      page.unmount();
+    }
+  });
+});
+
 describe("MySkills 有可用更新筛选", () => {
   it("按严格刷新契约筛选缓存状态，关闭后恢复列表且不触发更新入口", async () => {
     const user = userEvent.setup();

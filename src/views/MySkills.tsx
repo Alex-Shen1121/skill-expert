@@ -1309,7 +1309,7 @@ export function MySkills() {
       </div>
 
       <div className="app-toolbar">
-        <div className="flex flex-1 gap-3">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
           <div className="relative w-full max-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <input
@@ -1324,13 +1324,19 @@ export function MySkills() {
             />
           </div>
 
-          <div className="app-segmented">
+          <div
+            className="app-segmented shrink-0"
+            role="group"
+            aria-label={t("mySkills.filtersLabel")}
+          >
             {(["all", "enabled", "available"] as const).map((mode) => (
               <button
                 key={mode}
+                type="button"
+                aria-pressed={filterMode === mode}
                 onClick={() => setFilterMode(mode)}
                 className={cn(
-                  "app-segmented-button",
+                  "app-segmented-button whitespace-nowrap focus-visible:ring-2 focus-visible:ring-accent",
                   filterMode === mode && "app-segmented-button-active"
                 )}
               >
