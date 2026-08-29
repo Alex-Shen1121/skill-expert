@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { expectedPackageAssets } from './package-assets.mjs';
+import { expectedUpdaterSignatureAssets } from './package-assets.mjs';
 import { verifyUpdaterSignature } from './updater-signature.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,9 +52,7 @@ function requireRegularFile(filePath, label) {
 
 export function signReleaseUpdaterAssets(options) {
   const publicKeyValue = configuredPublicKey(options);
-  const signatureNames = expectedPackageAssets(options.version, options.target).filter(
-    (name) => name.endsWith('.sig'),
-  );
+  const signatureNames = expectedUpdaterSignatureAssets(options.version, options.target);
   if (signatureNames.length === 0) {
     throw new Error(`${options.target} 没有需要重新签署的 Updater 资产`);
   }

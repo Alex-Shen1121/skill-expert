@@ -5,24 +5,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseCommandOptions } from './command-options.mjs';
-import { expectedPackageAssets } from './package-assets.mjs';
+import {
+  expectedPackageAssets,
+  expectedUpdaterArtifact,
+  expectedUpdaterSignatureAssets,
+} from './package-assets.mjs';
 import { parseProductVersion } from './product-version.mjs';
 
 const targets = ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'];
 const generatedAssets = ['SHA256SUMS', 'build-provenance.json', 'latest.json'];
 const updaterPlatforms = {
-  'darwin-aarch64': {
-    artifact: (version) => `skill-expert-v${version}-macos-arm64.app.tar.gz`,
-  },
-  'darwin-x86_64': {
-    artifact: (version) => `skill-expert-v${version}-macos-x64.app.tar.gz`,
-  },
-  'linux-x86_64': {
-    artifact: (version) => `skill-expert-v${version}-linux-x64.AppImage`,
-  },
-  'windows-x86_64': {
-    artifact: (version) => `skill-expert-v${version}-windows-x64-setup.exe`,
-  },
+  'darwin-aarch64': 'macos-arm64',
+  'darwin-x86_64': 'macos-x64',
+  'linux-x86_64': 'linux-x64',
+  'windows-x86_64': 'windows-x64',
 };
 
 function requireVersion(version) {
@@ -46,8 +42,18 @@ function requireRegularFile(directory, filename) {
 
 export function expectedReleaseAssets(version, { includeGenerated = true } = {}) {
   requireVersion(version);
-  const platformAssets = targets.flatMap((target) => expectedPackageAssets(version, target));
+  const platformAssets = targets
+    .flatMap((target) => expectedPackageAssets(version, target))
+    .filter((filename) => !filename.startsWith('skill-expert-cli-'))
+    .filter((filename) => !filename.endsWith('.sig'));
   return [...platformAssets, ...(includeGenerated ? generatedAssets : [])].sort();
+}
+
+export function expectedDraftOnlyAssets(version) {
+  requireVersion(version);
+  return targets
+    .flatMap((target) => expectedUpdaterSignatureAssets(version, target))
+    .sort();
 }
 
 export function createUpdaterMetadata(directory, version, pubDate) {
@@ -60,8 +66,8 @@ export function createUpdaterMetadata(directory, version, pubDate) {
   const downloadRoot =
     `https://github.com/Alex-Shen1121/skill-expert/releases/download/v${version}`;
   const platforms = {};
-  for (const [platform, contract] of Object.entries(updaterPlatforms)) {
-    const artifact = contract.artifact(version);
+  for (const [platform, target] of Object.entries(updaterPlatforms)) {
+    const artifact = expectedUpdaterArtifact(version, target);
     const signatureFile = `${artifact}.sig`;
     const signature = fs.readFileSync(requireRegularFile(directory, signatureFile), 'utf8').trim();
     if (!signature) throw new Error(`Updater 签名为空：${signatureFile}`);
@@ -130,6 +136,10 @@ function main() {
       console.log(expectedReleaseAssets(options.version).join('\n'));
       return;
     }
+    if (command === 'draft-only') {
+      console.log(expectedDraftOnlyAssets(options.version).join('\n'));
+      return;
+    }
     if (command === 'metadata') {
       const metadata = createUpdaterMetadata(
         options.directory,
@@ -150,7 +160,7 @@ function main() {
       return;
     }
     throw new Error(
-      '用法：release-assets.mjs <expected|metadata|checksums|verify> --version x.y.z --directory 路径',
+      '用法：release-assets.mjs <expected|draft-only|metadata|checksums|verify> --version x.y.z --directory 路径',
     );
   } catch (error) {
     console.error(`正式发布资产处理失败：${error.message}`);

@@ -34,7 +34,7 @@ Agent 技能管家的普通开发和正式发布都通过 PR 合入 `main`，但
 2. 验证该提交的三项轻量检查全部成功、源码只使用稳定 `x.y.z`、全部版本副本一致、双语 Changelog 已归档，并确认 tag 和 GitHub Release 尚不存在；
 3. 创建不可变 annotated `vX.Y.Z` tag 和不可见 Draft；
 4. 在 GitHub `release` Environment 中读取生产 Updater Secret，在 macOS 与 Windows 运行 Rust 测试，并为 macOS arm64、macOS x64、Windows x64 和 Linux x64 构建 CLI 与 Tauri 安装包、完成生产签名和原生包回验；
-5. 生成四平台 `latest.json`、`SHA256SUMS` 和 `build-provenance.json`；
+5. CLI 只在 runner 内构建和验证、不上传到 Draft；从四个平台实际更新入口的 Draft 临时签名生成 `latest.json` 和 `SHA256SUMS`，删除单独 `.sig` 文件，再为剩余公开资产生成 `build-provenance.json`；
 6. 从 Draft 重新下载 GitHub 保存的真实字节，验证精确资产清单、SHA-256、Updater 签名、来源证明，以及 macOS、Windows、Linux 原生版本；
 7. 只有所有门禁通过后，才一次性公开 Draft 并标记为 Latest。
 
@@ -49,14 +49,16 @@ Agent 技能管家的普通开发和正式发布都通过 PR 合入 `main`，但
 
 ## 公开资产
 
-每个公开 Release 精确包含 18 个四平台产品文件和 3 个生成文件，共 21 个资产：
+每个公开 Release 精确包含 9 个四平台应用分发文件和 3 个生成文件，共 12 个资产：
 
-- macOS arm64 与 x64：DMG、Updater archive、`.sig` 和 CLI；
-- Windows x64：NSIS、NSIS `.sig`、MSI、MSI `.sig` 和 CLI；
-- Linux x64：AppImage、AppImage `.sig`、DEB、RPM 和 CLI；
+- macOS arm64 与 x64：DMG 和 Updater archive；
+- Windows x64：NSIS 和 MSI；
+- Linux x64：AppImage、DEB 和 RPM；
 - `latest.json`：四平台稳定下载地址与生产签名；
 - `SHA256SUMS`：产品资产和 `latest.json` 的 SHA-256；
 - `build-provenance.json`：正式发布提交和 `.github/workflows/release.yml` 的 GitHub 来源证明。
+
+独立 CLI 继续参与构建和测试，但不再作为 Release 下载。Updater `.sig` 继续在不可见 Draft 阶段生成并通过密码学验证，签名值写入 `latest.json` 后不再单独公开。
 
 ## 失败与版本身份
 

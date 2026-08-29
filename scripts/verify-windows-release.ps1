@@ -20,14 +20,8 @@ function Assert-Version([string]$Label, [string]$Actual) {
   }
 }
 
-$Cli = Get-RequiredFile "skill-expert-cli-v$Version-windows-x64.exe"
 $Nsis = Get-RequiredFile "skill-expert-v$Version-windows-x64-setup.exe"
 $Msi = Get-RequiredFile "skill-expert-v$Version-windows-x64.msi"
-
-$CliVersion = (& $Cli --version | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $CliVersion -ne "skill-expert-cli $Version") {
-  throw "CLI 版本不匹配：预期 skill-expert-cli $Version，实际 $CliVersion"
-}
 
 $NsisVersion = (Get-Item -LiteralPath $Nsis).VersionInfo.ProductVersion
 if ($NsisVersion -eq "$Version.0") {

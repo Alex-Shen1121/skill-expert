@@ -177,8 +177,6 @@ npm run cli:install
 
 二进制会装到 `~/.cargo/bin/skill-expert-cli`。代码更新后再跑一次即可刷新。
 
-正式 Release 也会提供 macOS arm64/x64、Windows x64、Linux x64 的独立 CLI 文件。下载对应的 `skill-expert-cli-*`，在 macOS/Linux 添加可执行权限后放入 PATH 即可。
-
 #### 与桌面应用并发使用
 
 CLI 和桌面应用共享同一个 SQLite 数据库及仓库锁。CLI 修改 metadata 或 Agent 部署后，桌面应用通常会通过文件监听自动刷新；如果应用当时处于休眠状态，手动刷新一次即可。

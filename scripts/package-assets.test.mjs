@@ -39,6 +39,30 @@ const expectedInventory = {
   ],
 };
 
+const expectedDraftUploadInventory = {
+  'macos-arm64': [
+    'skill-expert-v1.2.3-macos-arm64.app.tar.gz',
+    'skill-expert-v1.2.3-macos-arm64.app.tar.gz.sig',
+    'skill-expert-v1.2.3-macos-arm64.dmg',
+  ],
+  'macos-x64': [
+    'skill-expert-v1.2.3-macos-x64.app.tar.gz',
+    'skill-expert-v1.2.3-macos-x64.app.tar.gz.sig',
+    'skill-expert-v1.2.3-macos-x64.dmg',
+  ],
+  'windows-x64': [
+    'skill-expert-v1.2.3-windows-x64-setup.exe',
+    'skill-expert-v1.2.3-windows-x64-setup.exe.sig',
+    'skill-expert-v1.2.3-windows-x64.msi',
+  ],
+  'linux-x64': [
+    'skill-expert-v1.2.3-linux-x64.AppImage',
+    'skill-expert-v1.2.3-linux-x64.AppImage.sig',
+    'skill-expert-v1.2.3-linux-x64.deb',
+    'skill-expert-v1.2.3-linux-x64.rpm',
+  ],
+};
+
 function runPackageAssets(args) {
   return spawnSync(process.execPath, [packageAssets, ...args], {
     cwd: repositoryRoot,
@@ -95,6 +119,15 @@ const buildArtifacts = {
 test('输出四个平台的精确稳定打包清单', () => {
   for (const [target, expected] of Object.entries(expectedInventory)) {
     const result = runPackageAssets(['expected', '--version', version, '--target', target]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split('\n'), expected);
+  }
+});
+
+test('输出不包含独立 CLI 的 Draft 上传清单', () => {
+  for (const [target, expected] of Object.entries(expectedDraftUploadInventory)) {
+    const result = runPackageAssets(['draft-upload', '--version', version, '--target', target]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(result.stdout.trim().split('\n'), expected);
