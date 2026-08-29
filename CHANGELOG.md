@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.7] - 2026-08-29
+
+### Release Overview
 - 修复桌面显示名称改为“Agent 技能管家”后 Windows MSI 打包失败的问题。
 
 ### User-facing
