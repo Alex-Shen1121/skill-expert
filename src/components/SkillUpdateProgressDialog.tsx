@@ -1,4 +1,5 @@
 import { CheckCircle2, CircleAlert, Clock3, Loader2, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import type { SkillUpdateBatchProgressStatus } from "../lib/tauri";
@@ -43,7 +44,7 @@ function isFinishedStatus(status: SkillUpdateBatchProgressStatus) {
   return !RUNNING_STATUSES.has(status);
 }
 
-interface Props {
+export interface SkillUpdateProgressDialogProps {
   open: boolean;
   stage: SkillUpdateDialogStage;
   items: SkillUpdateProgressItem[];
@@ -75,14 +76,27 @@ export function SkillUpdateProgressDialog({
   onStop,
   onRetryFailures,
   onClose,
-}: Props) {
+}: SkillUpdateProgressDialogProps) {
   const { t } = useTranslation();
   const running = stage === "checking" || stage === "updating";
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasRunningRef = useRef(false);
   const { containerRef, onKeyDown } = useModalFocusTrap<HTMLElement>({
     active: open,
     onEscape: running ? undefined : onClose,
     focusContainerInitially: true,
   });
+
+  useEffect(() => {
+    if (!open) {
+      wasRunningRef.current = false;
+      return;
+    }
+    if (wasRunningRef.current && !running) {
+      closeButtonRef.current?.focus();
+    }
+    wasRunningRef.current = running;
+  }, [open, running]);
 
   if (!open) return null;
 
@@ -147,6 +161,7 @@ export function SkillUpdateProgressDialog({
             )}
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             disabled={running}

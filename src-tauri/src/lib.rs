@@ -6,6 +6,7 @@ use tauri::{Emitter, Manager};
 
 pub mod commands;
 pub mod core;
+mod skill_update_batch;
 
 /// Shared flag: when true, CloseRequested should NOT be prevented.
 pub static QUITTING: AtomicBool = AtomicBool::new(false);

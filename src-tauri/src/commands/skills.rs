@@ -1,11 +1,15 @@
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use tauri::{Emitter, State};
 use walkdir::WalkDir;
+
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use crate::core::{
     audit_log::AuditDraft,
@@ -54,19 +58,6 @@ pub struct ReimportSkillResult {
     /// Approves exactly `pending_removals` — see [`UpdateSkillResult`].
     pub removal_approval: Option<String>,
 }
-
-/// Where a path about to be removed lives.
-#[derive(Debug, Clone, Serialize)]
-pub struct PendingRemoval {
-    /// [`LIBRARY_LOCATION`], or the key of the agent whose deployed copy holds
-    /// it. The user needs to know which directory to go and rescue.
-    pub location: String,
-    pub path: String,
-}
-
-/// `PendingRemoval::location` for the central library, as opposed to an agent's
-/// deployed copy.
-pub const LIBRARY_LOCATION: &str = "library";
 
 enum UpdateOutcome {
     Applied {
@@ -175,117 +166,21 @@ impl Drop for StagedPathGuard<'_> {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub struct BatchUpdateSkillsResult {
-    pub batch_id: Option<String>,
-    pub stopped: bool,
-    pub refreshed: usize,
-    pub unchanged: usize,
-    pub failed: Vec<String>,
-    /// Skills left alone because updating would have removed files the new
-    /// version does not have. Named so the user can go and look, rather than
-    /// wondering why the badge did not clear.
-    pub held_back: Vec<String>,
-    pub items: Vec<BatchUpdateSkillItemResult>,
-}
+pub use crate::core::pending_removal::{PendingRemoval, LIBRARY_LOCATION};
+pub use crate::skill_update_batch::PrefetchedRemote;
+use crate::skill_update_batch::{
+    self, is_checkable_update_skill, skill_update_batch_cancel_key, BatchUpdateExecution,
+    CheckedSkillState, ForegroundCheckBatch, RemoteKey, SkillUpdateCheckAdapter,
+};
+pub use crate::skill_update_batch::{
+    BatchUpdateSkillItemResult, BatchUpdateSkillsResult, CheckSkillUpdateItemResult,
+    CheckSkillUpdatesBatchResult, SkillUpdateBatchPhase, SkillUpdateBatchProgress,
+    SkillUpdateBatchProgressStatus, DEFAULT_CHECK_CONCURRENCY, DEFAULT_UPDATE_CONCURRENCY,
+    SKILL_UPDATE_BATCH_PROGRESS_EVENT,
+};
 
-pub const SKILL_UPDATE_BATCH_PROGRESS_EVENT: &str = "skill-update-batch-progress";
-pub const DEFAULT_CHECK_CONCURRENCY: usize = 8;
-pub const DEFAULT_UPDATE_CONCURRENCY: usize = 4;
-const FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY: &str = "foreground_batch_check_concurrency";
-const FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY: &str = "foreground_batch_update_concurrency";
-
-fn foreground_batch_concurrency(store: &SkillStore, key: &str, fallback: usize) -> usize {
-    match store.get_setting(key) {
-        Ok(Some(value)) => match value.trim() {
-            "1" => 1,
-            "4" => 4,
-            "8" => 8,
-            _ => fallback,
-        },
-        Ok(None) => fallback,
-        Err(err) => {
-            log::warn!("读取前台批处理并发设置失败，使用默认值 {fallback}：{err}");
-            fallback
-        }
-    }
-}
-
-fn skill_update_batch_cancel_key(batch_id: &str) -> String {
-    format!("skill-update-batch:{batch_id}")
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SkillUpdateBatchPhase {
-    Check,
-    Update,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SkillUpdateBatchProgressStatus {
-    Waiting,
-    Checking,
-    Updating,
-    Updated,
-    Unchanged,
-    NeedsConfirmation,
-    UpToDate,
-    UpdateAvailable,
-    Unknown,
-    LocalOnly,
-    SourceMissing,
-    NotStarted,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct SkillUpdateBatchProgress {
-    pub batch_id: String,
-    pub skill_id: String,
-    pub phase: SkillUpdateBatchPhase,
-    pub status: SkillUpdateBatchProgressStatus,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CheckSkillUpdateItemResult {
-    pub skill_id: String,
-    pub name: String,
-    pub source_type: String,
-    pub status: SkillUpdateBatchProgressStatus,
-    pub error: Option<String>,
-    pub last_checked_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CheckSkillUpdatesBatchResult {
-    pub batch_id: String,
-    pub stopped: bool,
-    pub skipped: usize,
-    pub items: Vec<CheckSkillUpdateItemResult>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BatchUpdateSkillItemResult {
-    pub skill_id: String,
-    pub name: String,
-    pub source_type: String,
-    pub status: SkillUpdateBatchProgressStatus,
-    pub error: Option<String>,
-    pub pending_removals: Vec<PendingRemoval>,
-    pub removal_approval: Option<String>,
-}
-
-pub(crate) enum BatchUpdateExecution {
-    Updated,
-    Unchanged,
-    NeedsConfirmation {
-        pending_removals: Vec<PendingRemoval>,
-        removal_approval: Option<String>,
-    },
-}
+#[cfg(test)]
+use crate::skill_update_batch::CheckSkillUpdatesBatch;
 
 #[derive(Debug, Serialize)]
 pub struct BatchDeleteSkillsResult {
@@ -1388,6 +1283,46 @@ pub async fn check_skill_update(
     .await?
 }
 
+struct StoredSkillUpdateCheckAdapter<'a> {
+    store: &'a SkillStore,
+}
+
+impl SkillUpdateCheckAdapter for StoredSkillUpdateCheckAdapter<'_> {
+    fn remote_key(&self, skill: &SkillRecord, force_check: bool) -> Option<RemoteKey> {
+        if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
+            return None;
+        }
+        match should_skip_update_check(self.store, skill, force_check) {
+            Ok(true) => return None,
+            Ok(false) => {}
+            Err(err) => log::warn!(
+                "Skill 检查批次：{} 的跳过判断失败，将继续检查：{}",
+                skill.id,
+                err.message
+            ),
+        }
+        let source = git_source_from_skill(skill).ok()?;
+        Some(RemoteKey::new(source.clone_url, source.branch))
+    }
+
+    fn apply_check(
+        &self,
+        skill: &SkillRecord,
+        force_check: bool,
+        prefetched: Option<PrefetchedRemote>,
+    ) -> Result<CheckedSkillState, String> {
+        let _lock = RepoLock::acquire("check skill update").map_err(|err| err.to_string())?;
+        let checked =
+            check_skill_update_internal_with_remote(self.store, &skill.id, force_check, prefetched)
+                .map_err(|err| err.message)?;
+        Ok(CheckedSkillState {
+            update_status: checked.update_status,
+            last_check_error: checked.last_check_error,
+            last_checked_at: checked.last_checked_at,
+        })
+    }
+}
+
 #[tauri::command]
 pub async fn check_all_skill_updates(
     force: Option<bool>,
@@ -1416,7 +1351,8 @@ pub async fn check_all_skill_updates(
                 &app,
             )
         } else {
-            check_all_skill_updates_background_internal(&store, force_check, |key| {
+            let adapter = StoredSkillUpdateCheckAdapter { store: &store };
+            skill_update_batch::check_background(&store, &adapter, force_check, |key| {
                 git_fetcher::resolve_remote_revision(
                     &key.clone_url,
                     key.branch.as_deref(),
@@ -1472,12 +1408,16 @@ fn run_foreground_skill_update_checks(
     proxy_url: Option<&str>,
     app: &tauri::AppHandle,
 ) -> Result<CheckSkillUpdatesBatchResult, AppError> {
-    check_all_skill_updates_foreground_internal(
+    let adapter = StoredSkillUpdateCheckAdapter { store };
+    skill_update_batch::check_with_preferences(
         store,
-        batch_id,
-        force_check,
-        requested_skill_ids,
-        stop,
+        &adapter,
+        ForegroundCheckBatch {
+            batch_id,
+            force_check,
+            requested_skill_ids,
+            stop,
+        },
         |key| {
             git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
                 .map_err(|err| err.to_string())
@@ -1488,388 +1428,6 @@ fn run_foreground_skill_update_checks(
             }
         },
     )
-}
-
-fn is_checkable_update_skill(skill: &SkillRecord) -> bool {
-    match skill.source_type.as_str() {
-        "git" | "skillssh" => true,
-        "local" | "import" => skill
-            .source_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .is_some_and(|path| Path::new(path).exists()),
-        _ => false,
-    }
-}
-
-fn collect_remote_skill_ids(
-    store: &SkillStore,
-    skills: &[SkillRecord],
-    force_check: bool,
-) -> HashMap<RemoteKey, Vec<String>> {
-    let mut remote_skill_ids = HashMap::new();
-    for skill in skills {
-        if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
-            continue;
-        }
-        match should_skip_update_check(store, skill, force_check) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(err) => log::warn!(
-                "Skill 检查批次：{} 的跳过判断失败，将继续检查：{}",
-                skill.id,
-                err.message
-            ),
-        }
-        if let Ok(source) = git_source_from_skill(skill) {
-            remote_skill_ids
-                .entry(RemoteKey::from(source))
-                .or_insert_with(Vec::new)
-                .push(skill.id.clone());
-        }
-    }
-    remote_skill_ids
-}
-
-fn prefetched_remote_for_skill(
-    skill: &SkillRecord,
-    remote_revisions: &HashMap<RemoteKey, Result<String, String>>,
-) -> Option<PrefetchedRemote> {
-    if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
-        return None;
-    }
-    git_source_from_skill(skill).ok().and_then(|source| {
-        let key = RemoteKey::from(source);
-        remote_revisions
-            .get(&key)
-            .cloned()
-            .map(|result| PrefetchedRemote { key, result })
-    })
-}
-
-fn apply_prefetched_skill_check(
-    store: &SkillStore,
-    skill: &SkillRecord,
-    force_check: bool,
-    remote_revisions: &HashMap<RemoteKey, Result<String, String>>,
-) -> Result<ManagedSkillDto, String> {
-    let prefetched = prefetched_remote_for_skill(skill, remote_revisions);
-    let _lock = RepoLock::acquire("check skill update").map_err(|err| err.to_string())?;
-    check_skill_update_internal_with_remote(store, &skill.id, force_check, prefetched)
-        .map_err(|err| err.message)
-}
-
-/// 保留无前台批次调用的既有检查语义：遍历整个中央技能库，
-/// 包括需要落库为 `source_missing` 或 `local_only` 的本地副本；
-/// 任一单项失败仍以整批错误返回给原有后台调用方。
-pub(crate) fn check_all_skill_updates_background_internal<R>(
-    store: &SkillStore,
-    force_check: bool,
-    resolve: R,
-) -> Result<(), AppError>
-where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
-{
-    let skills = store.get_all_skills().map_err(AppError::db)?;
-    let remote_skill_ids = collect_remote_skill_ids(store, &skills, force_check);
-    let remote_revisions = resolve_concurrent_with_progress(
-        remote_skill_ids.keys().cloned().collect(),
-        DEFAULT_CHECK_CONCURRENCY,
-        None,
-        resolve,
-        |_| {},
-    );
-
-    let mut failed = Vec::new();
-    for skill in &skills {
-        if let Err(message) =
-            apply_prefetched_skill_check(store, skill, force_check, &remote_revisions)
-        {
-            log::warn!("check all: {} failed: {}", skill.id, message);
-            failed.push(format!("{}: {}", skill.id, message));
-        }
-    }
-
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(AppError::internal(format!(
-            "Failed to check {} skill(s): {}",
-            failed.len(),
-            failed.join("; ")
-        )))
-    }
-}
-
-fn check_progress_status(
-    status: &str,
-    error: Option<String>,
-) -> (SkillUpdateBatchProgressStatus, Option<String>) {
-    match status {
-        "up_to_date" => (SkillUpdateBatchProgressStatus::UpToDate, None),
-        "update_available" => (SkillUpdateBatchProgressStatus::UpdateAvailable, None),
-        "unknown" => (SkillUpdateBatchProgressStatus::Unknown, None),
-        "local_only" => (SkillUpdateBatchProgressStatus::LocalOnly, None),
-        "source_missing" => (SkillUpdateBatchProgressStatus::SourceMissing, error),
-        "error" => (SkillUpdateBatchProgressStatus::Error, error),
-        other => (
-            SkillUpdateBatchProgressStatus::Error,
-            error.or_else(|| Some(format!("Unexpected update status: {other}"))),
-        ),
-    }
-}
-
-fn emit_check_progress<E>(
-    emit: &E,
-    batch_id: &str,
-    skill_id: &str,
-    status: SkillUpdateBatchProgressStatus,
-    error: Option<String>,
-) where
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    emit(SkillUpdateBatchProgress {
-        batch_id: batch_id.to_string(),
-        skill_id: skill_id.to_string(),
-        phase: SkillUpdateBatchPhase::Check,
-        status,
-        error,
-    });
-}
-
-/// 前台 Skill 检查批次的公开协调契约。远端解析器和事件出口由调用方注入，
-/// 使全库检查与失败项重试共享去重、并发、失败隔离和结果路径。
-pub(crate) struct CheckSkillUpdatesBatch<'a> {
-    batch_id: &'a str,
-    force_check: bool,
-    concurrency: usize,
-    requested_skill_ids: Option<&'a [String]>,
-    stop: &'a AtomicBool,
-}
-
-pub(crate) fn check_skill_updates_batch_internal<R, E>(
-    store: &SkillStore,
-    batch: CheckSkillUpdatesBatch<'_>,
-    resolve: R,
-    emit: E,
-) -> Result<CheckSkillUpdatesBatchResult, AppError>
-where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    let CheckSkillUpdatesBatch {
-        batch_id,
-        force_check,
-        concurrency,
-        requested_skill_ids,
-        stop,
-    } = batch;
-    let all_skills = store.get_all_skills().map_err(AppError::db)?;
-    let requested: Option<HashSet<&str>> =
-        requested_skill_ids.map(|ids| ids.iter().map(String::as_str).collect());
-    let mut skills: Vec<SkillRecord> = all_skills
-        .iter()
-        .filter(|skill| {
-            is_checkable_update_skill(skill)
-                && match requested.as_ref() {
-                    Some(ids) => ids.contains(skill.id.as_str()),
-                    None => true,
-                }
-        })
-        .cloned()
-        .collect();
-    skills.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    let skipped = if requested.is_some() {
-        requested_skill_ids
-            .map_or(0, |ids| ids.len())
-            .saturating_sub(skills.len())
-    } else {
-        all_skills.len().saturating_sub(skills.len())
-    };
-
-    for skill in &skills {
-        emit_check_progress(
-            &emit,
-            batch_id,
-            &skill.id,
-            SkillUpdateBatchProgressStatus::Waiting,
-            None,
-        );
-    }
-
-    // 第一阶段只解析不同远端，多个 Skill 共享同一 URL 与分支时复用结果。
-    let remote_skill_ids = collect_remote_skill_ids(store, &skills, force_check);
-    let remote_scheduled: HashSet<String> = remote_skill_ids
-        .values()
-        .flat_map(|ids| ids.iter().cloned())
-        .collect();
-    let remote_revisions = resolve_concurrent_with_progress(
-        remote_skill_ids.keys().cloned().collect(),
-        concurrency,
-        Some(stop),
-        resolve,
-        |key| {
-            if let Some(skill_ids) = remote_skill_ids.get(key) {
-                for skill_id in skill_ids {
-                    emit_check_progress(
-                        &emit,
-                        batch_id,
-                        skill_id,
-                        SkillUpdateBatchProgressStatus::Checking,
-                        None,
-                    );
-                }
-            }
-        },
-    );
-
-    // 第二阶段逐项持有中央仓库锁写入状态；单项错误只进入自己的结果。
-    let mut items = Vec::with_capacity(skills.len());
-    for skill in &skills {
-        let remote_was_started = prefetched_remote_for_skill(skill, &remote_revisions).is_some();
-        if (remote_scheduled.contains(&skill.id) && !remote_was_started)
-            || (!remote_scheduled.contains(&skill.id)
-                && stop.load(std::sync::atomic::Ordering::SeqCst))
-        {
-            emit_check_progress(
-                &emit,
-                batch_id,
-                &skill.id,
-                SkillUpdateBatchProgressStatus::NotStarted,
-                None,
-            );
-            items.push(CheckSkillUpdateItemResult {
-                skill_id: skill.id.clone(),
-                name: skill.name.clone(),
-                source_type: skill.source_type.clone(),
-                status: SkillUpdateBatchProgressStatus::NotStarted,
-                error: None,
-                last_checked_at: skill.last_checked_at,
-            });
-            continue;
-        }
-        if !remote_scheduled.contains(&skill.id) {
-            emit_check_progress(
-                &emit,
-                batch_id,
-                &skill.id,
-                SkillUpdateBatchProgressStatus::Checking,
-                None,
-            );
-        }
-        let checked = apply_prefetched_skill_check(store, skill, force_check, &remote_revisions);
-        let (status, error, last_checked_at) = match checked {
-            Ok(dto) => {
-                let last_checked_at = dto.last_checked_at;
-                let (status, error) =
-                    check_progress_status(&dto.update_status, dto.last_check_error);
-                (status, error, last_checked_at)
-            }
-            Err(message) => {
-                log::warn!("前台 Skill 检查批次：{} 失败：{}", skill.id, message);
-                (
-                    SkillUpdateBatchProgressStatus::Error,
-                    Some(message),
-                    skill.last_checked_at,
-                )
-            }
-        };
-        emit_check_progress(&emit, batch_id, &skill.id, status, error.clone());
-        items.push(CheckSkillUpdateItemResult {
-            skill_id: skill.id.clone(),
-            name: skill.name.clone(),
-            source_type: skill.source_type.clone(),
-            status,
-            error,
-            last_checked_at,
-        });
-    }
-
-    Ok(CheckSkillUpdatesBatchResult {
-        batch_id: batch_id.to_string(),
-        stopped: stop.load(std::sync::atomic::Ordering::SeqCst),
-        skipped,
-        items,
-    })
-}
-
-/// 启动前台“检查全部”批次时读取一次并发偏好，然后把数值固定传入批处理契约。
-/// 设置在解析远端期间发生变化时，只会影响下一批任务。
-pub(crate) fn check_all_skill_updates_foreground_internal<R, E>(
-    store: &SkillStore,
-    batch_id: &str,
-    force_check: bool,
-    requested_skill_ids: Option<&[String]>,
-    stop: &AtomicBool,
-    resolve: R,
-    emit: E,
-) -> Result<CheckSkillUpdatesBatchResult, AppError>
-where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    let concurrency = foreground_batch_concurrency(
-        store,
-        FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
-        DEFAULT_CHECK_CONCURRENCY,
-    );
-    check_skill_updates_batch_internal(
-        store,
-        CheckSkillUpdatesBatch {
-            batch_id,
-            force_check,
-            concurrency,
-            requested_skill_ids,
-            stop,
-        },
-        resolve,
-        emit,
-    )
-}
-
-/// A distinct remote to resolve once during a batch check. Several skills can
-/// share one — e.g. many skills installed from subdirectories of a single
-/// monorepo — so keying by (clone_url, branch) collapses the redundant network
-/// queries the per-skill loop used to make.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) struct RemoteKey {
-    clone_url: String,
-    branch: Option<String>,
-}
-
-impl From<GitSkillSource> for RemoteKey {
-    fn from(source: GitSkillSource) -> Self {
-        RemoteKey {
-            clone_url: source.clone_url,
-            branch: source.branch,
-        }
-    }
-}
-
-impl RemoteKey {
-    /// Whether `source` still points at this remote. Subpath is deliberately
-    /// ignored: two subdirectories of one repo share a head revision.
-    fn matches(&self, source: &GitSkillSource) -> bool {
-        self.clone_url == source.clone_url && self.branch == source.branch
-    }
-}
-
-/// A remote revision resolved off the central-repo lock, tagged with the remote
-/// it was resolved for. The tag is what makes it safe to apply later: a
-/// reinstall keeps a skill's row and repoints its source
-/// (`update_skill_after_reinstall`), so the applying side re-derives the key
-/// from the freshly read record and drops a prefetch that no longer matches.
-#[derive(Clone)]
-pub struct PrefetchedRemote {
-    key: RemoteKey,
-    result: Result<String, String>,
 }
 
 /// Resolve one skill's remote revision *before* the caller takes the
@@ -1893,67 +1451,15 @@ pub fn prefetch_skill_remote(
     if should_skip_update_check(store, &skill, force).unwrap_or(false) {
         return None;
     }
-    let key = RemoteKey::from(git_source_from_skill(&skill).ok()?);
-    let result =
-        git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
-            .map_err(|err| err.to_string());
-    Some(PrefetchedRemote { key, result })
-}
-
-/// 测试入口沿用生产批处理的默认并发数，验证远端解析工作队列。
-#[cfg(test)]
-fn resolve_concurrent<F>(
-    remotes: Vec<RemoteKey>,
-    resolve: F,
-) -> HashMap<RemoteKey, Result<String, String>>
-where
-    F: Fn(&RemoteKey) -> Result<String, String> + Sync,
-{
-    resolve_concurrent_with_progress(remotes, DEFAULT_CHECK_CONCURRENCY, None, resolve, |_| {})
-}
-
-/// 受限并发解析每个不同远端，并在每项开始时发出进度。
-/// 失败作为该远端自己的结果返回，不会取消同批次其他远端。
-fn resolve_concurrent_with_progress<F, P>(
-    remotes: Vec<RemoteKey>,
-    concurrency: usize,
-    stop: Option<&AtomicBool>,
-    resolve: F,
-    on_start: P,
-) -> HashMap<RemoteKey, Result<String, String>>
-where
-    F: Fn(&RemoteKey) -> Result<String, String> + Sync,
-    P: Fn(&RemoteKey) + Sync,
-{
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let next = AtomicUsize::new(0);
-    let results: Mutex<HashMap<RemoteKey, Result<String, String>>> =
-        Mutex::new(HashMap::with_capacity(remotes.len()));
-    let worker_count = concurrency.max(1).min(remotes.len().max(1));
-
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| loop {
-                if matches!(stop, Some(token) if token.load(Ordering::SeqCst)) {
-                    break;
-                }
-                let idx = next.fetch_add(1, Ordering::Relaxed);
-                let Some(key) = remotes.get(idx) else { break };
-                if matches!(stop, Some(token) if token.load(Ordering::SeqCst)) {
-                    break;
-                }
-
-                on_start(key);
-                let resolved = resolve(key);
-                if let Ok(mut map) = results.lock() {
-                    map.insert(key.clone(), resolved);
-                }
-            });
-        }
-    });
-
-    results.into_inner().unwrap_or_default()
+    let source = git_source_from_skill(&skill).ok()?;
+    let result = git_fetcher::resolve_remote_revision(
+        &source.clone_url,
+        source.branch.as_deref(),
+        proxy_url,
+    )
+    .map_err(|err| err.to_string());
+    let key = RemoteKey::new(source.clone_url, source.branch);
+    Some(skill_update_batch::prefetched_remote(key, result))
 }
 
 /// Update one skill.
@@ -2045,235 +1551,6 @@ fn execute_batch_update(
     }
 }
 
-fn emit_update_progress<E>(
-    emit: &E,
-    batch_id: &str,
-    skill_id: &str,
-    status: SkillUpdateBatchProgressStatus,
-    error: Option<String>,
-) where
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    emit(SkillUpdateBatchProgress {
-        batch_id: batch_id.to_string(),
-        skill_id: skill_id.to_string(),
-        phase: SkillUpdateBatchPhase::Update,
-        status,
-        error,
-    });
-}
-
-/// “全部更新”的前台公开批处理契约。每个任务可以并发完成联网、下载和准备，
-/// 真实更新函数内部仍通过既有仓库锁串行保护中央技能库关键写入。
-pub(crate) fn batch_update_skills_internal<U, E>(
-    store: &SkillStore,
-    batch_id: &str,
-    skill_ids: Vec<String>,
-    concurrency: usize,
-    stop: &AtomicBool,
-    update: U,
-    emit: E,
-) -> Result<BatchUpdateSkillsResult, AppError>
-where
-    U: Fn(&SkillRecord) -> Result<BatchUpdateExecution, String> + Sync,
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let mut seen = HashSet::new();
-    let mut skills = Vec::new();
-    let mut items = Vec::new();
-    for skill_id in skill_ids {
-        if !seen.insert(skill_id.clone()) {
-            continue;
-        }
-        match store.get_skill_by_id(&skill_id).map_err(AppError::db)? {
-            Some(skill) => skills.push(skill),
-            None => items.push(BatchUpdateSkillItemResult {
-                skill_id: skill_id.clone(),
-                name: skill_id.clone(),
-                source_type: String::new(),
-                status: SkillUpdateBatchProgressStatus::Error,
-                error: Some("未找到 Skill".to_string()),
-                pending_removals: Vec::new(),
-                removal_approval: None,
-            }),
-        }
-    }
-    skills.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-
-    for skill in &skills {
-        emit_update_progress(
-            &emit,
-            batch_id,
-            &skill.id,
-            SkillUpdateBatchProgressStatus::Waiting,
-            None,
-        );
-    }
-
-    let next = AtomicUsize::new(0);
-    let completed = Mutex::new(Vec::<BatchUpdateSkillItemResult>::with_capacity(
-        skills.len(),
-    ));
-    let worker_count = concurrency.max(1).min(skills.len().max(1));
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            scope.spawn(|| loop {
-                if stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(skill) = skills.get(index) else {
-                    break;
-                };
-                if stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                emit_update_progress(
-                    &emit,
-                    batch_id,
-                    &skill.id,
-                    SkillUpdateBatchProgressStatus::Updating,
-                    None,
-                );
-                let (status, error, pending_removals, removal_approval) = match update(skill) {
-                    Ok(BatchUpdateExecution::Updated) => (
-                        SkillUpdateBatchProgressStatus::Updated,
-                        None,
-                        Vec::new(),
-                        None,
-                    ),
-                    Ok(BatchUpdateExecution::Unchanged) => (
-                        SkillUpdateBatchProgressStatus::Unchanged,
-                        None,
-                        Vec::new(),
-                        None,
-                    ),
-                    Ok(BatchUpdateExecution::NeedsConfirmation {
-                        pending_removals,
-                        removal_approval,
-                    }) => (
-                        SkillUpdateBatchProgressStatus::NeedsConfirmation,
-                        None,
-                        pending_removals,
-                        removal_approval,
-                    ),
-                    Err(message) => (
-                        SkillUpdateBatchProgressStatus::Error,
-                        Some(message),
-                        Vec::new(),
-                        None,
-                    ),
-                };
-                emit_update_progress(&emit, batch_id, &skill.id, status, error.clone());
-                completed.lock().unwrap().push(BatchUpdateSkillItemResult {
-                    skill_id: skill.id.clone(),
-                    name: skill.name.clone(),
-                    source_type: skill.source_type.clone(),
-                    status,
-                    error,
-                    pending_removals,
-                    removal_approval,
-                });
-            });
-        }
-    });
-    items.extend(completed.into_inner().unwrap_or_default());
-    let completed_ids: HashSet<String> = items.iter().map(|item| item.skill_id.clone()).collect();
-    for skill in &skills {
-        if completed_ids.contains(&skill.id) {
-            continue;
-        }
-        emit_update_progress(
-            &emit,
-            batch_id,
-            &skill.id,
-            SkillUpdateBatchProgressStatus::NotStarted,
-            None,
-        );
-        items.push(BatchUpdateSkillItemResult {
-            skill_id: skill.id.clone(),
-            name: skill.name.clone(),
-            source_type: skill.source_type.clone(),
-            status: SkillUpdateBatchProgressStatus::NotStarted,
-            error: None,
-            pending_removals: Vec::new(),
-            removal_approval: None,
-        });
-    }
-    items.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.skill_id.cmp(&right.skill_id))
-    });
-
-    let refreshed = items
-        .iter()
-        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Updated)
-        .count();
-    let unchanged = items
-        .iter()
-        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Unchanged)
-        .count();
-    let failed = items
-        .iter()
-        .filter(|item| item.status == SkillUpdateBatchProgressStatus::Error)
-        .map(|item| {
-            format!(
-                "{}: {}",
-                item.name,
-                item.error.as_deref().unwrap_or("未知错误")
-            )
-        })
-        .collect();
-    let held_back = items
-        .iter()
-        .filter(|item| item.status == SkillUpdateBatchProgressStatus::NeedsConfirmation)
-        .map(|item| item.name.clone())
-        .collect();
-
-    Ok(BatchUpdateSkillsResult {
-        batch_id: Some(batch_id.to_string()),
-        stopped: stop.load(Ordering::SeqCst),
-        refreshed,
-        unchanged,
-        failed,
-        held_back,
-        items,
-    })
-}
-
-/// 启动前台“全部更新”批次时读取一次并发偏好，然后把数值固定传入批处理契约。
-/// 运行期间的设置修改不会改变已经创建的工作队列。
-pub(crate) fn batch_update_skills_foreground_internal<U, E>(
-    store: &SkillStore,
-    batch_id: &str,
-    skill_ids: Vec<String>,
-    stop: &AtomicBool,
-    update: U,
-    emit: E,
-) -> Result<BatchUpdateSkillsResult, AppError>
-where
-    U: Fn(&SkillRecord) -> Result<BatchUpdateExecution, String> + Sync,
-    E: Fn(SkillUpdateBatchProgress) + Sync,
-{
-    let concurrency = foreground_batch_concurrency(
-        store,
-        FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
-        DEFAULT_UPDATE_CONCURRENCY,
-    );
-    batch_update_skills_internal(store, batch_id, skill_ids, concurrency, stop, update, emit)
-}
-
 #[tauri::command]
 pub async fn batch_update_skills(
     skill_ids: Vec<String>,
@@ -2290,7 +1567,7 @@ pub async fn batch_update_skills(
             let cancel_key = skill_update_batch_cancel_key(&batch_id);
             let stop = registry.register_or_get(&cancel_key);
             let _cancel_guard = CancelRegistrationGuard::new(registry.clone(), cancel_key);
-            return batch_update_skills_foreground_internal(
+            return skill_update_batch::update_with_preferences(
                 &store,
                 &batch_id,
                 skill_ids,
@@ -3270,7 +2547,11 @@ pub fn check_skill_update_internal_with_remote(
             // 20s "busy" failure the off-lock split exists to remove (#315).
             // The next round picks the skill up.
             let Some(remote_result) = prefetched
-                .filter(|prefetched| prefetched.key.matches(&git_source))
+                .filter(|prefetched| {
+                    prefetched
+                        .key
+                        .matches(&git_source.clone_url, git_source.branch.as_deref())
+                })
                 .map(|prefetched| prefetched.result)
             else {
                 log::debug!(
@@ -3346,7 +2627,7 @@ pub fn check_skill_update_internal_with_remote(
     managed_skill_by_id(store, skill_id)
 }
 
-fn should_skip_update_check(
+pub(crate) fn should_skip_update_check(
     store: &SkillStore,
     skill: &SkillRecord,
     force: bool,
@@ -3890,6 +3171,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tempfile::{tempdir, TempDir};
 
+    const TEST_CHECK_CONCURRENCY_SETTING: &str = "foreground_batch_check_concurrency";
+    const TEST_UPDATE_CONCURRENCY_SETTING: &str = "foreground_batch_update_concurrency";
+
     struct TestRepo {
         _lock: std::sync::MutexGuard<'static, ()>,
         _tmp: TempDir,
@@ -4363,7 +3647,9 @@ mod tests {
             ),
         ];
         for s in skills {
-            *per_remote.entry(RemoteKey::from(s)).or_insert(0) += 1;
+            *per_remote
+                .entry(RemoteKey::new(s.clone_url, s.branch))
+                .or_insert(0) += 1;
         }
 
         assert_eq!(per_remote.len(), 3, "distinct remotes to query");
@@ -4403,8 +3689,9 @@ mod tests {
         repo.store.insert_skill(&local_copy).unwrap();
 
         let events = Mutex::new(Vec::<SkillUpdateBatchProgress>::new());
-        let result = check_skill_updates_batch_internal(
+        let result = skill_update_batch::check_with_concurrency(
             &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
             CheckSkillUpdatesBatch {
                 batch_id: "batch-42",
                 force_check: true,
@@ -4476,8 +3763,9 @@ mod tests {
         let calls = Mutex::new(HashMap::<String, usize>::new());
         let in_flight = AtomicUsize::new(0);
         let peak = AtomicUsize::new(0);
-        let result = check_skill_updates_batch_internal(
+        let result = skill_update_batch::check_with_concurrency(
             &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
             CheckSkillUpdatesBatch {
                 batch_id: "batch-concurrency",
                 force_check: true,
@@ -4519,24 +3807,24 @@ mod tests {
             let repo = test_repo();
             let skill_ids = insert_concurrency_skills(&repo.store, "check", 12);
             repo.store
-                .set_setting(
-                    FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
-                    &configured.to_string(),
-                )
+                .set_setting(TEST_CHECK_CONCURRENCY_SETTING, &configured.to_string())
                 .unwrap();
 
             let probe = ConcurrencyProbe::new();
-            let result = check_all_skill_updates_foreground_internal(
+            let result = skill_update_batch::check_with_preferences(
                 &repo.store,
-                &format!("check-{configured}"),
-                true,
-                None,
-                &AtomicBool::new(false),
+                &StoredSkillUpdateCheckAdapter { store: &repo.store },
+                ForegroundCheckBatch {
+                    batch_id: &format!("check-{configured}"),
+                    force_check: true,
+                    requested_skill_ids: None,
+                    stop: &AtomicBool::new(false),
+                },
                 |_key| {
                     probe.observe(
                         || {
                             repo.store
-                                .set_setting(FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY, "8")
+                                .set_setting(TEST_CHECK_CONCURRENCY_SETTING, "8")
                                 .unwrap();
                         },
                         Ok("old-rev".to_string()),
@@ -4556,51 +3844,6 @@ mod tests {
     }
 
     #[test]
-    fn foreground_concurrency_contract_uses_safe_defaults_for_missing_or_invalid_values() {
-        let repo = test_repo();
-
-        assert_eq!(
-            foreground_batch_concurrency(
-                &repo.store,
-                FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
-                DEFAULT_CHECK_CONCURRENCY,
-            ),
-            8
-        );
-        assert_eq!(
-            foreground_batch_concurrency(
-                &repo.store,
-                FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
-                DEFAULT_UPDATE_CONCURRENCY,
-            ),
-            4
-        );
-
-        repo.store
-            .set_setting(FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY, "32")
-            .unwrap();
-        repo.store
-            .set_setting(FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY, "invalid")
-            .unwrap();
-        assert_eq!(
-            foreground_batch_concurrency(
-                &repo.store,
-                FOREGROUND_BATCH_CHECK_CONCURRENCY_KEY,
-                DEFAULT_CHECK_CONCURRENCY,
-            ),
-            8
-        );
-        assert_eq!(
-            foreground_batch_concurrency(
-                &repo.store,
-                FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
-                DEFAULT_UPDATE_CONCURRENCY,
-            ),
-            4
-        );
-    }
-
-    #[test]
     fn check_batch_stop_finishes_started_remotes_and_leaves_pending_skills_unstarted() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Barrier;
@@ -4617,8 +3860,9 @@ mod tests {
         let started = AtomicUsize::new(0);
         let barrier = Barrier::new(2);
 
-        let result = check_skill_updates_batch_internal(
+        let result = skill_update_batch::check_with_concurrency(
             &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
             CheckSkillUpdatesBatch {
                 batch_id: "check-stop",
                 force_check: true,
@@ -4674,7 +3918,7 @@ mod tests {
         let peak = AtomicUsize::new(0);
         let events = Mutex::new(Vec::<SkillUpdateBatchProgress>::new());
 
-        let result = batch_update_skills_internal(
+        let result = skill_update_batch::update_with_concurrency(
             &repo.store,
             "update-batch-42",
             skill_ids,
@@ -4753,14 +3997,11 @@ mod tests {
             let repo = test_repo();
             let skill_ids = insert_concurrency_skills(&repo.store, "update", 12);
             repo.store
-                .set_setting(
-                    FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY,
-                    &configured.to_string(),
-                )
+                .set_setting(TEST_UPDATE_CONCURRENCY_SETTING, &configured.to_string())
                 .unwrap();
 
             let probe = ConcurrencyProbe::new();
-            let result = batch_update_skills_foreground_internal(
+            let result = skill_update_batch::update_with_preferences(
                 &repo.store,
                 &format!("update-{configured}"),
                 skill_ids.clone(),
@@ -4769,7 +4010,7 @@ mod tests {
                     probe.observe(
                         || {
                             repo.store
-                                .set_setting(FOREGROUND_BATCH_UPDATE_CONCURRENCY_KEY, "1")
+                                .set_setting(TEST_UPDATE_CONCURRENCY_SETTING, "1")
                                 .unwrap();
                         },
                         Ok(BatchUpdateExecution::Updated),
@@ -4805,7 +4046,7 @@ mod tests {
         let started = AtomicUsize::new(0);
         let barrier = Barrier::new(2);
 
-        let result = batch_update_skills_internal(
+        let result = skill_update_batch::update_with_concurrency(
             &repo.store,
             "update-stop",
             (0..5).map(|index| format!("skill-{index}")).collect(),
@@ -4853,7 +4094,7 @@ mod tests {
             );
         }
 
-        let first = batch_update_skills_internal(
+        let first = skill_update_batch::update_with_concurrency(
             &repo.store,
             "update-first",
             vec![
@@ -4887,7 +4128,7 @@ mod tests {
             .collect();
         let retried = Mutex::new(Vec::<String>::new());
 
-        let second = batch_update_skills_internal(
+        let second = skill_update_batch::update_with_concurrency(
             &repo.store,
             "update-retry",
             retry_ids,
@@ -4918,8 +4159,9 @@ mod tests {
         let requested = vec!["failure".to_string()];
         let resolved = Mutex::new(Vec::<String>::new());
 
-        let result = check_skill_updates_batch_internal(
+        let result = skill_update_batch::check_with_concurrency(
             &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
             CheckSkillUpdatesBatch {
                 batch_id: "check-retry",
                 force_check: true,
@@ -4964,9 +4206,12 @@ mod tests {
                 .can_check_update
         );
 
-        check_all_skill_updates_background_internal(&repo.store, true, |_key| {
-            panic!("本地来源不应解析 Git 远端")
-        })
+        skill_update_batch::check_background(
+            &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
+            true,
+            |_key| panic!("本地来源不应解析 Git 远端"),
+        )
         .unwrap();
 
         let stored = repo.store.get_skill_by_id("local-source").unwrap().unwrap();
@@ -4980,8 +4225,9 @@ mod tests {
         let local = sample_skill("local-without-baseline", "local-without-baseline", &source);
         repo.store.insert_skill(&local).unwrap();
 
-        let result = check_skill_updates_batch_internal(
+        let result = skill_update_batch::check_with_concurrency(
             &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
             CheckSkillUpdatesBatch {
                 batch_id: "batch-local",
                 force_check: true,
@@ -5000,80 +4246,6 @@ mod tests {
             SkillUpdateBatchProgressStatus::LocalOnly
         );
         assert_eq!(result.items[0].error, None);
-    }
-
-    /// Work-stealing must cover every remote exactly once and collect each
-    /// resolver result under its own key — this exercises the real concurrent
-    /// loop, not just `RemoteKey`'s hashing.
-    #[test]
-    fn resolve_concurrent_resolves_every_remote_exactly_once() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let remotes: Vec<RemoteKey> = (0..20)
-            .map(|i| remote(&format!("https://example.test/r{i}"), None))
-            .collect();
-        let calls = AtomicUsize::new(0);
-
-        let out = resolve_concurrent(remotes.clone(), |key| {
-            calls.fetch_add(1, Ordering::Relaxed);
-            Ok(format!("rev:{}", key.clone_url))
-        });
-
-        assert_eq!(
-            calls.load(Ordering::Relaxed),
-            remotes.len(),
-            "each remote resolved exactly once"
-        );
-        assert_eq!(out.len(), remotes.len());
-        for key in &remotes {
-            assert!(matches!(out.get(key), Some(Ok(v)) if *v == format!("rev:{}", key.clone_url)));
-        }
-    }
-
-    /// A single remote failing must be stored as `Err` for that key alone and
-    /// never abort the batch (the "检查全部 both crawled and popped failures" fix
-    /// depends on this isolation).
-    #[test]
-    fn resolve_concurrent_isolates_per_remote_failures() {
-        let ok = remote("https://example.test/ok", None);
-        let bad = remote("https://example.test/bad", Some("main"));
-
-        let out = resolve_concurrent(vec![ok.clone(), bad.clone()], |key| {
-            if key.clone_url.ends_with("/bad") {
-                Err("boom".to_string())
-            } else {
-                Ok("rev".to_string())
-            }
-        });
-
-        assert!(matches!(out.get(&ok), Some(Ok(v)) if v == "rev"));
-        assert!(matches!(out.get(&bad), Some(Err(e)) if e == "boom"));
-    }
-
-    /// The resolutions must genuinely overlap: with several remotes and a
-    /// resolver that lingers, more than one worker is inside `resolve` at once.
-    /// Because `resolve_concurrent` holds no `RepoLock`, this is also the proof
-    /// that the network step runs off the central-repo lock.
-    #[test]
-    fn resolve_concurrent_runs_remotes_in_parallel() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let remotes: Vec<RemoteKey> = (0..8).map(|i| remote(&format!("r{i}"), None)).collect();
-        let in_flight = AtomicUsize::new(0);
-        let peak = AtomicUsize::new(0);
-
-        let out = resolve_concurrent(remotes, |_key| {
-            let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-            peak.fetch_max(now, Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            in_flight.fetch_sub(1, Ordering::SeqCst);
-            Ok("rev".to_string())
-        });
-
-        assert_eq!(out.len(), 8);
-        assert!(
-            peak.load(Ordering::SeqCst) >= 2,
-            "expected concurrent resolution, peak in-flight was {}",
-            peak.load(Ordering::SeqCst)
-        );
     }
 
     // ── Applying a prefetched remote under the lock ──

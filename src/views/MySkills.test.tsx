@@ -628,7 +628,9 @@ describe("MySkills 检查全部进度", () => {
     expect(within(dialog).getByText("失败 1")).not.toBeNull();
     expect(within(dialog).getByText("未开始 1")).not.toBeNull();
     expect(within(dialog).getByText("需要单独确认 0")).not.toBeNull();
-    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled).toBe(false);
+    const close = within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" });
+    expect(close.disabled).toBe(false);
+    expect(document.activeElement).toBe(close);
   });
 
   it("立即展示不受页面筛选影响的完整可检查范围，并按名称稳定排序", async () => {
@@ -804,6 +806,30 @@ describe("MySkills 检查全部进度", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Skill 更新" });
     await waitFor(() => expect(within(dialog).getByText("没有可用更新")).not.toBeNull());
+  });
+
+  it("检查命令整体拒绝时把所有未完成项标记为失败并只重试这些项", async () => {
+    const user = userEvent.setup();
+    const retryCheck = deferred<never>();
+    apiMocks.checkAllSkillUpdates.mockRejectedValueOnce(new Error("检查命令已拒绝"));
+    apiMocks.retryFailedSkillUpdateChecks.mockReturnValueOnce(retryCheck.promise);
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+      createSkill({ id: "beta", name: "Beta", sourceType: "skillssh", updateStatus: "unknown" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+
+    await waitFor(() => expect(within(dialog).getAllByText("检查失败")).toHaveLength(2));
+    expect(within(dialog).getByText("2 / 2")).not.toBeNull();
+    expect(within(dialog).getAllByText("检查命令已拒绝")).toHaveLength(2);
+
+    await user.click(within(dialog).getByRole("button", { name: "重试失败项（2）" }));
+
+    expect(apiMocks.retryFailedSkillUpdateChecks).toHaveBeenCalledTimes(1);
+    expect(apiMocks.retryFailedSkillUpdateChecks.mock.calls[0]?.[0]).toEqual(["alpha", "beta"]);
   });
 
   it("只重试检查失败项，并用新批次隔离旧事件", async () => {
