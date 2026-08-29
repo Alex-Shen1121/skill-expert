@@ -247,9 +247,17 @@ Extra flags:
 npm run -s cli -- --skills-root /path/to/my-skills --json skills list
 ```
 
+#### Let your agents manage skills
+
+Claude Code, Codex, Cursor and the rest can drive all of the above for you — installing a skill, deploying it to another agent, checking what is where — through the bundled [`manage-skills`](skills/manage-skills/SKILL.md) skill. Going through Skills Manager rather than writing into an agent's folder directly is what keeps source metadata, preset membership, updates and cross-agent deployment state intact.
+
+The Dashboard offers a one-time setup for this on first launch: pick the agents that should be able to do it, and the app installs the skill and deploys it to exactly those. Afterwards, adding or removing an agent is the agent badge row on the skill's own card, like any other skill.
+
+The desktop app publishes a copy of its own CLI to `~/.skills-manager/bin/skills-manager-cli` at startup, so agents can find it without anything being added to your PATH. That copy is always the same version as the running app. A `.version` stamp next to it is written only after the copy is verified and removed before each republish, so a copy that failed — a binary held open on Windows, say — is never presented as usable.
+
 #### Install the binary on PATH
 
-Agents and scripts that invoke `skills-manager-cli` directly (without `npm run`) need the binary on PATH. Install it with:
+The bridge above covers agents. Putting the CLI on your *own* PATH, for typing commands yourself, is separate:
 
 ```bash
 npm run cli:install

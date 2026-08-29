@@ -80,6 +80,18 @@
     "installNew": "安装新 Skills",
     "recentActivity": "近期动态"
   },
+  "agentControl": {
+    "title": "让你的 Agent 管理 Skills",
+    "body": "让 Claude Code、Codex 等直接替你安装和部署 Skill，来源与部署状态仍由 Skills Manager 记录。",
+    "cta": "去启用",
+    "pickAgents": "让哪些 Agent 可以这么做",
+    "confirm": "为 {{count}} 个启用",
+    "confirmEmpty": "选择 Agent",
+    "dismiss": "不再提示",
+    "done": "{{count}} 个 Agent 现在可以管理你的 Skill 了",
+    "errorNotFound": "管理 Skill 已安装，但在技能库里找不到它。",
+    "errorGeneric": "启用失败。"
+  },
   "backup": {
     "title": "备份",
     "subtitle": "连接一次后，就可以在一个页面完成备份、恢复和断开。",
