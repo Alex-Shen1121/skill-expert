@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复桌面显示名称改为“Agent 技能管家”后 Windows MSI 打包失败的问题。
 
 ### User-facing
--
+- Windows x64 正式版本恢复同时提供 NSIS 与 MSI 安装包；MSI 升级继续识别既有 Skill Expert 安装。
 
 ### Developer & Governance
--
+- 显式使用 `zh-CN` WiX 本地化并固定旧版 `upgradeCode`，避免中文产品名落入默认 `en-US` MSI 代码页和重命名导致安装身份漂移。
 
 ## [1.0.6] - 2026-08-29
 
