@@ -678,14 +678,7 @@ fn main() {
 
     if let Err(err) = run(cli) {
         if json {
-            let message = format!("{err:#}");
-            let envelope = serde_json::json!({
-                "ok": false,
-                "code": "COMMAND_FAILED",
-                "message": message,
-                "error": message,
-            });
-            eprintln!("{}", serde_json::to_string(&envelope).unwrap());
+            eprintln!("{}", serde_json::to_string(&error_envelope(&err)).unwrap());
         } else {
             eprintln!("error: {err:#}");
         }
@@ -3011,8 +3004,37 @@ fn run_git(
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
+/// 将带详情的 `AppError` 原样扩展为 CLI JSON 错误信封。
+///
+/// 普通错误继续使用既有 `COMMAND_FAILED` 结构；目标冲突额外保留路径，
+/// 供 Agent 直接指出需要用户处理的目录。
+fn error_envelope(err: &anyhow::Error) -> serde_json::Value {
+    let message = format!("{err:#}");
+    match err.downcast_ref::<AppError>() {
+        Some(app_err) if app_err.details.is_some() => {
+            let mut value = serde_json::to_value(app_err).unwrap();
+            let object = value.as_object_mut().unwrap();
+            object.insert("ok".into(), serde_json::Value::Bool(false));
+            let code = object
+                .get("kind")
+                .and_then(|kind| kind.as_str())
+                .unwrap_or("command_failed")
+                .to_ascii_uppercase();
+            object.insert("code".into(), serde_json::Value::String(code));
+            object.insert("error".into(), serde_json::Value::String(message));
+            value
+        }
+        _ => serde_json::json!({
+            "ok": false,
+            "code": "COMMAND_FAILED",
+            "message": message.clone(),
+            "error": message,
+        }),
+    }
+}
+
 fn map_app_err(e: AppError) -> anyhow::Error {
-    anyhow!(e.message)
+    anyhow::Error::new(e)
 }
 
 fn print_json<T: Serialize>(value: &T, json: bool) {
@@ -3026,6 +3048,34 @@ fn print_json<T: Serialize>(value: &T, json: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deployment_refusal_keeps_paths_in_json_envelope() {
+        let err = map_app_err(AppError::target_conflict(
+            "拒绝部署",
+            vec![app_lib::core::error::TargetConflictDetail {
+                path: "/home/me/.codex/skills/demo".to_string(),
+                reason: "不是受管部署".to_string(),
+            }],
+        ));
+
+        let envelope = error_envelope(&err);
+        assert_eq!(envelope["ok"], false);
+        assert_eq!(envelope["code"], "TARGET_CONFLICT");
+        assert_eq!(envelope["kind"], "target_conflict");
+        assert_eq!(
+            envelope["details"]["conflicts"][0]["path"],
+            "/home/me/.codex/skills/demo"
+        );
+    }
+
+    #[test]
+    fn ordinary_failure_keeps_command_failed_envelope() {
+        let envelope = error_envelope(&anyhow!("缺少 Agent 标识"));
+        assert_eq!(envelope["code"], "COMMAND_FAILED");
+        assert_eq!(envelope["message"], "缺少 Agent 标识");
+        assert!(envelope.get("details").is_none());
+    }
+
     use super::*;
     use app_lib::core::skill_store::{ScenarioRecord, SkillRecord};
     use app_lib::core::tool_adapters::{CustomToolDef, ToolCategory};

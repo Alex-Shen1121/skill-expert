@@ -8,14 +8,27 @@ export const ERROR_KINDS = [
   "invalid_input",
   "cancelled",
   "internal",
+  "target_conflict",
 ] as const;
 
 export type ErrorKind = (typeof ERROR_KINDS)[number];
+
+/** 因目录不属于受管部署而被拒绝写入的目标。 */
+export interface TargetConflictDetail {
+  path: string;
+  reason: string;
+}
+
+export interface TargetConflictDetails {
+  conflicts: TargetConflictDetail[];
+}
 
 /** Structured error returned by Tauri commands. */
 export interface AppError {
   kind: ErrorKind;
   message: string;
+  /** 仅在调用方必须读取结构化信息时存在。 */
+  details?: TargetConflictDetails;
 }
 
 const validKinds: ReadonlySet<string> = new Set(ERROR_KINDS);

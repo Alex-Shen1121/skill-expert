@@ -1,10 +1,11 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::{
-    error::AppError,
+    error::{AppError, TargetConflictDetail},
     skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
     sync_engine, tool_adapters, tool_service,
 };
@@ -273,6 +274,21 @@ fn replace_policy(recorded_mode: Option<&str>) -> sync_engine::ReplacePolicy<'_>
     }
 }
 
+/// 因目标不属于本应用而被拒绝写入的单个路径。
+///
+/// 保留路径与原因的结构，CLI 才能准确指出冲突位置，而不是解析一段文案。
+#[derive(Debug, Clone, Serialize)]
+pub struct TargetConflict {
+    pub target: PathBuf,
+    pub reason: String,
+}
+
+impl fmt::Display for TargetConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&sync_engine::refusal_message(&self.target, &self.reason))
+    }
+}
+
 /// Sync every desired target, returning the ownership refusals rather than
 /// failing on them.
 ///
@@ -284,7 +300,7 @@ fn replace_policy(recorded_mode: Option<&str>) -> sync_engine::ReplacePolicy<'_>
 pub fn sync_desired_targets(
     store: &SkillStore,
     desired_targets: &[ScenarioSyncTarget],
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<TargetConflict>, AppError> {
     let batch_start = Instant::now();
     let all_existing_targets = store.get_all_targets().map_err(AppError::db)?;
     let existing_targets: HashMap<(String, String), &SkillTargetRecord> = all_existing_targets
@@ -295,7 +311,7 @@ pub fn sync_desired_targets(
     let mut synced_count = 0usize;
     let mut skipped_count = 0usize;
     let mut failed_count = 0usize;
-    let mut refusals: Vec<String> = Vec::new();
+    let mut refusals: Vec<TargetConflict> = Vec::new();
     let mut retirement = RetargetRetirement::new(&all_existing_targets);
 
     for desired in desired_targets {
@@ -394,7 +410,10 @@ pub fn sync_desired_targets(
                 // asked for is not deployed, and saying "ok" to that is the
                 // half of #363 that made the data loss invisible.
                 if let Some(refused) = e.downcast_ref::<sync_engine::ReplaceRefused>() {
-                    refusals.push(refused.to_string());
+                    refusals.push(TargetConflict {
+                        target: refused.target.clone(),
+                        reason: refused.reason.to_string(),
+                    });
                 }
                 log::warn!(
                     "Failed to sync skill {} ({}) to {} after {} ms: {e}",
@@ -423,16 +442,30 @@ pub fn sync_desired_targets(
 /// Turn reported refusals into the error a user-initiated command should show.
 /// Deliberately says only that these targets were skipped — everything else in
 /// the operation did apply, so claiming "nothing happened" would be false.
-pub fn refusals_to_error(refusals: Vec<String>) -> Result<(), AppError> {
+pub fn refusals_to_error(refusals: Vec<TargetConflict>) -> Result<(), AppError> {
     if refusals.is_empty() {
         return Ok(());
     }
-    Err(AppError::invalid_input(format!(
-        "{} skill(s) were skipped because their target is not ours to replace \
-         (nothing at those paths was deleted; everything else was applied). {}",
+    let summary = format!(
+        "有 {} 个 Skill 因目标路径不属于 Agent 技能管家而跳过；这些路径中的内容保持不变，\
+         其余操作已完成。{}",
         refusals.len(),
-        refusals.join("; ")
-    )))
+        refusals
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("；")
+    );
+    Err(AppError::target_conflict(
+        summary,
+        refusals
+            .into_iter()
+            .map(|conflict| TargetConflictDetail {
+                path: conflict.target.display().to_string(),
+                reason: conflict.reason,
+            })
+            .collect(),
+    ))
 }
 
 pub fn unsync_obsolete_scenario_targets(
@@ -500,7 +533,7 @@ pub fn unsync_scenario_skills(store: &SkillStore, scenario_id: &str) -> Result<(
 pub fn sync_scenario_skills(
     store: &SkillStore,
     scenario_id: &str,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<TargetConflict>, AppError> {
     let desired_targets = collect_scenario_sync_targets(store, scenario_id)?;
     sync_desired_targets(store, &desired_targets)
 }
@@ -508,7 +541,7 @@ pub fn sync_scenario_skills(
 pub fn apply_scenario_to_default(
     store: &SkillStore,
     scenario_id: &str,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<TargetConflict>, AppError> {
     ensure_scenario_exists(store, scenario_id)?;
     let desired_targets = collect_scenario_sync_targets(store, scenario_id)?;
 
@@ -894,7 +927,10 @@ fn apply_add(
     // same deployment path (`target_dir_name` uses the basename only), so the
     // second would silently overwrite the first. Neither is the user's data,
     // but the result is a target whose contents don't match its record.
-    let mut conflicts: Vec<String> = Vec::new();
+    // 两个库内 Skill 规划到同一路径属于命名冲突，不应被误报为用户目录所有权冲突。
+    let mut duplicate_targets: Vec<String> = Vec::new();
+    let mut conflicts: Vec<TargetConflictDetail> = Vec::new();
+    let mut probe_errors: Vec<String> = Vec::new();
     // Keyed on skill id, not name: names are not unique, and two distinct
     // skills that happen to share one would otherwise slip through as "the
     // same skill" and silently overwrite each other.
@@ -903,7 +939,7 @@ fn apply_add(
         let entry = (pair.skill.id.as_str(), pair.skill.name.as_str());
         if let Some((first_id, first_name)) = planned_paths.insert(pair.target.as_path(), entry) {
             if first_id != pair.skill.id {
-                conflicts.push(format!(
+                duplicate_targets.push(format!(
                     "{} — skills \"{}\" and \"{}\" both deploy here",
                     pair.target.display(),
                     first_name,
@@ -911,6 +947,13 @@ fn apply_add(
                 ));
             }
         }
+    }
+    if !duplicate_targets.is_empty() {
+        return Err(AppError::invalid_input(format!(
+            "拒绝部署：有 {} 个目标路径同时被两个不同的 Skill 占用，未写入任何内容。{}",
+            duplicate_targets.len(),
+            duplicate_targets.join("；")
+        )));
     }
     // Ownership belongs to the path, not to the (skill, tool) pair. When two
     // agents share a skills directory, a row for either one vouches for the
@@ -968,17 +1011,37 @@ fn apply_add(
             pair.mode,
             replace_policy(evidence_for(&pair.target, &mut key_memo)),
         ) {
-            conflicts.push(format!("{e}"));
+            match e.downcast_ref::<sync_engine::ReplaceRefused>() {
+                Some(refused) => conflicts.push(TargetConflictDetail {
+                    path: refused.target.display().to_string(),
+                    reason: refused.reason.to_string(),
+                }),
+                None => probe_errors.push(format!("{}：{e}", pair.target.display())),
+            }
         }
     }
+    if !probe_errors.is_empty() {
+        return Err(AppError::io(format!(
+            "拒绝部署：有 {} 个目标无法检查，未写入任何内容。{}",
+            probe_errors.len(),
+            probe_errors.join("；")
+        )));
+    }
     if !conflicts.is_empty() {
-        return Err(AppError::invalid_input(format!(
-            "Refusing to deploy: {} of {} target(s) would overwrite content that is not ours. \
-             Nothing was changed. {}",
+        let summary = format!(
+            "拒绝部署：{} / {} 个目标会覆盖不属于 Agent 技能管家的内容，未写入任何内容。{}",
             conflicts.len(),
             plan.len(),
-            conflicts.join("; ")
-        )));
+            conflicts
+                .iter()
+                .map(|conflict| sync_engine::refusal_message(
+                    Path::new(&conflict.path),
+                    &conflict.reason
+                ))
+                .collect::<Vec<_>>()
+                .join("；")
+        );
+        return Err(AppError::target_conflict(summary, conflicts));
     }
 
     let mut synced = 0usize;
@@ -1235,7 +1298,17 @@ mod sync_desired_targets_tests {
         let refusals = sync_desired_targets(&store, &desired)
             .expect("a refusal must not surface as Err: that panics app startup");
         assert_eq!(refusals.len(), 1, "{refusals:?}");
-        assert!(refusals[0].contains("Refusing to replace"), "{refusals:?}");
+        assert!(
+            refusals[0].to_string().contains("Refusing to replace"),
+            "{refusals:?}"
+        );
+        assert_eq!(refusals[0].target, target);
+
+        let err = refusals_to_error(refusals).expect_err("调用方应收到结构化冲突错误");
+        assert_eq!(err.kind, crate::core::error::ErrorKind::TargetConflict);
+        let details = err.details.expect("冲突错误必须包含路径详情");
+        assert_eq!(details.conflicts.len(), 1);
+        assert_eq!(details.conflicts[0].path, target.display().to_string());
         assert_eq!(
             fs::read_to_string(target.join("unmanaged.txt")).unwrap(),
             "DO_NOT_OVERWRITE"

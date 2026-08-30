@@ -3,265 +3,95 @@ name: manage-skills
 description: Use when a user asks to install, update, remove, inspect, organize, deploy, or undeploy agent skills through the shared Skill Expert library.
 ---
 
-## Before doing anything
+# 管理共享 Skill 技能库
 
-1. Confirm the CLI is available: `command -v skill-expert-cli`. If it's not on PATH, this skill doesn't apply — fall back to find-skills or tell the user to install the Skill Expert CLI with `npm run cli:install` from the source repository.
-2. **Always pass `--json` when you parse output yourself.** Pretty-printed output is for the user; JSON is for you. Errors include `ok=false`, a stable `code`, and `message` on stderr with a non-zero exit code.
+## 1. 解析 CLI
 
-```bash
-skill-expert-cli --json skills list
-```
+先按当前 Shell 选择一段命令，只执行一次。
 
-## Mental model
-
-There's **one central library** at `~/.skill-expert/skills/` that all agents share. Each skill has source metadata, preset membership, tags, and zero or more real deployments in agent directories. A **preset** is a reusable group; several presets may be deployed at the same time.
-
-Keep these three states separate:
-- **Library**: install/remove controls whether Skill Expert owns the skill.
-- **Preset membership**: `presets add-skill/remove-skill` organizes the library only.
-- **Deployment**: `skills deploy/undeploy` and `presets deploy/undeploy` control what an agent can actually see.
-
-Internally, presets are still stored as scenarios for backward-compatible Git Backup. The CLI and UI call them presets.
-
-## Install
+POSIX Shell：
 
 ```bash
-# From skills.sh marketplace
-skill-expert-cli skills install vercel-labs/agent-skills@react-best-practices
-
-# Any git URL (use /tree/branch/subpath form when the skill lives in a sub-directory)
-skill-expert-cli skills install https://github.com/anthropics/skills.git
-skill-expert-cli skills install https://github.com/foo/bar/tree/main/skills/baz
-
-# Local folder
-skill-expert-cli skills install ./my-skill
-
-# Force a source type when the ref is ambiguous
-skill-expert-cli skills install foo/bar --skillssh
-skill-expert-cli skills install ./looks-like/owner-repo --local
+D="$HOME/.skill-expert/bin"
+B="$D/skill-expert-cli"; [ -e "$B" ] || B="$B.exe"
+if [ -s "$D/.version" ] && [ -x "$B" ]; then
+  echo "$B"
+elif [ -s "$D/.version" ] || [ -e "$B" ]; then
+  echo BRIDGE_BROKEN
+else
+  P="$(command -v skill-expert-cli 2>/dev/null || true)"
+  [ -x "$P" ] && echo "$P"
+fi
 ```
 
-**Default is library-only** — the skill enters the DB but doesn't appear in any agent yet. Prefer an explicit follow-up deployment so scope is unambiguous:
+PowerShell：
 
-```bash
-skill-expert-cli skills deploy <skill> --agent claude_code --agent codex
+```powershell
+$dir = Join-Path $HOME ".skill-expert\bin"
+$bin = Join-Path $dir "skill-expert-cli.exe"
+$stamp = Join-Path $dir ".version"
+if ((Test-Path -LiteralPath $stamp -PathType Leaf) -and
+    (Get-Item -LiteralPath $stamp).Length -gt 0 -and
+    (Test-Path -LiteralPath $bin -PathType Leaf)) {
+  $bin
+} elseif ((Test-Path -LiteralPath $stamp) -or (Test-Path -LiteralPath $bin)) {
+  "BRIDGE_BROKEN"
+} else {
+  $command = Get-Command skill-expert-cli -CommandType Application -ErrorAction SilentlyContinue
+  if ($command) { $command.Source }
+}
 ```
 
-`--sync` and `--sync-preset` remain legacy shortcuts for the exclusive active-preset workflow.
+后续文档以 `{CLI}` 表示打印出的完整路径；每次执行前替换这个占位符。
 
-**Ref resolution** is deterministic, no path-existence guessing:
-1. Starts with `./`, `../`, `/`, or `~/` → local path
-2. Contains `://`, ends in `.git`, or starts with `git@` → git URL
-3. Matches `owner/repo`, `owner/repo/skill`, or `owner/repo@skill` → skillssh
-4. Otherwise → error; pass `--local` / `--git` / `--skillssh` to disambiguate
+- 固定目录中的路径：桌面应用已发布并验证同版本 CLI，直接使用。
+- `BRIDGE_BROKEN`：停止操作，请用户打开一次 Agent 技能管家重新发布；不要回退到其他 CLI。
+- `PATH` 中的路径：可用于 CLI-only 环境，并提醒它可能与另一处桌面安装版本不同。
+- 无输出：本 Skill 不适用，改用 `find-skills`，或请用户先安装 Agent 技能管家。
 
-**Always verify after install** with `skills list` or `skills show <name>` so you can confirm the skill landed and report the preset / sync state back to the user.
+Agent 解析结果时始终传 `--json`：
 
-## Search
-
-```bash
-skill-expert-cli --json skills search "react performance" --limit 5
+```text
+{CLI} --json skills list
 ```
 
-Each result has `install_ref` (paste straight into `skills install`), `installs` (popularity proxy), and `skills_sh_url`. Show the top 1–3 with install counts before installing — anything with 10K+ installs is battle-tested; anything under 100 needs a careful look at the source repo.
+## 2. 读取状态模型
 
-## Update / Check
+中央技能库默认位于 `~/.skill-expert/skills/`。始终区分三种状态：
 
-```bash
-# Re-fetch one skill (git/skillssh re-clones, local/import re-imports source dir)
-skill-expert-cli skills update <skill-name-or-id>
+- 技能库：安装或删除决定 Agent 技能管家是否管理该 Skill。
+- Preset 成员关系：只组织技能库，不等于部署。
+- 部署：决定某个 Agent 实际能否读取该 Skill。
 
-# Re-fetch all eligible skills
-skill-expert-cli skills update --all
+内部备份协议继续使用 scenario 字段以保持兼容；CLI 和界面统一称为 Preset。
 
-# Just probe remote revisions, don't touch files
-skill-expert-cli skills check --all
-```
+## 3. 按请求加载操作参考
 
-`check` is the dry-run partner of `update`. Local-only skills (no git source) are reported as `skipped: true`.
+- 安装、搜索、检查更新、执行更新或用 `skills set-source` 修正来源：读取 [`references/install-update.md`](references/install-update.md)。
+- 部署、撤销部署、Preset、标签、Agent 启用状态或同步排查：读取 [`references/deploy-organize.md`](references/deploy-organize.md)。
+- 收编现有目录、删除 Skill，或处理 `TARGET_CONFLICT`：读取 [`references/adopt-remove.md`](references/adopt-remove.md)。
 
-**An update replaces the skill's directory wholesale**, so anything written inside it that the new version does not have would be destroyed. When the CLI detects that, it applies nothing and reports the paths instead:
+只读取当前请求需要的参考页。具体参数先运行对应子命令的 `--help`，参考页负责安全顺序和不会出现在帮助文本里的数据边界。
 
-```jsonc
-{ "name": "ppt-master", "refreshed": false,
-  "held_back_removals": ["library: templates/mine.pptx"] }
-```
+## 4. 人工确认关卡
 
-The field is omitted entirely when nothing is held back, so test for its presence rather than for an empty array. `refreshed: false` *with* `held_back_removals` is **not a failure and not something to retry** — the skill is untouched and still on its old version. Show the user the listed paths and ask. There is no CLI flag to override this; only the desktop app can confirm and proceed, because only a person can say those files are expendable. The paths are prefixed with where they live (`library`, or an agent key for a deployed copy).
+以下操作先展示预览和影响，再等待用户明确确认：
 
-Note what this does *not* cover: a file the user edited that the new version also ships is reported as surviving, because its path survives — the update overwrites their edits silently. Warn anyone keeping local modifications inside a skill folder.
+- `skills remove --yes`、Preset 删除、标签删除；
+- `skills set-source --force`；
+- `agents disable`；
+- 移动、重命名或删除冲突目录；
+- 任意批量写入或撤销部署。
 
-## Remove
+未收到确认时停在关卡前，不替用户选择。
 
-```bash
-# Always preview first when removing more than one
-skill-expert-cli skills remove <skill> --dry-run
+## 5. 完成标准
 
-# --yes is required for the actual delete; --json mode does NOT auto-confirm
-skill-expert-cli skills remove <skill> --yes
-```
+每次写操作后重新读取相关状态，并报告：
 
-Remove deletes the central-library copy, all synced targets across agents, and the DB row. It's not reversible without re-installing.
+- 实际变更的 Skill、Preset 或 Agent；
+- 中央技能库记录与目标部署是否一致；
+- 所有跳过、保留、失败和冲突路径；
+- 仍需用户确认的破坏性步骤。
 
-## Deploy / Undeploy
-
-```bash
-skill-expert-cli skills deploy <skill> --agent claude_code
-skill-expert-cli skills undeploy <skill> --agent codex
-skill-expert-cli skills deploy <skill-a> <skill-b> --agent codex --dry-run
-skill-expert-cli skills deploy <skill> --agent claude_code --agent codex
-skill-expert-cli --json skills status <skill>
-```
-
-These commands change real managed deployments without deleting the central-library copy or changing preset membership. `skills enable/disable` are deprecated compatibility commands and do not change deployment; never use them.
-
-`skills deploy` and `skills undeploy` always require at least one explicit `--agent`, whether the command names one skill or several. `skills status` also reports target rows left by a custom agent that is no longer registered, so stale deployments stay visible and can be cleaned with an explicit undeploy while the row exists.
-
-## Legacy exclusive sync
-
-```bash
-# Sync current active preset to all enabled agents
-skill-expert-cli skills sync
-
-# Preview the target list — safe, no writes
-skill-expert-cli skills sync --dry-run
-
-# Switch the one legacy active preset, then sync
-skill-expert-cli skills sync --preset "Web Dev"
-
-# Only sync to a single agent (useful when one agent's directory got out of sync)
-skill-expert-cli skills sync --tool claude_code
-```
-
-## Adopt skills installed elsewhere
-
-When skills already live in an agent's directory (e.g. installed via `npx skills add` or manual `git clone`) but aren't in the central library, pull them in:
-
-```bash
-# Dry-run scan first — lists candidates without writing
-skill-expert-cli skills adopt ~/.claude/skills --dry-run
-
-# Adopt everything found — each becomes source_type=local (can't auto-update from git)
-skill-expert-cli skills adopt ~/.claude/skills
-
-# Adopt a single skill and pin it to a git source so `update` works later
-skill-expert-cli skills adopt ~/.claude/skills/react-best-practices \
-  --git-url https://github.com/vercel-labs/agent-skills/tree/main/react-best-practices
-
-# Or pass --git-subpath explicitly when the URL is just the repo root
-skill-expert-cli skills adopt ~/.claude/skills/react-best-practices \
-  --git-url https://github.com/vercel-labs/agent-skills \
-  --git-subpath react-best-practices
-
-# Skill lives at the repo root? Pass an empty subpath
-skill-expert-cli skills adopt ~/.claude/skills/my-skill \
-  --git-url https://github.com/me/my-skill --git-subpath ""
-```
-
-`adopt` auto-excludes anything already in the DB or already a sync target, so it's safe to re-run. `--git-url` requires either a URL with a subpath (`/tree/branch/path`) or an explicit `--git-subpath` — without that, future `update` would re-clone the wrong directory, so the CLI refuses to guess.
-
-## Tag
-
-```bash
-skill-expert-cli skills tag add <skill> web frontend
-skill-expert-cli skills tag remove <skill> frontend
-skill-expert-cli skills tag set <skill> web frontend
-skill-expert-cli skills tag rename frontend web
-skill-expert-cli skills tag delete obsolete --dry-run
-skill-expert-cli skills tag delete obsolete --yes
-skill-expert-cli skills tag list <skill>   # tags on one skill
-skill-expert-cli skills tag list           # all distinct tags
-```
-
-Useful organization queries:
-
-```bash
-skill-expert-cli --json skills list --untagged
-skill-expert-cli --json skills list --no-preset
-skill-expert-cli --json skills list --tag frontend
-skill-expert-cli --json skills list --preset "Web Dev"
-skill-expert-cli --json skills list --deployed-to codex
-```
-
-## Presets
-
-```bash
-skill-expert-cli presets list
-skill-expert-cli presets current
-skill-expert-cli presets show "Web Dev"
-skill-expert-cli presets create "Web Dev" --description "Frontend work"
-skill-expert-cli presets update "Web Dev" --name "Frontend"
-skill-expert-cli presets delete "Old" --dry-run
-skill-expert-cli presets delete "Old" --yes
-
-skill-expert-cli presets add-skill <preset> <skill>...
-skill-expert-cli presets remove-skill <preset> <skill>...
-
-skill-expert-cli presets deploy <preset>                  # all enabled coding agents
-skill-expert-cli presets deploy <preset> --agent codex
-skill-expert-cli presets undeploy <preset> --agent claude_code
-skill-expert-cli presets undeploy <preset>                # every agent with target rows for this preset
-skill-expert-cli --json presets status <preset>
-```
-
-`deploy/undeploy` are additive and match the app's Preset pills. Explicit `presets apply/deactivate` commands remain for the legacy exclusive active-preset model; do not use them for normal "turn this preset on/off" requests.
-
-The no-`--agent` defaults intentionally differ: deploy targets all installed, enabled coding agents; undeploy discovers the preset's actual target rows and removes them even when an agent is now disabled, uninstalled, or no longer registered. Use the no-agent undeploy for "turn this preset off everywhere."
-
-Preset create/update/delete and add-skill/remove-skill are organization-only CLI operations. They never deploy or undeploy agent files implicitly.
-
-## Health check
-
-When sync misbehaves or a command errors in a confusing way:
-
-```bash
-skill-expert-cli --json repo status   # base dir, skill / preset counts, active preset
-skill-expert-cli --json agents list  # detected agents and their target paths
-skill-expert-cli agents enable codex
-skill-expert-cli agents disable claude_code
-```
-
-`repo status` and `agents list` are read-only and are the first checks for "why isn't this skill showing up in Cursor" questions. `agents disable` is a real mutation: it removes every managed deployment for that agent. `agents enable` makes the agent globally available again and re-syncs the legacy active preset, if one exists; use explicit skill or preset deployment afterward when the requested state is additive.
-
-Use `agents disable <agent>` when the user wants the whole Agent integration turned off or wants every managed skill removed from it. If they only want one skill or preset removed while keeping the Agent available for future deployments, use `skills undeploy` or `presets undeploy` instead.
-
-## Typical workflows
-
-### "Find me a skill for X" / "Install a skill that does X"
-
-1. `skills search "X" --limit 5` — show the top 1–3 hits with install counts and source.
-2. If a clear winner: `skills install <install_ref>`.
-3. If ambiguous: ask the user to pick.
-4. Deploy it to the agent(s) the user requested with `skills deploy`.
-5. `skills status <name>` to confirm the library and deployment state.
-
-### "What skills do I have?"
-
-```bash
-skill-expert-cli --json skills list
-```
-
-The `preset_ids`, `presets`, `deployed_to`, `tags`, and `source_type` fields are usually the most informative. The legacy `enabled` field is not deployment state.
-
-### "Pull in the skills already installed in my agent directories"
-
-1. `skills adopt ~/.claude/skills --dry-run` (and any other agent dirs the user mentions) — show the candidate list.
-2. After user confirms: `skills adopt ~/.claude/skills`.
-3. For any adopted skill where the user knows the original repo, follow up with `skills adopt ... --git-url ... --git-subpath ...` to restore the update link.
-
-### "Update everything"
-
-```bash
-skill-expert-cli skills check --all     # see what has upstream changes
-skill-expert-cli skills update --all    # apply
-```
-
-Report which skills actually refreshed (`refreshed: true` in the JSON) vs which were already up-to-date.
-
-## Pitfalls
-
-- **Install succeeded but skill doesn't appear in the agent** → install defaults to library-only. Use `skills deploy <skill> --agent <key>`.
-- **Preset membership changed but agent files did not** → membership is organization only. Follow with `presets deploy` or `skills deploy` when the user also asked to make it visible.
-- **No active preset** only affects legacy `skills sync` / `presets apply`; additive deploy commands do not require one.
-- **Adopted skills can't be `update`d from git** → `npx skills add` and manual `git clone` don't leave source metadata, so adopt has to treat them as `local`. Fix per-skill with `adopt ... --git-url ... --git-subpath ...`, or just `skills remove` + `skills install <git-ref>` to start clean with a real source.
-- Use `--dry-run` before bulk remove, tag delete, preset delete, deploy, or undeploy operations. Use `check` before `update`.
+只有目标状态读回一致、失败项已说明且没有未跨越的确认关卡时，任务才算完成。

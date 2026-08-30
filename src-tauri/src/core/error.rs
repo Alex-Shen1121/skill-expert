@@ -1,14 +1,28 @@
 use serde::Serialize;
 use std::fmt;
 
-/// Structured error type for Tauri commands.
+/// Tauri 命令使用的结构化错误。
 ///
-/// Serialized as `{"kind": "Database", "message": "..."}` so the frontend
-/// can branch on `kind` while still showing a human-readable `message`.
+/// `details` 只承载调用方必须按字段处理的附加信息；没有附加信息时不进入序列化结果，
+/// 因而现有前端调用方仍可只读取 `kind` 与 `message`。
 #[derive(Debug, Serialize)]
 pub struct AppError {
     pub kind: ErrorKind,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<ErrorDetails>,
+}
+
+/// 部署因目标不属于本应用而被拒绝时的机器可读信息。
+#[derive(Debug, Serialize)]
+pub struct ErrorDetails {
+    pub conflicts: Vec<TargetConflictDetail>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TargetConflictDetail {
+    pub path: String,
+    pub reason: String,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -22,6 +36,8 @@ pub enum ErrorKind {
     InvalidInput,
     Cancelled,
     Internal,
+    /// 目标路径不是受管部署，现有内容保持不变。
+    TargetConflict,
 }
 
 impl fmt::Display for AppError {
@@ -35,6 +51,7 @@ impl AppError {
         Self {
             kind: ErrorKind::NotFound,
             message: msg.into(),
+            details: None,
         }
     }
 
@@ -42,6 +59,7 @@ impl AppError {
         Self {
             kind: ErrorKind::InvalidInput,
             message: msg.into(),
+            details: None,
         }
     }
 
@@ -50,6 +68,7 @@ impl AppError {
         Self {
             kind: ErrorKind::Cancelled,
             message: msg.into(),
+            details: None,
         }
     }
 
@@ -58,6 +77,7 @@ impl AppError {
         Self {
             kind: ErrorKind::Database,
             message: e.to_string(),
+            details: None,
         }
     }
 
@@ -66,6 +86,7 @@ impl AppError {
         Self {
             kind: ErrorKind::Git,
             message: e.to_string(),
+            details: None,
         }
     }
 
@@ -77,6 +98,7 @@ impl AppError {
             Self {
                 kind: ErrorKind::Cancelled,
                 message,
+                details: None,
             }
         } else if lower.contains("connection refused")
             || lower.contains("could not resolve host")
@@ -87,11 +109,13 @@ impl AppError {
             Self {
                 kind: ErrorKind::Network,
                 message,
+                details: None,
             }
         } else {
             Self {
                 kind: ErrorKind::Git,
                 message,
+                details: None,
             }
         }
     }
@@ -101,6 +125,7 @@ impl AppError {
         Self {
             kind: ErrorKind::Network,
             message: e.to_string(),
+            details: None,
         }
     }
 
@@ -109,6 +134,19 @@ impl AppError {
         Self {
             kind: ErrorKind::Io,
             message: e.to_string(),
+            details: None,
+        }
+    }
+
+    /// 构造带冲突路径的部署拒绝错误，供 CLI 和前端直接读取路径。
+    pub fn target_conflict(
+        message: impl Into<String>,
+        conflicts: Vec<TargetConflictDetail>,
+    ) -> Self {
+        Self {
+            kind: ErrorKind::TargetConflict,
+            message: message.into(),
+            details: Some(ErrorDetails { conflicts }),
         }
     }
 
@@ -116,15 +154,19 @@ impl AppError {
         Self {
             kind: ErrorKind::Internal,
             message: e.to_string(),
+            details: None,
         }
     }
 }
+
+impl std::error::Error for AppError {}
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         Self {
             kind: ErrorKind::Io,
             message: e.to_string(),
+            details: None,
         }
     }
 }
@@ -134,6 +176,7 @@ impl From<tokio::task::JoinError> for AppError {
         Self {
             kind: ErrorKind::Internal,
             message: e.to_string(),
+            details: None,
         }
     }
 }
@@ -143,6 +186,7 @@ impl From<tauri::Error> for AppError {
         Self {
             kind: ErrorKind::Internal,
             message: e.to_string(),
+            details: None,
         }
     }
 }
@@ -219,6 +263,24 @@ mod tests {
         let json = serde_json::to_value(&err).unwrap();
         assert_eq!(json["kind"], "not_found");
         assert_eq!(json["message"], "missing");
+        assert!(json.get("details").is_none());
+    }
+
+    #[test]
+    fn target_conflict_serializes_paths_as_details() {
+        let err = AppError::target_conflict(
+            "目标冲突",
+            vec![TargetConflictDetail {
+                path: "/tmp/agent/skills/demo".to_string(),
+                reason: "不是受管部署".to_string(),
+            }],
+        );
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["kind"], "target_conflict");
+        assert_eq!(
+            json["details"]["conflicts"][0]["path"],
+            "/tmp/agent/skills/demo"
+        );
     }
 
     #[test]

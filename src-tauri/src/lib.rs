@@ -910,6 +910,17 @@ pub fn run() {
                 }
             });
 
+            // 将随应用打包的 CLI 发布到固定用户目录，供 Agent 在无需 PATH 配置时调用。
+            // 复制与版本验证放在阻塞线程中，且失败只记日志，不影响桌面应用启动。
+            tauri::async_runtime::spawn_blocking(|| {
+                let step = Instant::now();
+                core::cli_bridge::ensure_bridge(env!("CARGO_PKG_VERSION"));
+                log::info!(
+                    "startup: CLI 桥接完成，用时 {} ms",
+                    step.elapsed().as_millis()
+                );
+            });
+
             let step = Instant::now();
             if is_tray_icon_enabled(&store_for_setup) {
                 ensure_tray_icon(app.handle())?;
