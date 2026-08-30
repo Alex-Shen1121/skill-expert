@@ -164,6 +164,18 @@ for (const relativePath of ['README.md', 'README.zh-CN.md', 'skills/manage-skill
 }
 
 const manageSkill = read('skills/manage-skills/SKILL.md');
+const manageSkillReferencePaths = [
+  'skills/manage-skills/references/install-update.md',
+  'skills/manage-skills/references/deploy-organize.md',
+  'skills/manage-skills/references/adopt-remove.md',
+];
+for (const relativePath of manageSkillReferencePaths) {
+  expect('manage-skills 渐进披露参考', exists(relativePath), `缺少 ${relativePath}`);
+}
+const manageSkillCorpus = [
+  manageSkill,
+  ...manageSkillReferencePaths.filter(exists).map(read),
+].join('\n');
 expect(
   'manage-skills trigger description',
   /^description: Use when /m.test(manageSkill),
@@ -188,8 +200,27 @@ expect(
 );
 expect(
   'manage-skills 来源修正命令',
-  manageSkill.includes('skills set-source') && manageSkill.includes('--dry-run'),
+  manageSkillCorpus.includes('skills set-source') && manageSkillCorpus.includes('--dry-run'),
   'manage-skills 必须使用 set-source 原地修正来源',
+);
+expect(
+  'manage-skills Windows CLI 解析',
+  manageSkill.includes('PowerShell') &&
+    manageSkill.includes('Get-Command skill-expert-cli') &&
+    manageSkill.includes('skill-expert-cli.exe'),
+  'manage-skills 必须同时提供 PowerShell 桥接解析',
+);
+expect(
+  'manage-skills 冲突收编闭环',
+  manageSkillCorpus.includes('`adopt` 单独执行不会解除冲突') &&
+    manageSkillCorpus.includes('synced=false'),
+  'manage-skills 必须说明收编不会认领原冲突路径',
+);
+expect(
+  'manage-skills 更新覆盖边界',
+  manageSkillCorpus.includes('远端新版本仍包含同名文件') &&
+    manageSkillCorpus.includes('内容却会覆盖本地编辑'),
+  'manage-skills 必须说明 held_back_removals 不保护同名文件编辑',
 );
 
 const setupCard = read('src/components/AgentControlSetupCard.tsx');
