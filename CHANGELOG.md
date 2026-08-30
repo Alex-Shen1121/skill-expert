@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复 Windows 正式构建可能被并发契约测试时序误报阻断的问题。
 
 ### User-facing
--
+- 本次不改变应用运行时行为；提高跨平台发布验证的稳定性。
 
 ### Developer & Governance
--
+- 将并发测试探针从固定 20ms 睡眠改为带超时的确定性首波同步，慢设置写入仍会被准确计入并发峰值，worker 不足时则快速失败。
 
 ## [1.0.11] - 2026-08-30
 

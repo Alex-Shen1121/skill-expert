@@ -3190,24 +3190,49 @@ mod tests {
         first_operation_started: AtomicBool,
         in_flight: AtomicUsize,
         peak: AtomicUsize,
+        first_wave_target: usize,
+        first_wave_arrivals: std::sync::Mutex<usize>,
+        first_wave_ready: std::sync::Condvar,
     }
 
     impl ConcurrencyProbe {
-        fn new() -> Self {
+        fn new(first_wave_target: usize) -> Self {
+            assert!(first_wave_target > 0);
             Self {
                 first_operation_started: AtomicBool::new(false),
                 in_flight: AtomicUsize::new(0),
                 peak: AtomicUsize::new(0),
+                first_wave_target,
+                first_wave_arrivals: std::sync::Mutex::new(0),
+                first_wave_ready: std::sync::Condvar::new(),
             }
         }
 
         fn observe<T>(&self, on_first: impl FnOnce(), output: T) -> T {
+            let current = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(current, Ordering::SeqCst);
             if !self.first_operation_started.swap(true, Ordering::SeqCst) {
                 on_first();
             }
-            let current = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-            self.peak.fetch_max(current, Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_millis(20));
+
+            let mut arrivals = self.first_wave_arrivals.lock().unwrap();
+            if *arrivals < self.first_wave_target {
+                *arrivals += 1;
+                if *arrivals == self.first_wave_target {
+                    self.first_wave_ready.notify_all();
+                } else {
+                    arrivals = self
+                        .first_wave_ready
+                        .wait_timeout_while(
+                            arrivals,
+                            std::time::Duration::from_secs(2),
+                            |arrivals| *arrivals < self.first_wave_target,
+                        )
+                        .unwrap()
+                        .0;
+                }
+            }
+            drop(arrivals);
             self.in_flight.fetch_sub(1, Ordering::SeqCst);
             output
         }
@@ -3810,7 +3835,7 @@ mod tests {
                 .set_setting(TEST_CHECK_CONCURRENCY_SETTING, &configured.to_string())
                 .unwrap();
 
-            let probe = ConcurrencyProbe::new();
+            let probe = ConcurrencyProbe::new(configured);
             let result = skill_update_batch::check_with_preferences(
                 &repo.store,
                 &StoredSkillUpdateCheckAdapter { store: &repo.store },
@@ -4000,7 +4025,7 @@ mod tests {
                 .set_setting(TEST_UPDATE_CONCURRENCY_SETTING, &configured.to_string())
                 .unwrap();
 
-            let probe = ConcurrencyProbe::new();
+            let probe = ConcurrencyProbe::new(configured);
             let result = skill_update_batch::update_with_preferences(
                 &repo.store,
                 &format!("update-{configured}"),
