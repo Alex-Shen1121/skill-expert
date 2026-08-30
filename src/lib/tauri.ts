@@ -39,6 +39,7 @@ export interface ManagedSkill {
   targets: SkillTarget[];
   preset_ids: string[];
   tags: string[];
+  can_check_update: boolean;
 }
 
 export interface SkillTarget {
@@ -306,10 +307,59 @@ export const checkSkillUpdate = (skillId: string, force?: boolean) =>
     force: force ?? false,
   });
 
-export const checkAllSkillUpdates = (force?: boolean) =>
-  invoke<void>("check_all_skill_updates", {
+export type SkillUpdateBatchProgressStatus =
+  | "waiting"
+  | "checking"
+  | "updating"
+  | "updated"
+  | "unchanged"
+  | "needs_confirmation"
+  | "up_to_date"
+  | "update_available"
+  | "unknown"
+  | "local_only"
+  | "source_missing"
+  | "not_started"
+  | "error";
+
+export interface SkillUpdateBatchProgress {
+  batch_id: string;
+  skill_id: string;
+  phase: "check" | "update";
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+}
+
+export interface CheckSkillUpdateItemResult {
+  skill_id: string;
+  name: string;
+  source_type: string;
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+  last_checked_at: number | null;
+}
+
+export interface CheckSkillUpdatesBatchResult {
+  batch_id: string;
+  stopped: boolean;
+  skipped: number;
+  items: CheckSkillUpdateItemResult[];
+}
+
+export const checkAllSkillUpdates = (force?: boolean, batchId?: string) =>
+  invoke<CheckSkillUpdatesBatchResult>("check_all_skill_updates", {
     force: force ?? false,
+    batchId,
   });
+
+export const retryFailedSkillUpdateChecks = (skillIds: string[], batchId: string) =>
+  invoke<CheckSkillUpdatesBatchResult>("retry_failed_skill_update_checks", {
+    skillIds,
+    batchId,
+  });
+
+export const stopSkillUpdateBatch = (batchId: string) =>
+  invoke<boolean>("stop_skill_update_batch", { batchId });
 
 export interface UpdateSkillResult {
   skill: ManagedSkill;
@@ -341,15 +391,28 @@ export const updateSkill = (skillId: string, approvedRemovals?: string | null) =
   });
 
 export interface BatchUpdateSkillsResult {
+  batch_id: string | null;
+  stopped: boolean;
   refreshed: number;
   unchanged: number;
   /** Skills left alone because updating would have removed files. */
   held_back: string[];
   failed: string[];
+  items: BatchUpdateSkillItemResult[];
 }
 
-export const batchUpdateSkills = (skillIds: string[]) =>
-  invoke<BatchUpdateSkillsResult>("batch_update_skills", { skillIds });
+export interface BatchUpdateSkillItemResult {
+  skill_id: string;
+  name: string;
+  source_type: string;
+  status: SkillUpdateBatchProgressStatus;
+  error: string | null;
+  pending_removals: PendingRemoval[];
+  removal_approval: string | null;
+}
+
+export const batchUpdateSkills = (skillIds: string[], batchId?: string) =>
+  invoke<BatchUpdateSkillsResult>("batch_update_skills", { skillIds, batchId });
 
 export interface ReimportSkillResult {
   skill: ManagedSkill;

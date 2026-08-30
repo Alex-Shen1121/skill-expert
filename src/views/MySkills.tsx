@@ -40,6 +40,10 @@ import { BatchTagDialog } from "../components/BatchTagDialog";
 import { SyncDots } from "../components/SyncDots";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { CardActionMenu } from "../components/CardActionMenu";
+import { SkillUpdateProgressDialog } from "../components/SkillUpdateProgressDialog";
+import {
+  useSkillUpdateBatch,
+} from "../hooks/useSkillUpdateBatch";
 import * as api from "../lib/tauri";
 import { getTagActiveColor, getTagColor, pruneStaleTagFilters, UNTAGGED_FILTER } from "../lib/skillTags";
 import type {
@@ -49,6 +53,12 @@ import type {
   SkillToolToggle,
 } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
+import {
+  canRefreshSkill,
+  hasAvailableUpdate,
+  refreshManagedSkill,
+  type SkillRefreshOutcome,
+} from "../lib/skillUpdate";
 import {
   DndContext,
   closestCenter,
@@ -131,23 +141,12 @@ function centralDirName(skill: ManagedSkill) {
   return skill.central_path.split(/[\\/]/).filter(Boolean).pop() || skill.name;
 }
 
-function canRefreshSkill(skill: ManagedSkill) {
-  return (
-    skill.source_type === "git" ||
-    skill.source_type === "skillssh" ||
-    ((skill.source_type === "local" || skill.source_type === "import") &&
-      Boolean(skill.source_ref?.trim()))
-  );
-}
-
-function hasAvailableUpdate(skill: ManagedSkill) {
-  return skill.update_status === "update_available" && canRefreshSkill(skill);
-}
-
 type RepositoryOption = {
   identity: string;
   label: string;
 };
+
+type SkillRefreshResult = SkillRefreshOutcome | { status: "error"; error: string };
 
 function normalizeRepositoryIdentity(source: string | null) {
   const trimmed = source?.trim().replace(/\/+$/, "") || "";
@@ -274,7 +273,6 @@ export function MySkills() {
   const refreshAfterDeleteRef = useRef<number | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
-  const [checkingAll, setCheckingAll] = useState(false);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
   const [batchUpdating, setBatchUpdating] = useState(false);
@@ -931,38 +929,6 @@ export function MySkills() {
     relinkSource?: string;
   } | null>(null);
 
-  const handleUpdateAvailableSkills = async () => {
-    const updatableSkills = skills.filter(hasAvailableUpdate);
-    if (updatableSkills.length === 0) return;
-
-    setBatchUpdating(true);
-    try {
-      const result = await api.batchUpdateSkills(updatableSkills.map((skill) => skill.id));
-      if (result.refreshed > 0) {
-        toast.success(t("mySkills.batchUpdated", { count: result.refreshed }));
-      }
-      if (result.unchanged > 0) {
-        toast.info(t("mySkills.batchAlreadyUpToDate", { count: result.unchanged }));
-      }
-      if (result.held_back.length > 0) {
-        toast.warning(
-          t("mySkills.batchHeldBack", {
-            count: result.held_back.length,
-            names: result.held_back.slice(0, 3).join("、"),
-          })
-        );
-      }
-      if (result.failed.length > 0) {
-        toast.error(t("mySkills.batchUpdateFailed", { count: result.failed.length }));
-      }
-    } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
-    } finally {
-      await refreshManagedSkills();
-      setBatchUpdating(false);
-    }
-  };
-
   const handleTogglePreset = async (skill: ManagedSkill) => {
     if (!viewedPreset) return;
     const enabledInPreset = skill.preset_ids.includes(viewedPreset.id);
@@ -974,19 +940,6 @@ export function MySkills() {
       toast.success(`${skill.name} ${t("mySkills.enabledInPreset")}`);
     }
     await Promise.all([refreshManagedSkills(), refreshPresets()]);
-  };
-
-  const handleCheckAllUpdates = async () => {
-    setCheckingAll(true);
-    try {
-      await api.checkAllSkillUpdates(true);
-      toast.success(t("mySkills.updateActions.checkedAll"));
-    } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
-    } finally {
-      await refreshManagedSkills();
-      setCheckingAll(false);
-    }
   };
 
   const handleCheckUpdate = async (skill: ManagedSkill) => {
@@ -1002,46 +955,45 @@ export function MySkills() {
     }
   };
 
-  const handleRefreshSkill = async (skill: ManagedSkill, approvedRemovals?: string) => {
+  const handleRefreshSkill = async (
+    skill: ManagedSkill,
+    approvedRemovals?: string,
+  ): Promise<SkillRefreshResult> => {
     setUpdatingSkillId(skill.id);
     try {
+      const outcome = await refreshManagedSkill(skill, approvedRemovals);
+      if (outcome.status === "needs_confirmation") {
+          setPendingRemoval({
+            skill,
+            removals: outcome.pendingRemovals,
+            approval: outcome.removalApproval,
+          });
+        return outcome;
+      }
       if (skill.source_type === "local" || skill.source_type === "import") {
-        const result = await api.reimportLocalSkill(skill.id, approvedRemovals);
-        if (result.pending_removals.length > 0) {
-          setPendingRemoval({
-            skill,
-            removals: result.pending_removals,
-            approval: result.removal_approval,
-          });
-          return;
-        }
         toast.success(t("mySkills.updateActions.reimported"));
+      } else if (outcome.status === "updated") {
+        toast.success(t("mySkills.updateActions.updated"));
       } else {
-        const result = await api.updateSkill(skill.id, approvedRemovals);
-        // Nothing was changed: the update would have taken away files the new
-        // version does not have. Show them and let the user decide (#256).
-        if (result.pending_removals.length > 0) {
-          setPendingRemoval({
-            skill,
-            removals: result.pending_removals,
-            approval: result.removal_approval,
-          });
-          return;
-        }
-        if (result.content_changed) {
-          toast.success(t("mySkills.updateActions.updated"));
-        } else {
-          toast.info(t("mySkills.updateActions.alreadyUpToDate"));
-        }
+        toast.info(t("mySkills.updateActions.alreadyUpToDate"));
       }
       await refreshManagedSkills();
+      return outcome;
     } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      const message = getErrorMessage(error, t("common.error"));
+      toast.error(message);
       await refreshManagedSkills();
+      return { status: "error", error: message };
     } finally {
       setUpdatingSkillId(null);
     }
   };
+
+  const skillUpdateBatch = useSkillUpdateBatch({
+    skills,
+    displayNames: skillDisplayNames,
+    refreshManagedSkills,
+  });
 
   const handleRelinkSource = async (
     skill: ManagedSkill,
@@ -1308,8 +1260,8 @@ export function MySkills() {
 
       </div>
 
-      <div className="app-toolbar">
-        <div className="flex flex-1 gap-3">
+      <div className="app-toolbar flex-nowrap items-start">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           <div className="relative w-full max-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <input
@@ -1324,19 +1276,27 @@ export function MySkills() {
             />
           </div>
 
-          <div className="app-segmented">
-            {(["all", "enabled", "available"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setFilterMode(mode)}
-                className={cn(
-                  "app-segmented-button",
-                  filterMode === mode && "app-segmented-button-active"
-                )}
-              >
-                {t(`mySkills.filters.${mode}`)}
-              </button>
-            ))}
+          <div className="shrink-0">
+            <div
+              className="app-segmented w-fit"
+              role="group"
+              aria-label={t("mySkills.filtersLabel")}
+            >
+              {(["all", "enabled", "available"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={filterMode === mode}
+                  onClick={() => setFilterMode(mode)}
+                  className={cn(
+                    "app-segmented-button whitespace-nowrap focus-visible:ring-2 focus-visible:ring-accent",
+                    filterMode === mode && "app-segmented-button-active"
+                  )}
+                >
+                  {t(`mySkills.filters.${mode}`)}
+                </button>
+              ))}
+            </div>
           </div>
 
         </div>
@@ -1362,19 +1322,19 @@ export function MySkills() {
             );
           })()}
           <button
-            onClick={handleCheckAllUpdates}
-            disabled={checkingAll}
+            onClick={skillUpdateBatch.checkAll}
+            disabled={skillUpdateBatch.checking}
             className="ml-2 mr-2 inline-flex items-center gap-1 rounded-md border-l border-border-subtle pl-4 pr-3 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", checkingAll && "animate-spin")} />
+            <RefreshCw className={cn("h-3.5 w-3.5", skillUpdateBatch.checking && "animate-spin")} />
             {t("mySkills.updateActions.checkAll")}
           </button>
           <button
-            onClick={handleUpdateAvailableSkills}
-            disabled={batchUpdating || availableUpdateCount === 0}
+            onClick={skillUpdateBatch.openAvailableUpdates}
+            disabled={batchUpdating || skillUpdateBatch.updating || availableUpdateCount === 0}
             className="mr-2 inline-flex items-center gap-1 rounded-md px-3 py-2 text-[13px] font-medium text-accent-light transition-colors hover:bg-accent-bg disabled:opacity-50"
           >
-            <RotateCcw className={cn("h-3.5 w-3.5", batchUpdating && "animate-spin")} />
+            <RotateCcw className={cn("h-3.5 w-3.5", (batchUpdating || skillUpdateBatch.updating) && "animate-spin")} />
             {t("mySkills.updateActions.updateAvailable", { count: availableUpdateCount })}
           </button>
           <label className="sr-only" htmlFor="skill-library-sort-field">
@@ -2162,6 +2122,12 @@ export function MySkills() {
         projects={projects}
         onProjectsChanged={refreshProjects}
       />
+
+      <SkillUpdateProgressDialog
+        {...skillUpdateBatch.dialogProps}
+      />
+
+      <ConfirmDialog {...skillUpdateBatch.removalDialogProps} />
 
       <ConfirmDialog
         open={pendingRemoval !== null}

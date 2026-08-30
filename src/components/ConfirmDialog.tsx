@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-interface Props {
+export interface ConfirmDialogProps {
   open: boolean;
   title?: string;
   message: string;
@@ -22,7 +22,7 @@ export function ConfirmDialog({
   tone = "danger",
   onClose,
   onConfirm,
-}: Props) {
+}: ConfirmDialogProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 

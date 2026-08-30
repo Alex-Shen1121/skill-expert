@@ -6,6 +6,7 @@ use tauri::{Emitter, Manager};
 
 pub mod commands;
 pub mod core;
+mod skill_update_batch;
 
 /// Shared flag: when true, CloseRequested should NOT be prevented.
 pub static QUITTING: AtomicBool = AtomicBool::new(false);
@@ -1019,8 +1020,10 @@ pub fn run() {
             commands::skills::install_from_skillssh,
             commands::skills::check_skill_update,
             commands::skills::check_all_skill_updates,
+            commands::skills::retry_failed_skill_update_checks,
             commands::skills::update_skill,
             commands::skills::batch_update_skills,
+            commands::skills::stop_skill_update_batch,
             commands::skills::reimport_local_skill,
             commands::skills::relink_local_skill_source,
             commands::skills::detach_local_skill_source,
