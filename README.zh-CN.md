@@ -93,6 +93,8 @@ brew install --cask skills-manager
 
 从 [最新 Release](https://github.com/xingkongliang/skills-manager/releases/latest) 下载对应平台的安装包：Windows 为 `.exe` 或 `.msi`，Linux 为 `.AppImage`、`.deb` 或 `.rpm`（提供 x64 和 arm64）。
 
+所有安装包都自带 CLI，位置见 [二进制放在哪](#二进制放在哪)。
+
 ## 快速上手
 
 1. 从本地目录、Git 仓库、压缩包或市场安装 Skills。

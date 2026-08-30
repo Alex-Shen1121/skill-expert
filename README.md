@@ -97,6 +97,8 @@ You can also download the `.dmg` for your Mac from the [latest release](https://
 
 Download the installer for your platform from the [latest release](https://github.com/xingkongliang/skills-manager/releases/latest): `.exe` or `.msi` for Windows, and `.AppImage`, `.deb`, or `.rpm` for Linux (x64 and arm64).
 
+Every installer ships the CLI inside the app — see [Where the binary lives](#where-the-binary-lives).
+
 ## Quick Start
 
 1. Install skills from local folders, Git repositories, archives, or the marketplace.
