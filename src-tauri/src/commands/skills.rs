@@ -3848,6 +3848,8 @@ mod tests {
                 |_key| {
                     probe.observe(
                         || {
+                            // 模拟 Windows 上较慢的设置写入，确保首个 worker 仍计入并发峰值。
+                            std::thread::sleep(std::time::Duration::from_millis(60));
                             repo.store
                                 .set_setting(TEST_CHECK_CONCURRENCY_SETTING, "8")
                                 .unwrap();
