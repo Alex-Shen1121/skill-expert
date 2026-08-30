@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.11] - 2026-08-30
+
+### Release Overview
 - 让已安装的 Agent 通过受版本保护的内置 CLI 管理共享技能库。
 - 为技能库“检查全部”增加逐项进度与结构化结果窗口。
 - 为“全部更新”增加勾选确认、逐项安全进度与完成摘要。
