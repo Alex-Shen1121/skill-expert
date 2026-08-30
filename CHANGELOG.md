@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.12] - 2026-08-30
+
+### Release Overview
 - 修复 Windows 正式构建可能被并发契约测试时序误报阻断的问题。
 
 ### User-facing
