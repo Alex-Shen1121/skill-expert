@@ -12,6 +12,8 @@ const CONFIG_DIR_NAME: &str = "skill-expert";
 const DATABASE_FILE_NAME: &str = "skill-expert.db";
 
 static BASE_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+/// 测试专用的用户主目录重定向；CLI 桥接目录不会跟随技能库迁移。
+static HOME_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static SKILLS_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static STARTUP_WARNINGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STARTUP_ERROR_LOG: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
@@ -82,9 +84,33 @@ struct RepoPathConfig {
 }
 
 fn default_base_dir() -> PathBuf {
+    home_base_dir()
+}
+
+/// 固定的 `~/.skill-expert` 技术身份目录，不受自定义技能库位置影响。
+///
+/// Agent 必须在无需读取应用设置的情况下找到 CLI，因此桥接文件使用这里，
+/// 中央技能库仍继续使用可迁移的 [`base_dir`]。
+pub fn home_base_dir() -> PathBuf {
+    if let Some(path) = HOME_DIR_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+    {
+        return path.join(DEFAULT_BASE_DIR_NAME);
+    }
     dirs::home_dir()
         .expect("Cannot determine home directory")
         .join(DEFAULT_BASE_DIR_NAME)
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_home_dir_override(path: Option<PathBuf>) {
+    *HOME_DIR_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = path;
 }
 
 fn config_file_path() -> PathBuf {

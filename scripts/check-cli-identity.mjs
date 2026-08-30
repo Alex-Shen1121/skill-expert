@@ -31,6 +31,7 @@ function expect(label, condition, detail) {
 
 const newCliPath = `src-tauri/src/bin/${expectedCommand}.rs`;
 const oldCliPath = `src-tauri/src/bin/${legacyCommand}.rs`;
+const cliBridgePath = 'src-tauri/src/core/cli_bridge.rs';
 expect('CLI source name', exists(newCliPath), `missing ${newCliPath}`);
 expect('legacy CLI source removed', !exists(oldCliPath), `found ${oldCliPath}`);
 
@@ -45,6 +46,23 @@ if (exists(newCliPath)) {
     'CLI product help',
     cliSource.includes('Skill Expert'),
     'help does not expose the Skill Expert identity',
+  );
+}
+
+expect('CLI 桥接源码', exists(cliBridgePath), `缺少 ${cliBridgePath}`);
+if (exists(cliBridgePath)) {
+  const bridgeSource = read(cliBridgePath);
+  expect(
+    'CLI 桥接命令身份',
+    bridgeSource.includes('"skill-expert-cli"') &&
+      bridgeSource.includes('"skill-expert-cli.exe"') &&
+      !bridgeSource.includes(legacyCommand),
+    `CLI 桥接必须只发布 ${expectedCommand}`,
+  );
+  expect(
+    'CLI 桥接固定目录',
+    bridgeSource.includes('central_repo::home_base_dir().join("bin")'),
+    `CLI 桥接必须位于 ${expectedStateRoot}/bin`,
   );
 }
 
@@ -160,6 +178,26 @@ expect(
   'manage-skills default library',
   manageSkill.includes(`${expectedStateRoot}/skills/`) && !manageSkill.includes(legacyStateRoot),
   'skill body uses the wrong default library',
+);
+expect(
+  'manage-skills CLI 桥接协议',
+  manageSkill.includes('$HOME/.skill-expert/bin') &&
+    manageSkill.includes('BRIDGE_BROKEN') &&
+    manageSkill.includes('TARGET_CONFLICT'),
+  'manage-skills 必须先校验固定 CLI 桥接并处理结构化目标冲突',
+);
+expect(
+  'manage-skills 来源修正命令',
+  manageSkill.includes('skills set-source') && manageSkill.includes('--dry-run'),
+  'manage-skills 必须使用 set-source 原地修正来源',
+);
+
+const setupCard = read('src/components/AgentControlSetupCard.tsx');
+expect(
+  '管理 Skill 独立仓库来源',
+  setupCard.includes('Alex-Shen1121/skill-expert/tree/main/skills/manage-skills') &&
+    !setupCard.includes('xingkongliang/skills-manager'),
+  '首页设置入口必须从独立仓库安装管理 Skill',
 );
 
 if (failures.length > 0) {

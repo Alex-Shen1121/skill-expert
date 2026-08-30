@@ -80,6 +80,18 @@
     "installNew": "Install New Skills",
     "recentActivity": "Recent Activity"
   },
+  "agentControl": {
+    "title": "Let agents manage Skills",
+    "body": "Let Codex, Claude Code, and other agents install and deploy Skills while Agent 技能管家 keeps tracking sources and deployment state.",
+    "cta": "Set up",
+    "pickAgents": "Choose agents that can manage Skills",
+    "confirm": "Enable for {{count}} agent(s)",
+    "confirmEmpty": "Choose agents",
+    "dismiss": "Do not show this again",
+    "done": "{{count}} agent(s) can now manage Skills",
+    "errorNotFound": "The management Skill was installed but could not be found in the library.",
+    "errorGeneric": "Could not complete setup."
+  },
   "backup": {
     "title": "Backup",
     "subtitle": "Connect once, then back up or restore your skill library from one place.",
