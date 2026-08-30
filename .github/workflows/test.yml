@@ -112,28 +112,3 @@ jobs:
 
       - name: 检查 Linux 构建
         run: cargo check --manifest-path src-tauri/Cargo.toml
-
-  windows-concurrency-regression:
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/fix-windows-concurrency-test-race'
-    runs-on: windows-latest
-    name: Windows 并发回归验证（临时）
-
-    steps:
-      - name: 检出仓库
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: 配置 Rust 工具链
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - name: 缓存 Rust 依赖
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: src-tauri
-          save-if: false
-
-      - name: 运行 Windows 并发回归测试
-        run: >-
-          cargo test --locked
-          --manifest-path src-tauri/Cargo.toml
-          commands::skills::tests::foreground_check_contract_snapshots_configured_concurrency_one_four_and_eight
-          -- --nocapture
