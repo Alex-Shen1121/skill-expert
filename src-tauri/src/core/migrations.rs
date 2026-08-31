@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// Current schema version. Bump this when adding a new migration.
-const LATEST_VERSION: u32 = 7;
+const LATEST_VERSION: u32 = 8;
 
 /// Run all pending migrations on the database.
 ///
@@ -54,6 +54,7 @@ fn migrate_step(conn: &Connection, from_version: u32) -> Result<()> {
         4 => migrate_v4_to_v5(conn),
         5 => migrate_v5_to_v6(conn),
         6 => migrate_v6_to_v7(conn),
+        7 => migrate_v7_to_v8(conn),
         _ => bail!("unknown migration version: {from_version}"),
     }
 }
@@ -78,6 +79,7 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<()> {
             source_branch TEXT,
             source_revision TEXT,
             remote_revision TEXT,
+            source_content_hash TEXT,
             central_path TEXT NOT NULL UNIQUE,
             content_hash TEXT,
             enabled INTEGER DEFAULT 1,
@@ -184,6 +186,7 @@ fn migrate_v0_to_v1(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "skills", "source_subpath", "TEXT")?;
     add_column_if_missing(conn, "skills", "source_branch", "TEXT")?;
     add_column_if_missing(conn, "skills", "remote_revision", "TEXT")?;
+    add_column_if_missing(conn, "skills", "source_content_hash", "TEXT")?;
     add_column_if_missing(conn, "skills", "update_status", "TEXT DEFAULT 'unknown'")?;
     add_column_if_missing(conn, "skills", "last_checked_at", "INTEGER")?;
     add_column_if_missing(conn, "skills", "last_check_error", "TEXT")?;
@@ -294,6 +297,15 @@ fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v7 → v8：持久化与 `source_revision` 对齐的来源内容哈希。
+///
+/// 既有记录有意保持 NULL。升级后的第一次内容级检查会取得真实来源快照，
+/// 不猜测可变的中央技能库哈希仍然代表已采用来源修订。
+fn migrate_v7_to_v8(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "skills", "source_content_hash", "TEXT")?;
+    Ok(())
+}
+
 // ── Helpers ──
 
 fn add_column_if_missing(
@@ -362,6 +374,7 @@ mod tests {
         assert!(tables.contains(&"skill_tags".to_string()));
         assert!(tables.contains(&"scenario_skill_tools".to_string()));
         assert!(tables.contains(&"audit_log".to_string()));
+        assert!(has_column(&conn, "skills", "source_content_hash").unwrap());
     }
 
     #[test]
@@ -421,6 +434,7 @@ mod tests {
         assert!(has_column(&conn, "skills", "source_subpath").unwrap());
         assert!(has_column(&conn, "skills", "source_branch").unwrap());
         assert!(has_column(&conn, "skills", "remote_revision").unwrap());
+        assert!(has_column(&conn, "skills", "source_content_hash").unwrap());
         assert!(has_column(&conn, "skills", "update_status").unwrap());
         assert!(has_column(&conn, "skills", "last_checked_at").unwrap());
         assert!(has_column(&conn, "skills", "last_check_error").unwrap());

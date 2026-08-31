@@ -97,7 +97,7 @@ pub fn validate_git_url(url: &str) -> Result<()> {
 /// This is intentionally conservative — no case folding, no scheme rewriting,
 /// no path normalization beyond the suffix — so non-GitHub hosts that treat
 /// paths case-sensitively or distinguish schemes are unaffected.
-fn canonicalize_clone_url(url: &str) -> String {
+pub(crate) fn canonicalize_clone_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
     trimmed.strip_suffix(".git").unwrap_or(trimmed).to_string()
 }

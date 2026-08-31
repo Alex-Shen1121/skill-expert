@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复同一 Git 仓库包含多个 Skill 时，仓库中无关目录变化导致所有 Skill 错误显示可用更新的问题。
 
 ### User-facing
--
+- “检查更新”和差异页现在使用同一份 Skill 有效内容判断；只有文件内容或可执行权限真正不同的 Skill 才显示“有可用更新”。
 
 ### Developer & Governance
--
+- 更新检查按仓库与分支复用一次远端内容快照，持久化已对齐来源内容哈希，并继续隔离来源失败、停止后的未开始项目及中央技能库本地修改。
 
 ## [1.0.13] - 2026-08-31
 
