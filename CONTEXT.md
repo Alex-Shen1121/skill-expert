@@ -63,6 +63,26 @@ _避免使用_：自动更新、Skill 自动更新
 用户已安装的 Skill 从各自来源升级到新修订的过程；它独立于 Agent 技能管家应用版本。
 _避免使用_：应用更新、软件更新
 
+**Agent Skills 管理配置**：
+用户可重复查看和调整哪些 Agent 能够直接管理中央技能库的产品配置；它与首次引导是否已关闭无关。设置页模块面向用户的固定标题为“Agent 管理 Skills”。
+_避免使用_：二次设置、恢复提示
+
+**Agent Skills 管理能力**：
+通过把来自可信固定来源的 `manage-skills` 部署到指定 Agent，使该 Agent 可以直接管理中央技能库的能力。撤销该能力只撤销对应 Agent 的部署，不删除中央库中的 Skill。
+_避免使用_：Agent 权限、删除管理 Skill
+
+**Agent Skills 管理目标**：
+可以获得 Agent Skills 管理能力的已启用 Agent，以及仍保留该能力部署记录的已停用或已卸载 Agent。从未安装且没有部署记录的 Agent 不属于此集合。
+_避免使用_：所有 Agent、支持的 Agent
+
+**Agent Skills 首次引导**：
+Dashboard 上一次性介绍 Agent Skills 管理能力的入口；至少一个 Agent 部署成功或用户主动关闭后结束，但不影响永久可用的 Agent Skills 管理配置。
+_避免使用_：Agent Skills 管理配置、永久入口
+
+**管理 Skill 来源冲突**：
+中央技能库存在名为 `manage-skills` 但不来自可信固定来源的 Skill；该 Skill 不能被当作 Agent Skills 管理能力部署，也不能被自动替换。
+_避免使用_：已安装管理 Skill、可自动修复的同名 Skill
+
 **可检查更新 Skill**：
 来源仍可追踪的 Skill，包括直接 Git 来源、skills.sh 来源，以及保留有效原始路径的本地或导入来源；失去来源的本地副本不属于此集合。
 _避免使用_：所有 Skill、有可用更新

@@ -10,12 +10,15 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Release Overview
 - 修复 macOS 主窗口关闭到托盘后，点击 Dock 固定图标或再次打开应用无法恢复窗口的问题。
+- 在设置页新增永久可用的 Agent Skills 管理配置，可重复调整哪些 Agent 直接管理中央技能库。
 
 ### User-facing
 - macOS 应用在后台运行时，通过 Dock、Finder 或 Spotlight 再次打开会显示、取消最小化并聚焦既有主窗口，不创建第二个窗口或第二个应用实例。
+- Agent Skills 管理配置支持可信来源校验、批量草稿应用、撤销确认、失败项重试，并通过搜索和状态筛选安全承载大量 Agent。
 
 ### Developer & Governance
 - 将 Tauri `RunEvent::Reopen` 接入统一窗口恢复路径，并以生命周期测试及隔离 `.app` 红—绿验证覆盖窗口可见与前台聚焦行为。
+- 管理 Skill 同时校验名称、固定仓库、子路径与 `main` 分支；同名异源保守阻断，部分部署失败保留已成功的真实状态。
 
 ## [1.0.12] - 2026-08-30
 
