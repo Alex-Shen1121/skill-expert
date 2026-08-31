@@ -83,6 +83,69 @@ fn restore_main_window(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
+enum MacosRunEvent {
+    Reopen { has_visible_windows: bool },
+    Other,
+}
+
+#[cfg(target_os = "macos")]
+fn handle_macos_run_event(event: MacosRunEvent, restore: impl FnOnce()) {
+    if let MacosRunEvent::Reopen {
+        has_visible_windows,
+    } = event
+    {
+        log::debug!("macOS 重新打开：has_visible_windows={has_visible_windows}");
+        restore();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_run_event_tests {
+    use std::cell::Cell;
+
+    use super::{handle_macos_run_event, MacosRunEvent};
+
+    #[test]
+    fn non_reopen_event_does_not_restore_main_window() {
+        let restore_count = Cell::new(0);
+
+        handle_macos_run_event(MacosRunEvent::Other, || {
+            restore_count.set(restore_count.get() + 1)
+        });
+
+        assert_eq!(restore_count.get(), 0);
+    }
+
+    #[test]
+    fn reopen_without_visible_windows_restores_main_window() {
+        let restore_count = Cell::new(0);
+
+        handle_macos_run_event(
+            MacosRunEvent::Reopen {
+                has_visible_windows: false,
+            },
+            || restore_count.set(restore_count.get() + 1),
+        );
+
+        assert_eq!(restore_count.get(), 1);
+    }
+
+    #[test]
+    fn reopen_with_visible_windows_focuses_existing_main_window() {
+        let restore_count = Cell::new(0);
+
+        handle_macos_run_event(
+            MacosRunEvent::Reopen {
+                has_visible_windows: true,
+            },
+            || restore_count.set(restore_count.get() + 1),
+        );
+
+        assert_eq!(restore_count.get(), 1);
+    }
+}
+
 fn request_quit(app: &tauri::AppHandle) {
     let app_for_main = app.clone();
     if let Err(err) = app.run_on_main_thread(move || {
@@ -828,7 +891,7 @@ pub fn run() {
     let cancel_registry = Arc::new(core::install_cancel::InstallCancelRegistry::new());
 
     let builder_start = Instant::now();
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(store)
         .manage(cancel_registry)
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1141,6 +1204,22 @@ pub fn run() {
             commands::presets::get_preset_skill_order,
             commands::presets::reorder_preset_skills,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        {
+            let event = match _event {
+                tauri::RunEvent::Reopen {
+                    has_visible_windows,
+                    ..
+                } => MacosRunEvent::Reopen {
+                    has_visible_windows,
+                },
+                _ => MacosRunEvent::Other,
+            };
+            handle_macos_run_event(event, || restore_main_window(_app));
+        }
+    });
 }
