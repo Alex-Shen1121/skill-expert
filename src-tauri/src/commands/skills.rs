@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -6,8 +7,6 @@ use std::time::Instant;
 use tauri::{Emitter, State};
 use walkdir::WalkDir;
 
-#[cfg(test)]
-use std::collections::HashMap;
 #[cfg(test)]
 use std::sync::Mutex;
 
@@ -170,7 +169,8 @@ pub use crate::core::pending_removal::{PendingRemoval, LIBRARY_LOCATION};
 pub use crate::skill_update_batch::PrefetchedRemote;
 use crate::skill_update_batch::{
     self, is_checkable_update_skill, skill_update_batch_cancel_key, BatchUpdateExecution,
-    CheckedSkillState, ForegroundCheckBatch, RemoteKey, SkillUpdateCheckAdapter,
+    CheckedSkillState, ForegroundCheckBatch, RemoteKey, RemoteSkillContent, ResolvedRemote,
+    SkillUpdateCheckAdapter,
 };
 pub use crate::skill_update_batch::{
     BatchUpdateSkillItemResult, BatchUpdateSkillsResult, CheckSkillUpdateItemResult,
@@ -1352,14 +1352,14 @@ pub async fn check_all_skill_updates(
             )
         } else {
             let adapter = StoredSkillUpdateCheckAdapter { store: &store };
-            skill_update_batch::check_background(&store, &adapter, force_check, |key| {
-                git_fetcher::resolve_remote_revision(
-                    &key.clone_url,
-                    key.branch.as_deref(),
-                    proxy_url.as_deref(),
-                )
-                .map_err(|err| err.to_string())
-            })?;
+            skill_update_batch::check_background(
+                &store,
+                &adapter,
+                force_check,
+                |key, skill_ids| {
+                    resolve_remote_content_for_check(&store, key, skill_ids, proxy_url.as_deref())
+                },
+            )?;
             Ok(CheckSkillUpdatesBatchResult {
                 batch_id: uuid::Uuid::now_v7().to_string(),
                 stopped: false,
@@ -1418,10 +1418,7 @@ fn run_foreground_skill_update_checks(
             requested_skill_ids,
             stop,
         },
-        |key| {
-            git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
-                .map_err(|err| err.to_string())
-        },
+        |key, skill_ids| resolve_remote_content_for_check(store, key, skill_ids, proxy_url),
         |event| {
             if let Err(err) = app.emit(SKILL_UPDATE_BATCH_PROGRESS_EVENT, event) {
                 log::warn!("前台 Skill 检查：发送进度事件失败：{err}");
@@ -1430,14 +1427,108 @@ fn run_foreground_skill_update_checks(
     )
 }
 
-/// Resolve one skill's remote revision *before* the caller takes the
-/// central-repo lock. Every lock-holding update-check path goes through this:
-/// holding the lock across a slow `ls-remote` is what made an unrelated
-/// foreground operation fail with a 20s "repository is busy" (#315).
+/// 在中央仓库锁外解析一份仓库快照，并从同一个 checkout 计算全部指定 Skill 的有效内容哈希。
+/// 远端修订已经对齐且存在持久化来源哈希时，可以完全跳过快照。
+fn resolve_remote_content_for_check(
+    store: &SkillStore,
+    key: &RemoteKey,
+    skill_ids: &[String],
+    proxy_url: Option<&str>,
+) -> Result<ResolvedRemote, String> {
+    let remote_revision =
+        git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
+            .map_err(|err| err.to_string())?;
+
+    let mut requested = Vec::with_capacity(skill_ids.len());
+    let mut needs_snapshot = false;
+    for skill_id in skill_ids {
+        let skill = store
+            .get_skill_by_id(skill_id)
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| format!("未找到 Skill：{skill_id}"))?;
+        let source = git_source_from_skill(&skill).map_err(|err| err.message)?;
+        let aligned_hash = store
+            .get_skill_source_content_hash(skill_id)
+            .map_err(|err| err.to_string())?;
+        if !key.matches(&source.clone_url, source.branch.as_deref())
+            || skill.source_ref_resolved.as_deref() != Some(source.clone_url.as_str())
+            || skill.source_subpath.as_deref() != source.subpath.as_deref()
+            || skill.source_branch.as_deref() != source.branch.as_deref()
+            || skill.source_revision.as_deref() != Some(remote_revision.as_str())
+            || aligned_hash.is_none()
+        {
+            needs_snapshot = true;
+        }
+        requested.push((skill, source, aligned_hash));
+    }
+
+    if !needs_snapshot {
+        let skills = requested
+            .into_iter()
+            .map(|(skill, source, aligned_hash)| {
+                (
+                    skill.id,
+                    RemoteSkillContent {
+                        source_subpath: source.subpath,
+                        locator_skill_id: source.locator_skill_id,
+                        content_hash: Ok(aligned_hash.expect("已确认存在已对齐内容哈希")),
+                    },
+                )
+            })
+            .collect();
+        return Ok(ResolvedRemote {
+            revision: remote_revision,
+            skills: Arc::new(skills),
+        });
+    }
+
+    let temp_dir =
+        git_fetcher::clone_repo_ref(&key.clone_url, key.branch.as_deref(), None, proxy_url)
+            .map_err(|err| err.to_string())?;
+    let result = (|| {
+        // 分支可能在 ls-remote 与 clone 之间移动。所有哈希都绑定到实际落盘的修订，
+        // 避免任何 Skill 记录混合快照。
+        let snapshot_revision =
+            git_fetcher::get_head_revision(&temp_dir).map_err(|err| err.to_string())?;
+        let mut skills = HashMap::with_capacity(requested.len());
+        for (skill, source, _) in requested {
+            let content_hash = if !key.matches(&source.clone_url, source.branch.as_deref()) {
+                Err("Skill 来源在检查期间发生变化，请重新检查".to_string())
+            } else {
+                resolve_skill_dir(
+                    &temp_dir,
+                    source.subpath.as_deref(),
+                    source.locator_skill_id.as_deref(),
+                )
+                .and_then(|dir| {
+                    crate::core::content_hash::hash_directory(&dir).map_err(AppError::io)
+                })
+                .map_err(|err| err.message)
+            };
+            skills.insert(
+                skill.id,
+                RemoteSkillContent {
+                    source_subpath: source.subpath,
+                    locator_skill_id: source.locator_skill_id,
+                    content_hash,
+                },
+            );
+        }
+        Ok(ResolvedRemote {
+            revision: snapshot_revision,
+            skills: Arc::new(skills),
+        })
+    })();
+    git_fetcher::cleanup_temp(&temp_dir);
+    result
+}
+
+/// 在调用方取得中央仓库锁之前，准备一个 Skill 的远端修订与有效内容哈希。
+/// 所有持锁的更新检查路径都经过这里；如果把缓慢的 `ls-remote` 或内容快照放在锁内，
+/// 无关的前台操作会再次触发 20 秒 "repository is busy" 失败（#315）。
 ///
-/// Returns `None` when there is nothing to resolve — a local skill, one still
-/// inside its check TTL, or an unparseable source — in which case the check
-/// itself does no network either.
+/// 本地 Skill、仍处于检查 TTL 内的 Skill 或无法解析的来源返回 `None`，
+/// 后续持锁检查也不会联网。
 pub fn prefetch_skill_remote(
     store: &SkillStore,
     skill_id: &str,
@@ -1452,13 +1543,9 @@ pub fn prefetch_skill_remote(
         return None;
     }
     let source = git_source_from_skill(&skill).ok()?;
-    let result = git_fetcher::resolve_remote_revision(
-        &source.clone_url,
-        source.branch.as_deref(),
-        proxy_url,
-    )
-    .map_err(|err| err.to_string());
     let key = RemoteKey::new(source.clone_url, source.branch);
+    let result =
+        resolve_remote_content_for_check(store, &key, std::slice::from_ref(&skill.id), proxy_url);
     Some(skill_update_batch::prefetched_remote(key, result))
 }
 
@@ -1850,6 +1937,16 @@ pub fn managed_skill_by_id(
     Ok(managed_skill_to_dto(store, skill, &all_targets, &tags_map))
 }
 
+/// 判断来源有效内容是否会改变中央技能库当前真实内容。
+fn source_differs_from_current_central(
+    central_path: &Path,
+    source_hash: &str,
+) -> Result<bool, AppError> {
+    let central_hash =
+        crate::core::content_hash::hash_directory(central_path).map_err(AppError::io)?;
+    Ok(central_hash != source_hash)
+}
+
 /// Update an installed git-sourced skill.
 ///
 /// `approved_removals` carries back the token from a previous call that
@@ -1917,9 +2014,10 @@ pub fn update_git_skill_internal(
 
         let new_hash =
             crate::core::content_hash::hash_directory(&skill_dir).map_err(AppError::io)?;
-        let content_changed = skill.content_hash.as_deref() != Some(new_hash.as_str());
         let source_subpath = git_fetcher::relative_subpath(&temp_dir, &skill_dir);
         let _lock = RepoLock::acquire_foreground("update installed skill").map_err(AppError::db)?;
+        let content_changed =
+            source_differs_from_current_central(Path::new(&skill.central_path), &new_hash)?;
 
         // Stage first, then compare. The tree that lands in the library is the
         // installer's output, not the raw checkout — it drops `.git` and every
@@ -1994,6 +2092,9 @@ pub fn update_git_skill_internal(
                     "up_to_date",
                 )
                 .map_err(AppError::db)?;
+            store
+                .set_skill_source_content_hash(&skill.id, Some(&install_result.content_hash))
+                .map_err(AppError::db)?;
             resync_copy_targets(store, &skill.id)?;
             sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
         } else {
@@ -2007,7 +2108,7 @@ pub fn update_git_skill_internal(
                 )
                 .map_err(AppError::db)?;
             store
-                .update_skill_check_state(&skill.id, Some(&remote_revision), "up_to_date", None)
+                .update_skill_content_alignment(&skill.id, &remote_revision, &new_hash, &new_hash)
                 .map_err(AppError::db)?;
             resync_copy_targets(store, &skill.id)?;
             sync_metadata::write_all_from_db_unlocked(store).map_err(AppError::db)?;
@@ -2465,6 +2566,11 @@ pub fn store_installed_skill_unlocked(
     };
 
     store.insert_skill(&record).map_err(AppError::db)?;
+    if metadata.source_revision.is_some() {
+        store
+            .set_skill_source_content_hash(&id, Some(&result.content_hash))
+            .map_err(AppError::db)?;
+    }
     if let Some(scenario_id) = active_scenario_id {
         store
             .add_skill_to_scenario(scenario_id, &id)
@@ -2561,20 +2667,57 @@ pub fn check_skill_update_internal_with_remote(
                 return managed_skill_by_id(store, skill_id);
             };
             match remote_result {
-                Ok(remote_revision) => {
-                    let update_status = match skill.source_revision.as_deref() {
-                        Some(current) if current == remote_revision => "up_to_date",
-                        Some(_) => "update_available",
-                        None => "unknown",
+                Ok(resolved) => {
+                    let Some(remote_skill) = resolved.skills.get(&skill.id) else {
+                        log::debug!("更新检查：预取远端结果未包含 {}，本轮跳过", skill.id);
+                        return managed_skill_by_id(store, skill_id);
                     };
-                    store
-                        .update_skill_check_state(
-                            &skill.id,
-                            Some(&remote_revision),
-                            update_status,
-                            None,
-                        )
-                        .map_err(AppError::db)?;
+                    if remote_skill.source_subpath.as_deref() != git_source.subpath.as_deref()
+                        || remote_skill.locator_skill_id.as_deref()
+                            != git_source.locator_skill_id.as_deref()
+                    {
+                        log::debug!(
+                            "更新检查：{} 的来源位置在预取后发生变化，本轮跳过",
+                            skill.id
+                        );
+                        return managed_skill_by_id(store, skill_id);
+                    }
+                    let source_hash = match &remote_skill.content_hash {
+                        Ok(hash) => hash,
+                        Err(message) => {
+                            store
+                                .update_skill_check_state(
+                                    &skill.id,
+                                    Some(&resolved.revision),
+                                    "error",
+                                    Some(message),
+                                )
+                                .map_err(AppError::db)?;
+                            return Err(AppError::git(message.clone()));
+                        }
+                    };
+                    let central_hash =
+                        crate::core::content_hash::hash_directory(Path::new(&skill.central_path))
+                            .map_err(AppError::io)?;
+                    if central_hash == *source_hash {
+                        store
+                            .update_skill_content_alignment(
+                                &skill.id,
+                                &resolved.revision,
+                                source_hash,
+                                &central_hash,
+                            )
+                            .map_err(AppError::db)?;
+                    } else {
+                        store
+                            .update_skill_content_check_state(
+                                &skill.id,
+                                Some(&resolved.revision),
+                                &central_hash,
+                                "update_available",
+                            )
+                            .map_err(AppError::db)?;
+                    }
                 }
                 Err(message) => {
                     store
@@ -2590,6 +2733,7 @@ pub fn check_skill_update_internal_with_remote(
             }
         }
         "local" | "import" => {
+            let mut central_hash = None;
             let (status, error): (&str, Option<String>) = match skill.source_ref.as_deref() {
                 Some(path) => {
                     let source_path = Path::new(path);
@@ -2598,14 +2742,23 @@ pub fn check_skill_update_internal_with_remote(
                             "source_missing",
                             Some("Original source path no longer exists".to_string()),
                         )
+                    } else if skill.content_hash.is_none() {
+                        ("local_only", None)
                     } else {
                         match installer::hash_local_source(source_path) {
-                            Ok(live_hash) => match skill.content_hash.as_deref() {
-                                Some(stored) if stored == live_hash.as_str() => {
-                                    ("up_to_date", None)
+                            Ok(live_hash) => match crate::core::content_hash::hash_directory(
+                                Path::new(&skill.central_path),
+                            ) {
+                                Ok(current_hash) => {
+                                    let status = if current_hash == live_hash {
+                                        "up_to_date"
+                                    } else {
+                                        "update_available"
+                                    };
+                                    central_hash = Some(current_hash);
+                                    (status, None)
                                 }
-                                Some(_) => ("update_available", None),
-                                None => ("local_only", None),
+                                Err(err) => ("error", Some(err.to_string())),
                             },
                             Err(err) => ("error", Some(err.to_string())),
                         }
@@ -2613,9 +2766,15 @@ pub fn check_skill_update_internal_with_remote(
                 }
                 None => ("local_only", None),
             };
-            store
-                .update_skill_check_state(&skill.id, None, status, error.as_deref())
-                .map_err(AppError::db)?;
+            if let (Some(hash), None) = (central_hash.as_deref(), error.as_deref()) {
+                store
+                    .update_skill_content_check_state(&skill.id, None, hash, status)
+                    .map_err(AppError::db)?;
+            } else {
+                store
+                    .update_skill_check_state(&skill.id, None, status, error.as_deref())
+                    .map_err(AppError::db)?;
+            }
         }
         _ => {
             store
@@ -3454,6 +3613,19 @@ mod tests {
         assert_eq!(pending[0].path, "mine.txt");
     }
 
+    /// 检查完成后中央技能库仍可能再次被修改；显式更新必须读取点击时的真实内容，
+    /// 不能复用检查阶段缓存的数据库哈希。
+    #[test]
+    fn explicit_update_compares_the_live_central_content() {
+        let source = tempdir().unwrap();
+        let central = tempdir().unwrap();
+        fs::write(source.path().join("SKILL.md"), "来源内容\n").unwrap();
+        fs::write(central.path().join("SKILL.md"), "检查后的本地修改\n").unwrap();
+        let source_hash = crate::core::content_hash::hash_directory(source.path()).unwrap();
+
+        assert!(source_differs_from_current_central(central.path(), &source_hash).unwrap());
+    }
+
     /// Symlink-mode deployments are not copied over, so they are not at risk and
     /// must not generate noise.
     #[test]
@@ -3661,6 +3833,11 @@ mod tests {
         let mut per_remote: HashMap<RemoteKey, usize> = HashMap::new();
         let skills = [
             source("https://github.com/mattpocock/skills.git", None, Some("a")),
+            source(
+                "https://github.com/mattpocock/skills",
+                None,
+                Some("same-repo"),
+            ),
             source("https://github.com/mattpocock/skills.git", None, Some("b")),
             source("https://github.com/mattpocock/skills.git", None, None),
             source("https://github.com/vercel/ai.git", None, None),
@@ -3679,27 +3856,51 @@ mod tests {
 
         assert_eq!(per_remote.len(), 3, "distinct remotes to query");
         assert_eq!(
-            per_remote[&RemoteKey {
-                clone_url: "https://github.com/mattpocock/skills.git".to_string(),
-                branch: None,
-            }],
-            3,
-            "three subpaths of one repo/branch share a single query"
+            per_remote
+                [&RemoteKey::new("https://github.com/mattpocock/skills.git".to_string(), None,)],
+            4,
+            "等价 URL 下的四个子路径必须共享一次远端解析"
         );
         assert_eq!(
-            per_remote[&RemoteKey {
-                clone_url: "https://github.com/mattpocock/skills.git".to_string(),
-                branch: Some("next".to_string()),
-            }],
+            per_remote[&RemoteKey::new(
+                "https://github.com/mattpocock/skills.git".to_string(),
+                Some("next".to_string()),
+            )],
             1,
             "a different branch is a separate remote"
         );
     }
 
     fn remote(url: &str, branch: Option<&str>) -> RemoteKey {
-        RemoteKey {
-            clone_url: url.to_string(),
-            branch: branch.map(|b| b.to_string()),
+        RemoteKey::new(url.to_string(), branch.map(str::to_string))
+    }
+
+    fn resolved_remote_for_skills(
+        store: &SkillStore,
+        revision: &str,
+        skill_ids: &[String],
+    ) -> ResolvedRemote {
+        let skills = skill_ids
+            .iter()
+            .map(|skill_id| {
+                let skill = store.get_skill_by_id(skill_id).unwrap().unwrap();
+                let source = git_source_from_skill(&skill).unwrap();
+                let content_hash =
+                    crate::core::content_hash::hash_directory(Path::new(&skill.central_path))
+                        .unwrap();
+                (
+                    skill_id.clone(),
+                    RemoteSkillContent {
+                        source_subpath: source.subpath,
+                        locator_skill_id: source.locator_skill_id,
+                        content_hash: Ok(content_hash),
+                    },
+                )
+            })
+            .collect();
+        ResolvedRemote {
+            revision: revision.to_string(),
+            skills: Arc::new(skills),
         }
     }
 
@@ -3724,11 +3925,15 @@ mod tests {
                 requested_skill_ids: None,
                 stop: &AtomicBool::new(false),
             },
-            |key| {
-                if key.clone_url.ends_with("bad.git") {
+            |key, skill_ids| {
+                if key.clone_url.ends_with("/bad") {
                     Err("远端不可用".to_string())
                 } else {
-                    Ok("old-rev".to_string())
+                    Ok(resolved_remote_for_skills(
+                        &repo.store,
+                        "old-rev",
+                        skill_ids,
+                    ))
                 }
             },
             |event| events.lock().unwrap().push(event),
@@ -3798,7 +4003,7 @@ mod tests {
                 requested_skill_ids: None,
                 stop: &AtomicBool::new(false),
             },
-            |key| {
+            |key, skill_ids| {
                 *calls
                     .lock()
                     .unwrap()
@@ -3808,7 +4013,11 @@ mod tests {
                 peak.fetch_max(current, Ordering::SeqCst);
                 std::thread::sleep(std::time::Duration::from_millis(20));
                 in_flight.fetch_sub(1, Ordering::SeqCst);
-                Ok("old-rev".to_string())
+                Ok(resolved_remote_for_skills(
+                    &repo.store,
+                    "old-rev",
+                    skill_ids,
+                ))
             },
             |_| {},
         )
@@ -3819,11 +4028,59 @@ mod tests {
         let calls = calls.into_inner().unwrap();
         assert_eq!(calls.len(), 9, "十个 Skill 只对应九个不同远端");
         assert_eq!(
-            calls["https://example.test/remote-0.git"], 1,
+            calls["https://example.test/remote-0"], 1,
             "共享远端只解析一次"
         );
         assert!(peak.load(Ordering::SeqCst) <= DEFAULT_CHECK_CONCURRENCY);
         assert!(peak.load(Ordering::SeqCst) >= 2, "不同远端应并发解析");
+    }
+
+    /// 同一单仓库中只有一个 Skill 子目录变化时，只能把该 Skill 标记为可更新，
+    /// 其余兄弟 Skill 复用同一份快照并保持已是最新。
+    #[test]
+    fn monorepo_check_marks_only_skills_with_effective_content_changes() {
+        let repo = test_repo();
+        let remote_url = "https://example.test/monorepo.git";
+        insert_git_skill(&repo.store, "changed", remote_url);
+        insert_git_skill(&repo.store, "unchanged", remote_url);
+        let resolve_calls = std::sync::atomic::AtomicUsize::new(0);
+
+        let result = skill_update_batch::check_with_concurrency(
+            &repo.store,
+            &StoredSkillUpdateCheckAdapter { store: &repo.store },
+            CheckSkillUpdatesBatch {
+                batch_id: "monorepo-content",
+                force_check: true,
+                concurrency: DEFAULT_CHECK_CONCURRENCY,
+                requested_skill_ids: None,
+                stop: &AtomicBool::new(false),
+            },
+            |_key, skill_ids| {
+                resolve_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(skill_ids.len(), 2, "同一仓库的两个 Skill 必须共享一次解析");
+                let mut remote = resolved_remote_for_skills(&repo.store, "new-rev", skill_ids);
+                Arc::make_mut(&mut remote.skills)
+                    .get_mut("changed")
+                    .unwrap()
+                    .content_hash = Ok("changed-source-content".to_string());
+                Ok(remote)
+            },
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(resolve_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(result.items[0].skill_id, "changed");
+        assert_eq!(
+            result.items[0].status,
+            SkillUpdateBatchProgressStatus::UpdateAvailable
+        );
+        assert_eq!(result.items[1].skill_id, "unchanged");
+        assert_eq!(
+            result.items[1].status,
+            SkillUpdateBatchProgressStatus::UpToDate
+        );
     }
 
     #[test]
@@ -3845,7 +4102,7 @@ mod tests {
                     requested_skill_ids: None,
                     stop: &AtomicBool::new(false),
                 },
-                |_key| {
+                |_key, skill_ids| {
                     probe.observe(
                         || {
                             // 模拟 Windows 上较慢的设置写入，确保首个 worker 仍计入并发峰值。
@@ -3854,7 +4111,11 @@ mod tests {
                                 .set_setting(TEST_CHECK_CONCURRENCY_SETTING, "8")
                                 .unwrap();
                         },
-                        Ok("old-rev".to_string()),
+                        Ok(resolved_remote_for_skills(
+                            &repo.store,
+                            "old-rev",
+                            skill_ids,
+                        )),
                     )
                 },
                 |_| {},
@@ -3897,11 +4158,15 @@ mod tests {
                 requested_skill_ids: None,
                 stop: &stop,
             },
-            |_key| {
+            |_key, skill_ids| {
                 started.fetch_add(1, Ordering::SeqCst);
                 barrier.wait();
                 stop.store(true, Ordering::SeqCst);
-                Ok("old-rev".to_string())
+                Ok(resolved_remote_for_skills(
+                    &repo.store,
+                    "old-rev",
+                    skill_ids,
+                ))
             },
             |_| {},
         )
@@ -4196,9 +4461,13 @@ mod tests {
                 requested_skill_ids: Some(&requested),
                 stop: &AtomicBool::new(false),
             },
-            |key| {
+            |key, skill_ids| {
                 resolved.lock().unwrap().push(key.clone_url.clone());
-                Ok("old-rev".to_string())
+                Ok(resolved_remote_for_skills(
+                    &repo.store,
+                    "old-rev",
+                    skill_ids,
+                ))
             },
             |_| {},
         )
@@ -4206,7 +4475,7 @@ mod tests {
 
         assert_eq!(
             resolved.into_inner().unwrap(),
-            vec!["https://example.test/failure.git"]
+            vec!["https://example.test/failure"]
         );
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].skill_id, "failure");
@@ -4237,7 +4506,7 @@ mod tests {
             &repo.store,
             &StoredSkillUpdateCheckAdapter { store: &repo.store },
             true,
-            |_key| panic!("本地来源不应解析 Git 远端"),
+            |_key, _skill_ids| panic!("本地来源不应解析 Git 远端"),
         )
         .unwrap();
 
@@ -4262,7 +4531,7 @@ mod tests {
                 requested_skill_ids: None,
                 stop: &AtomicBool::new(false),
             },
-            |_key| panic!("本地来源不应解析 Git 远端"),
+            |_key, _skill_ids| panic!("本地来源不应解析 Git 远端"),
             |_| {},
         )
         .unwrap();
@@ -4289,10 +4558,22 @@ mod tests {
         store.insert_skill(&skill).unwrap();
     }
 
-    fn prefetch(url: &str, revision: &str) -> Option<PrefetchedRemote> {
+    fn prefetch(url: &str, revision: &str, content_hash: &str) -> Option<PrefetchedRemote> {
+        let mut skills = HashMap::new();
+        skills.insert(
+            "skill-1".to_string(),
+            RemoteSkillContent {
+                source_subpath: None,
+                locator_skill_id: None,
+                content_hash: Ok(content_hash.to_string()),
+            },
+        );
         Some(PrefetchedRemote {
             key: remote(url, None),
-            result: Ok(revision.to_string()),
+            result: Ok(ResolvedRemote {
+                revision: revision.to_string(),
+                skills: Arc::new(skills),
+            }),
         })
     }
 
@@ -4306,13 +4587,88 @@ mod tests {
             &repo.store,
             "skill-1",
             false,
-            prefetch("https://example.test/a.git", "new-rev"),
+            prefetch(
+                "https://example.test/a.git",
+                "new-rev",
+                "different-source-hash",
+            ),
         )
         .unwrap();
 
         assert_eq!(dto.update_status, "update_available");
         let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.source_revision.as_deref(), Some("old-rev"));
         assert_eq!(stored.remote_revision.as_deref(), Some("new-rev"));
+    }
+
+    /// 单仓库中的其他目录推动了远端修订，但当前 Skill 的有效内容没有变化时，
+    /// 检查应直接推进已对齐修订，不能留下“有可用更新”的假阳性。
+    #[test]
+    fn matching_prefetched_remote_with_unchanged_content_is_aligned() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/a.git");
+        let skill = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        let central_hash =
+            crate::core::content_hash::hash_directory(Path::new(&skill.central_path)).unwrap();
+
+        let dto = check_skill_update_internal_with_remote(
+            &repo.store,
+            "skill-1",
+            false,
+            prefetch("https://example.test/a.git", "new-rev", &central_hash),
+        )
+        .unwrap();
+
+        assert_eq!(dto.update_status, "up_to_date");
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.source_revision.as_deref(), Some("new-rev"));
+        assert_eq!(stored.remote_revision.as_deref(), Some("new-rev"));
+        assert_eq!(
+            repo.store
+                .get_skill_source_content_hash("skill-1")
+                .unwrap()
+                .as_deref(),
+            Some(central_hash.as_str())
+        );
+    }
+
+    /// 已对齐修订没有变化，但中央技能库被修改后，必须按真实内容显示来源更新。
+    #[test]
+    fn central_modification_at_same_remote_revision_is_update_available() {
+        let repo = test_repo();
+        insert_git_skill(&repo.store, "skill-1", "https://example.test/a.git");
+        let skill = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        let original_hash =
+            crate::core::content_hash::hash_directory(Path::new(&skill.central_path)).unwrap();
+        repo.store
+            .update_skill_content_alignment("skill-1", "old-rev", &original_hash, &original_hash)
+            .unwrap();
+        fs::write(
+            Path::new(&skill.central_path).join("SKILL.md"),
+            "---\nname: skill-1\n---\n本地修改\n",
+        )
+        .unwrap();
+
+        let dto = check_skill_update_internal_with_remote(
+            &repo.store,
+            "skill-1",
+            true,
+            prefetch("https://example.test/a.git", "old-rev", &original_hash),
+        )
+        .unwrap();
+
+        assert_eq!(dto.update_status, "update_available");
+        let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
+        assert_eq!(stored.source_revision.as_deref(), Some("old-rev"));
+        assert_eq!(stored.remote_revision.as_deref(), Some("old-rev"));
+        assert_ne!(stored.content_hash.as_deref(), Some(original_hash.as_str()));
+        assert_eq!(
+            repo.store
+                .get_skill_source_content_hash("skill-1")
+                .unwrap()
+                .as_deref(),
+            Some(original_hash.as_str())
+        );
     }
 
     /// A reinstall between the off-lock resolve and this write keeps the skill's
@@ -4328,7 +4684,11 @@ mod tests {
             &repo.store,
             "skill-1",
             false,
-            prefetch("https://example.test/old.git", "rev-of-old-remote"),
+            prefetch(
+                "https://example.test/old.git",
+                "rev-of-old-remote",
+                "unused-hash",
+            ),
         )
         .unwrap();
 

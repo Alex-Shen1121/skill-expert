@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -286,7 +286,8 @@ impl SkillStore {
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
             "UPDATE skills
-             SET source_ref_resolved = ?1, source_subpath = ?2, source_branch = ?3, source_revision = ?4, updated_at = ?5
+             SET source_ref_resolved = ?1, source_subpath = ?2, source_branch = ?3,
+                 source_revision = ?4, source_content_hash = NULL, updated_at = ?5
              WHERE id = ?6",
             params![
                 source_ref_resolved,
@@ -314,6 +315,87 @@ impl SkillStore {
              SET remote_revision = ?1, update_status = ?2, last_checked_at = ?3, last_check_error = ?4
              WHERE id = ?5",
             params![remote_revision, update_status, now, last_check_error, id],
+        )?;
+        Ok(())
+    }
+
+    /// `source_revision` 对应的来源内容哈希。它与可变的中央技能库
+    /// `content_hash` 分开保存，使更新检查既能识别本地修改，也不必重复下载未变化的远端。
+    pub fn get_skill_source_content_hash(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT source_content_hash FROM skills WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map(|value| value.flatten())
+        .map_err(Into::into)
+    }
+
+    pub fn set_skill_source_content_hash(
+        &self,
+        id: &str,
+        content_hash: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE skills SET source_content_hash = ?1 WHERE id = ?2",
+            params![content_hash, id],
+        )?;
+        Ok(())
+    }
+
+    /// 记录一次已完成的内容比较，但不改变已对齐来源修订。
+    /// 用于中央技能库当前内容与最新来源快照不同的情况。
+    pub fn update_skill_content_check_state(
+        &self,
+        id: &str,
+        remote_revision: Option<&str>,
+        central_content_hash: &str,
+        update_status: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE skills
+             SET remote_revision = ?1, content_hash = ?2, update_status = ?3,
+                 last_checked_at = ?4, last_check_error = NULL
+             WHERE id = ?5",
+            params![
+                remote_revision,
+                central_content_hash,
+                update_status,
+                now,
+                id
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 只有来源有效内容已证明与中央技能库当前内容一致时，才推进已对齐来源修订。
+    pub fn update_skill_content_alignment(
+        &self,
+        id: &str,
+        source_revision: &str,
+        source_content_hash: &str,
+        central_content_hash: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE skills
+             SET source_revision = ?1, remote_revision = ?1, source_content_hash = ?2,
+                 content_hash = ?3, update_status = 'up_to_date', last_checked_at = ?4,
+                 last_check_error = NULL
+             WHERE id = ?5",
+            params![
+                source_revision,
+                source_content_hash,
+                central_content_hash,
+                now,
+                id
+            ],
         )?;
         Ok(())
     }
@@ -352,7 +434,8 @@ impl SkillStore {
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
             "UPDATE skills
-             SET name = ?1, description = ?2, source_revision = ?3, remote_revision = ?4, content_hash = ?5,
+             SET name = ?1, description = ?2, source_revision = ?3, remote_revision = ?4,
+                 content_hash = ?5,
                  updated_at = ?6, update_status = ?7, last_checked_at = ?6, last_check_error = NULL
              WHERE id = ?8",
             params![
@@ -400,7 +483,9 @@ impl SkillStore {
             "UPDATE skills
              SET name = ?1, description = ?2, source_type = ?3, source_ref = ?4, source_ref_resolved = ?5,
                  source_subpath = ?6, source_branch = ?7, source_revision = ?8, remote_revision = ?9,
-                 content_hash = ?10, updated_at = ?11, status = 'ok', update_status = ?12, last_checked_at = ?11,
+                 source_content_hash = CASE WHEN ?8 IS NULL THEN NULL ELSE ?10 END,
+                 content_hash = ?10, updated_at = ?11,
+                 status = 'ok', update_status = ?12, last_checked_at = ?11,
                  last_check_error = NULL
              WHERE id = ?13",
             params![

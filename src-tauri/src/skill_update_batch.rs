@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::core::{
     error::AppError,
@@ -143,24 +143,43 @@ pub(crate) struct RemoteKey {
 
 impl RemoteKey {
     pub(crate) fn new(clone_url: String, branch: Option<String>) -> Self {
-        Self { clone_url, branch }
+        Self {
+            clone_url: crate::core::git_fetcher::canonicalize_clone_url(&clone_url),
+            branch,
+        }
     }
 
     pub(crate) fn matches(&self, clone_url: &str, branch: Option<&str>) -> bool {
-        self.clone_url == clone_url && self.branch.as_deref() == branch
+        self.clone_url == crate::core::git_fetcher::canonicalize_clone_url(clone_url)
+            && self.branch.as_deref() == branch
     }
+}
+
+/// 一个 Skill 在共享远端快照中的内容身份。
+#[derive(Clone)]
+pub(crate) struct RemoteSkillContent {
+    pub(crate) source_subpath: Option<String>,
+    pub(crate) locator_skill_id: Option<String>,
+    pub(crate) content_hash: Result<String, String>,
+}
+
+/// 一个仓库与分支只准备一次的远端内容快照结果。
+#[derive(Clone)]
+pub(crate) struct ResolvedRemote {
+    pub(crate) revision: String,
+    pub(crate) skills: Arc<HashMap<String, RemoteSkillContent>>,
 }
 
 /// 在仓库锁外解析并绑定到远端身份的结果。
 #[derive(Clone)]
 pub struct PrefetchedRemote {
     pub(crate) key: RemoteKey,
-    pub(crate) result: Result<String, String>,
+    pub(crate) result: Result<ResolvedRemote, String>,
 }
 
 pub(crate) fn prefetched_remote(
     key: RemoteKey,
-    result: Result<String, String>,
+    result: Result<ResolvedRemote, String>,
 ) -> PrefetchedRemote {
     PrefetchedRemote { key, result }
 }
@@ -222,13 +241,13 @@ fn prefetched_remote_for_skill<A: SkillUpdateCheckAdapter>(
     adapter: &A,
     skill: &SkillRecord,
     force_check: bool,
-    remote_revisions: &HashMap<RemoteKey, Result<String, String>>,
+    remote_results: &HashMap<RemoteKey, Result<ResolvedRemote, String>>,
 ) -> Option<PrefetchedRemote> {
     if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
         return None;
     }
     adapter.remote_key(skill, force_check).and_then(|key| {
-        remote_revisions
+        remote_results
             .get(&key)
             .cloned()
             .map(|result| PrefetchedRemote { key, result })
@@ -239,9 +258,9 @@ fn apply_prefetched_skill_check<A: SkillUpdateCheckAdapter>(
     adapter: &A,
     skill: &SkillRecord,
     force_check: bool,
-    remote_revisions: &HashMap<RemoteKey, Result<String, String>>,
+    remote_results: &HashMap<RemoteKey, Result<ResolvedRemote, String>>,
 ) -> Result<CheckedSkillState, String> {
-    let prefetched = prefetched_remote_for_skill(adapter, skill, force_check, remote_revisions);
+    let prefetched = prefetched_remote_for_skill(adapter, skill, force_check, remote_results);
     adapter.apply_check(skill, force_check, prefetched)
 }
 
@@ -290,23 +309,28 @@ pub(crate) fn check_background<R, A>(
     resolve: R,
 ) -> Result<(), AppError>
 where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    R: Fn(&RemoteKey, &[String]) -> Result<ResolvedRemote, String> + Sync,
     A: SkillUpdateCheckAdapter,
 {
     let skills = store.get_all_skills().map_err(AppError::db)?;
     let remote_skill_ids = collect_remote_skill_ids(&skills, force_check, adapter);
-    let remote_revisions = resolve_concurrent_with_progress(
+    let remote_results = resolve_concurrent_with_progress(
         remote_skill_ids.keys().cloned().collect(),
         DEFAULT_CHECK_CONCURRENCY,
         None,
-        resolve,
+        |key| {
+            resolve(
+                key,
+                remote_skill_ids.get(key).map(Vec::as_slice).unwrap_or(&[]),
+            )
+        },
         |_| {},
     );
 
     let mut failed = Vec::new();
     for skill in &skills {
         if let Err(message) =
-            apply_prefetched_skill_check(adapter, skill, force_check, &remote_revisions)
+            apply_prefetched_skill_check(adapter, skill, force_check, &remote_results)
         {
             log::warn!("check all: {} failed: {}", skill.id, message);
             failed.push(format!("{}: {}", skill.id, message));
@@ -333,7 +357,7 @@ fn check<R, E, A>(
     emit: E,
 ) -> Result<CheckSkillUpdatesBatchResult, AppError>
 where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    R: Fn(&RemoteKey, &[String]) -> Result<ResolvedRemote, String> + Sync,
     E: Fn(SkillUpdateBatchProgress) + Sync,
     A: SkillUpdateCheckAdapter,
 {
@@ -389,11 +413,16 @@ where
         .values()
         .flat_map(|ids| ids.iter().cloned())
         .collect();
-    let remote_revisions = resolve_concurrent_with_progress(
+    let remote_results = resolve_concurrent_with_progress(
         remote_skill_ids.keys().cloned().collect(),
         concurrency,
         Some(stop),
-        resolve,
+        |key| {
+            resolve(
+                key,
+                remote_skill_ids.get(key).map(Vec::as_slice).unwrap_or(&[]),
+            )
+        },
         |key| {
             if let Some(skill_ids) = remote_skill_ids.get(key) {
                 for skill_id in skill_ids {
@@ -413,7 +442,7 @@ where
     let mut items = Vec::with_capacity(skills.len());
     for skill in &skills {
         let remote_was_started =
-            prefetched_remote_for_skill(adapter, skill, force_check, &remote_revisions).is_some();
+            prefetched_remote_for_skill(adapter, skill, force_check, &remote_results).is_some();
         if (remote_scheduled.contains(&skill.id) && !remote_was_started)
             || (!remote_scheduled.contains(&skill.id)
                 && stop.load(std::sync::atomic::Ordering::SeqCst))
@@ -446,7 +475,7 @@ where
                 None,
             );
         }
-        let checked = apply_prefetched_skill_check(adapter, skill, force_check, &remote_revisions);
+        let checked = apply_prefetched_skill_check(adapter, skill, force_check, &remote_results);
         let (status, error, last_checked_at) = match checked {
             Ok(dto) => {
                 let last_checked_at = dto.last_checked_at;
@@ -498,7 +527,7 @@ pub(crate) fn check_with_concurrency<R, E, A>(
     emit: E,
 ) -> Result<CheckSkillUpdatesBatchResult, AppError>
 where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    R: Fn(&RemoteKey, &[String]) -> Result<ResolvedRemote, String> + Sync,
     E: Fn(SkillUpdateBatchProgress) + Sync,
     A: SkillUpdateCheckAdapter,
 {
@@ -514,7 +543,7 @@ pub(crate) fn check_with_preferences<R, E, A>(
     emit: E,
 ) -> Result<CheckSkillUpdatesBatchResult, AppError>
 where
-    R: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    R: Fn(&RemoteKey, &[String]) -> Result<ResolvedRemote, String> + Sync,
     E: Fn(SkillUpdateBatchProgress) + Sync,
     A: SkillUpdateCheckAdapter,
 {
@@ -544,21 +573,22 @@ where
     )
 }
 
-fn resolve_concurrent_with_progress<F, P>(
+fn resolve_concurrent_with_progress<T, F, P>(
     remotes: Vec<RemoteKey>,
     concurrency: usize,
     stop: Option<&AtomicBool>,
     resolve: F,
     on_start: P,
-) -> HashMap<RemoteKey, Result<String, String>>
+) -> HashMap<RemoteKey, Result<T, String>>
 where
-    F: Fn(&RemoteKey) -> Result<String, String> + Sync,
+    T: Send,
+    F: Fn(&RemoteKey) -> Result<T, String> + Sync,
     P: Fn(&RemoteKey) + Sync,
 {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let next = AtomicUsize::new(0);
-    let results: Mutex<HashMap<RemoteKey, Result<String, String>>> =
+    let results: Mutex<HashMap<RemoteKey, Result<T, String>>> =
         Mutex::new(HashMap::with_capacity(remotes.len()));
     let worker_count = concurrency.max(1).min(remotes.len().max(1));
 
