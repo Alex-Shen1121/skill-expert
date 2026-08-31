@@ -1,6 +1,6 @@
 [package]
 name = "skill-expert"
-version = "1.0.12"
+version = "1.0.13"
 description = "Agent 技能管家 - AI Agent Skills 中央管理器"
 authors = ["Alex-Shen1121"]
 homepage = "https://github.com/Alex-Shen1121/skill-expert#readme"
