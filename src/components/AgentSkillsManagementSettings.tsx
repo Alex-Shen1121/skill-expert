@@ -435,7 +435,7 @@ export function AgentSkillsManagementSettings() {
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
+                    className={`absolute left-0 top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
                       target.selected ? "translate-x-[18px]" : "translate-x-0.5"
                     }`}
                   />

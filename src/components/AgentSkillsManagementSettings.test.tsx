@@ -140,6 +140,25 @@ describe("Agent Skills 管理配置", () => {
     expect(screen.getByText("Agent 已停用或卸载，仍保留部署记录")).toBeTruthy();
   });
 
+  it("未部署时滑块位于左侧，已部署时滑块移到右侧", () => {
+    renderModule();
+
+    const enabledSwitch = screen.getByRole("switch", {
+      name: "关闭 Codex 的管理能力",
+    });
+    const disabledSwitch = screen.getByRole("switch", {
+      name: "开启 Warp 的管理能力",
+    });
+    const enabledKnob = enabledSwitch.firstElementChild;
+    const disabledKnob = disabledSwitch.firstElementChild;
+
+    expect(enabledKnob?.classList.contains("left-0")).toBe(true);
+    expect(enabledKnob?.classList.contains("translate-x-[18px]")).toBe(true);
+    expect(disabledKnob?.classList.contains("left-0")).toBe(true);
+    expect(disabledKnob?.classList.contains("translate-x-0.5")).toBe(true);
+    expect(disabledKnob?.classList.contains("translate-x-[18px]")).toBe(false);
+  });
+
   it("同名异源时显示冲突、阻断 Agent 选择并提供处理入口", async () => {
     const user = userEvent.setup();
     const conflicting = managementSkill();

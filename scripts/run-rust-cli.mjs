@@ -1,39 +1,10 @@
-import { existsSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-
-function canRun(command, args = ['--version']) {
-  const result = spawnSync(command, args, { stdio: 'ignore' });
-  return result.status === 0;
-}
-
-function resolveCargo() {
-  if (process.env.CARGO && existsSync(process.env.CARGO)) {
-    return process.env.CARGO;
-  }
-
-  if (canRun('cargo')) {
-    return 'cargo';
-  }
-
-  const rustupCheck = spawnSync('rustup', ['which', 'rustc'], { encoding: 'utf8' });
-  if (rustupCheck.status === 0) {
-    const rustcPath = rustupCheck.stdout.trim();
-    if (rustcPath) {
-      const cargoPath = join(dirname(rustcPath), 'cargo');
-      if (existsSync(cargoPath)) {
-        return cargoPath;
-      }
-    }
-  }
-
-  console.error('cargo not found. Install Rust or ensure cargo/rustup is on PATH.');
-  process.exit(127);
-}
+import { buildRustEnvironment, resolveCargoCommand } from './rust-toolchain.mjs';
 
 const mode = process.argv[2];
 const extraArgs = process.argv.slice(3);
-const cargo = resolveCargo();
+const rustEnvironment = buildRustEnvironment();
+const cargo = resolveCargoCommand(rustEnvironment);
 
 const baseArgs = ['--manifest-path', 'src-tauri/Cargo.toml', '--bin', 'skill-expert-cli'];
 const cargoArgs =
@@ -46,21 +17,18 @@ const cargoArgs =
         : null;
 
 if (!cargoArgs) {
-  console.error(`unknown mode: ${mode}`);
+  console.error(`未知模式：${mode}`);
   process.exit(2);
 }
 
 const result = spawnSync(cargo, cargoArgs, {
   stdio: 'inherit',
-  env: {
-    ...process.env,
-    PATH: `${dirname(cargo)}${delimiter}${process.env.PATH ?? ''}`,
-  },
+  env: rustEnvironment,
 });
 
 if (result.error) {
-  console.error(result.error.message);
-  process.exit(1);
+  console.error(`无法启动固定 Rust 工具链：${result.error.message}`);
+  process.exit(result.error.code === 'ENOENT' ? 127 : 1);
 }
 
 process.exit(result.status ?? 1);
