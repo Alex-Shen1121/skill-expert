@@ -6,15 +6,17 @@ import { useApp } from "../context/AppContext";
 import { getErrorMessage } from "../lib/error";
 import * as api from "../lib/tauri";
 import { AgentIcon } from "./AgentIcon";
-
-const PROMPT_SETTING_KEY = "agent_control_setup_prompt";
-const SKILL_NAME = "manage-skills";
-const SKILL_SOURCE =
-  "https://github.com/Alex-Shen1121/skill-expert/tree/main/skills/manage-skills";
+import {
+  AGENT_SKILLS_ONBOARDING_SETTING_KEY,
+  ensureTrustedManagementSkill,
+  isTrustedManagementSkill,
+  markAgentSkillsOnboardingComplete,
+  MANAGEMENT_SKILL_NAME,
+} from "../lib/agentSkillsManagement";
 
 /**
  * 一次性告知用户 Agent 可以直接管理共享技能库。
- * Skill 已安装或用户关闭提示后不再显示；Agent 选择默认留空，避免一次点击部署到全部环境。
+ * 至少一个 Agent 已成功部署或用户关闭提示后不再显示；Agent 选择默认留空，避免一次点击部署到全部环境。
  */
 export function AgentControlSetupCard() {
   const { t } = useTranslation();
@@ -24,8 +26,17 @@ export function AgentControlSetupCard() {
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const alreadyInstalled = useMemo(
-    () => managedSkills.some((skill) => skill.name === SKILL_NAME),
+  const managementSkill = useMemo(
+    () => managedSkills.find(isTrustedManagementSkill) ?? null,
+    [managedSkills],
+  );
+  const configured = (managementSkill?.targets.length ?? 0) > 0;
+  const hasSourceConflict = useMemo(
+    () =>
+      managedSkills.some(
+        (skill) =>
+          skill.name === MANAGEMENT_SKILL_NAME && !isTrustedManagementSkill(skill),
+      ),
     [managedSkills],
   );
   const candidates = useMemo(
@@ -35,16 +46,18 @@ export function AgentControlSetupCard() {
 
   useEffect(() => {
     void api
-      .getSettings(PROMPT_SETTING_KEY)
+      .getSettings(AGENT_SKILLS_ONBOARDING_SETTING_KEY)
       .catch(() => null)
       .then((flag) => setDismissed(Boolean(flag)));
   }, []);
 
-  if (loading || dismissed === null || dismissed || alreadyInstalled) return null;
+  if (loading || dismissed === null || dismissed || configured) return null;
 
   const dismiss = async () => {
     setDismissed(true);
-    await api.setSettings(PROMPT_SETTING_KEY, "dismissed").catch(() => {});
+    await api
+      .setSettings(AGENT_SKILLS_ONBOARDING_SETTING_KEY, "dismissed")
+      .catch(() => {});
   };
 
   const toggle = (key: string) => {
@@ -55,18 +68,20 @@ export function AgentControlSetupCard() {
 
   const enable = async () => {
     if (busy || selected.length === 0) return;
+    if (hasSourceConflict) {
+      toast.error(t("agentControl.sourceConflict"));
+      return;
+    }
     setBusy(true);
     try {
-      await api.installGit(SKILL_SOURCE);
-      const skills = await api.getManagedSkills();
-      const installed = skills.find((skill) => skill.name === SKILL_NAME);
+      const installed = await ensureTrustedManagementSkill(managedSkills);
       if (!installed) throw new Error(t("agentControl.errorNotFound"));
 
       for (const key of selected) {
         await api.syncSkillToTool(installed.id, key);
       }
       toast.success(t("agentControl.done", { count: selected.length }));
-      await api.setSettings(PROMPT_SETTING_KEY, "installed").catch(() => {});
+      await markAgentSkillsOnboardingComplete();
     } catch (error) {
       toast.error(getErrorMessage(error, t("agentControl.errorGeneric")));
     } finally {

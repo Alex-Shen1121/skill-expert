@@ -43,7 +43,10 @@ vi.mock("../lib/tauri", () => apiMocks);
 vi.mock("../context/AppContext", () => ({
   useApp: () => ({
     tools: [],
+    managedSkills: [],
     refreshTools: vi.fn().mockResolvedValue(undefined),
+    refreshManagedSkills: vi.fn().mockResolvedValue(undefined),
+    openSkillDetailById: vi.fn(),
     openHelp: vi.fn(),
     appUpdate: null,
     refreshAppUpdate: vi.fn().mockResolvedValue(null),
@@ -202,5 +205,17 @@ describe("Settings 前台批量操作并发设置", () => {
       view.unmount();
     }
     await i18n.changeLanguage("zh");
+  });
+});
+
+describe("Settings Agent Skills 管理配置", () => {
+  it("首次引导已关闭时仍显示 Agent Skills 管理配置", async () => {
+    settingsStore.set("agent_control_setup_prompt", "dismissed");
+
+    renderSettings();
+
+    expect(
+      await screen.findByRole("heading", { name: "Agent 管理 Skills" }),
+    ).toBeTruthy();
   });
 });

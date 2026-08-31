@@ -57,6 +57,7 @@ import { useApp } from "../context/AppContext";
 import { useThemeContext } from "../context/ThemeContext";
 import { AgentIcon } from "../components/AgentIcon";
 import { ToggleSwitch } from "../components/ToggleSwitch";
+import { AgentSkillsManagementSettings } from "../components/AgentSkillsManagementSettings";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage } from "../lib/error";
@@ -1305,6 +1306,8 @@ export function Settings() {
             )}
           </div>
         </section>
+
+        <AgentSkillsManagementSettings />
 
         {/* Global config */}
         <section>

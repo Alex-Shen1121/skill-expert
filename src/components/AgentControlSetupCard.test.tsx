@@ -49,16 +49,17 @@ function tool(key: string, displayName: string, enabled = true): ToolInfo {
   };
 }
 
-function managedSkill(name = "manage-skills"): ManagedSkill {
+function managedSkill(name = "manage-skills", targetKeys: string[] = []): ManagedSkill {
   return {
     id: "manage-skills-id",
     name,
     description: null,
     source_type: "git",
-    source_ref: null,
-    source_ref_resolved: null,
-    source_subpath: null,
-    source_branch: null,
+    source_ref:
+      "https://github.com/Alex-Shen1121/skill-expert/tree/main/skills/manage-skills",
+    source_ref_resolved: "https://github.com/Alex-Shen1121/skill-expert.git",
+    source_subpath: "skills/manage-skills",
+    source_branch: "main",
     source_revision: null,
     remote_revision: null,
     update_status: "unknown",
@@ -69,7 +70,15 @@ function managedSkill(name = "manage-skills"): ManagedSkill {
     created_at: 1,
     updated_at: 1,
     status: "ready",
-    targets: [],
+    targets: targetKeys.map((toolKey) => ({
+      id: `target-${toolKey}`,
+      skill_id: "manage-skills-id",
+      tool: toolKey,
+      target_path: `/agents/${toolKey}/skills/manage-skills`,
+      mode: "symlink",
+      status: "synced",
+      synced_at: 1,
+    })),
     preset_ids: [],
     tags: [],
     can_check_update: true,
@@ -97,8 +106,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Agent 管理 Skill 设置卡片", () => {
-  it("已安装 manage-skills 时不再显示", async () => {
+  it("可信 manage-skills 已入库但零部署时仍显示", async () => {
     appState.managedSkills = [managedSkill()];
+    render(<AgentControlSetupCard />);
+
+    await waitFor(() => expect(apiMocks.getSettings).toHaveBeenCalledOnce());
+    expect(screen.getByText("让 Agent 直接管理 Skills")).toBeTruthy();
+  });
+
+  it("至少一个 Agent 已成功部署后不再显示", async () => {
+    appState.managedSkills = [managedSkill("manage-skills", ["codex"])];
     render(<AgentControlSetupCard />);
 
     await waitFor(() => expect(apiMocks.getSettings).toHaveBeenCalledOnce());
