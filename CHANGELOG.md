@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.13] - 2026-08-31
+
+### Release Overview
 - 修复 macOS 主窗口关闭到托盘后，点击 Dock 固定图标或再次打开应用无法恢复窗口的问题。
 - 在设置页新增永久可用的 Agent Skills 管理配置，可重复调整哪些 Agent 直接管理中央技能库。
 
