@@ -223,12 +223,30 @@ expect(
   'manage-skills 必须说明 held_back_removals 不保护同名文件编辑',
 );
 
-const setupCard = read('src/components/AgentControlSetupCard.tsx');
+const managementSkillModule = read('src/lib/agentSkillsManagement.ts');
+const managementSkillSource = managementSkillModule.match(
+  /export const MANAGEMENT_SKILL_SOURCE\s*=\s*["']([^"']+)["']/,
+)?.[1];
 expect(
   '管理 Skill 独立仓库来源',
-  setupCard.includes('Alex-Shen1121/skill-expert/tree/main/skills/manage-skills') &&
-    !setupCard.includes('xingkongliang/skills-manager'),
-  '首页设置入口必须从独立仓库安装管理 Skill',
+  managementSkillSource ===
+    'https://github.com/Alex-Shen1121/skill-expert/tree/main/skills/manage-skills',
+  '管理 Skill 权威模块必须指向独立仓库的固定子路径',
+);
+expect(
+  '管理 Skill 可信安装封装',
+  managementSkillModule.includes('api.installGit(MANAGEMENT_SKILL_SOURCE)') &&
+    !managementSkillModule.includes('xingkongliang/skills-manager'),
+  '管理 Skill 安装必须复用已验证的独立来源常量',
+);
+
+const setupCard = read('src/components/AgentControlSetupCard.tsx');
+expect(
+  '首页管理 Skill 入口接线',
+  setupCard.includes('ensureTrustedManagementSkill') &&
+    setupCard.includes('isTrustedManagementSkill') &&
+    setupCard.includes('from "../lib/agentSkillsManagement"'),
+  '首页设置入口必须通过权威模块校验并安装管理 Skill',
 );
 
 if (failures.length > 0) {
