@@ -79,24 +79,25 @@ export function SkillUpdateProgressDialog({
 }: SkillUpdateProgressDialogProps) {
   const { t } = useTranslation();
   const running = stage === "checking" || stage === "updating";
+  const closeLocked = running && !stopRequested;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const wasRunningRef = useRef(false);
+  const wasCloseLockedRef = useRef(false);
   const { containerRef, onKeyDown } = useModalFocusTrap<HTMLElement>({
     active: open,
-    onEscape: running ? undefined : onClose,
+    onEscape: closeLocked ? undefined : onClose,
     focusContainerInitially: true,
   });
 
   useEffect(() => {
     if (!open) {
-      wasRunningRef.current = false;
+      wasCloseLockedRef.current = false;
       return;
     }
-    if (wasRunningRef.current && !running) {
+    if (wasCloseLockedRef.current && !closeLocked) {
       closeButtonRef.current?.focus();
     }
-    wasRunningRef.current = running;
-  }, [open, running]);
+    wasCloseLockedRef.current = closeLocked;
+  }, [closeLocked, open]);
 
   if (!open) return null;
 
@@ -164,7 +165,7 @@ export function SkillUpdateProgressDialog({
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            disabled={running}
+            disabled={closeLocked}
             aria-label={t("mySkills.checkProgress.close")}
             className="rounded-md p-1 text-muted outline-none transition-colors hover:bg-surface-hover hover:text-secondary focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
           >

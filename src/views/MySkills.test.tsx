@@ -575,6 +575,27 @@ describe("MySkills 有可用更新筛选", () => {
 });
 
 describe("MySkills 检查全部进度", () => {
+  it("停止请求被接受后立即允许关闭窗口，即使在途任务尚未返回", async () => {
+    const user = userEvent.setup();
+    apiMocks.checkAllSkillUpdates.mockReturnValue(new Promise(() => {}));
+    appState.managedSkills = [
+      createSkill({ id: "alpha", name: "Alpha", sourceType: "git", updateStatus: "unknown" }),
+    ];
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "检查全部" }));
+    const dialog = screen.getByRole("dialog", { name: "Skill 更新" });
+    const close = within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" });
+    expect(close.disabled).toBe(true);
+
+    await user.click(within(dialog).getByRole("button", { name: "停止后续任务" }));
+
+    expect(within(dialog).getByText("正在停止，已开始的任务正在安全收尾…")).not.toBeNull();
+    expect(close.disabled).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Skill 更新" })).toBeNull();
+  });
+
   it("运行中只能显式停止后续任务，并在在途任务收尾后展示停止摘要", async () => {
     const user = userEvent.setup();
     const pendingCheck = deferred<{
@@ -608,9 +629,7 @@ describe("MySkills 检查全部进度", () => {
     await user.click(stop);
     expect(apiMocks.stopSkillUpdateBatch).toHaveBeenCalledWith(batchId);
     expect(within(dialog).getByText("正在停止，已开始的任务正在安全收尾…")).not.toBeNull();
-    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled).toBe(true);
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: "Skill 更新" })).not.toBeNull();
+    expect(within(dialog).getByRole<HTMLButtonElement>("button", { name: "关闭 Skill 更新窗口" }).disabled).toBe(false);
 
     pendingCheck.resolve({
       batch_id: batchId,

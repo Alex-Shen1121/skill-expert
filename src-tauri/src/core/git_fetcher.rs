@@ -7,12 +7,14 @@ use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStderr, Command, Stdio};
+use std::process::{ChildStderr, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const CLONE_TIMEOUT_SECS: u64 = 300;
+const REMOTE_QUERY_TIMEOUT_SECS: u64 = 90;
+const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Filename prefix shared by isolated install checkouts under `std::env::temp_dir()`.
 /// Used by both `materialize_cached_repo` (writer) and `validate_clone_temp_path` (reader).
@@ -31,6 +33,58 @@ fn git_command() -> Command {
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     cmd
+}
+
+/// 运行一个输出量受控的 Git 子进程，并在停止或超时时主动回收它。
+fn run_command_with_cancel(
+    command: &mut Command,
+    cancel: Option<&Arc<AtomicBool>>,
+    timeout: Duration,
+    operation: &str,
+) -> Result<Output> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("无法启动{operation}"))?;
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("{operation}已取消");
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("{operation}在 {} 秒后超时", timeout.as_secs());
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut pipe) = child.stdout.take() {
+                    pipe.read_to_end(&mut stdout)?;
+                }
+                if let Some(mut pipe) = child.stderr.take() {
+                    pipe.read_to_end(&mut stderr)?;
+                }
+                return Ok(Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) => std::thread::sleep(COMMAND_POLL_INTERVAL),
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err).with_context(|| format!("等待{operation}失败"));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +175,7 @@ struct RepoCacheLock {
 fn lock_repo_cache(
     cached_dir: &Path,
     on_progress: &Option<ProgressCallback>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<RepoCacheLock> {
     if let Some(parent) = cached_dir.parent() {
         std::fs::create_dir_all(parent)?;
@@ -135,13 +190,38 @@ fn lock_repo_cache(
         .open(&lock_path)
         .with_context(|| format!("Failed to open repo cache lock {}", lock_path.display()))?;
 
-    // Try non-blocking first; if contended, surface a progress message before blocking.
-    if file.try_lock_exclusive().is_err() {
-        if let Some(cb) = on_progress {
-            cb("Waiting for another install of this repository to finish…");
+    // 锁竞争时保持可取消，避免停止后仍无期等待另一个克隆。
+    match file.try_lock_exclusive() {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+            if let Some(cb) = on_progress {
+                cb("Waiting for another install of this repository to finish…");
+            }
+            let deadline = Instant::now() + Duration::from_secs(CLONE_TIMEOUT_SECS);
+            loop {
+                if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+                    anyhow::bail!("等待仓库缓存锁时已取消");
+                }
+                if Instant::now() > deadline {
+                    anyhow::bail!("等待仓库缓存锁超时");
+                }
+                match file.try_lock_exclusive() {
+                    Ok(()) => break,
+                    Err(wait_err) if wait_err.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(COMMAND_POLL_INTERVAL);
+                    }
+                    Err(wait_err) => {
+                        return Err(wait_err).with_context(|| {
+                            format!("Failed to lock repo cache {}", lock_path.display())
+                        });
+                    }
+                }
+            }
         }
-        file.lock_exclusive()
-            .with_context(|| format!("Failed to lock repo cache {}", lock_path.display()))?;
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("Failed to lock repo cache {}", lock_path.display()));
+        }
     }
     Ok(RepoCacheLock { _file: file })
 }
@@ -205,13 +285,41 @@ fn materialize_cached_repo(cached: &Path, cancel: Option<&Arc<AtomicBool>>) -> R
         }
     }
 
+    if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        anyhow::bail!("从仓库缓存创建检出时已取消");
+    }
+
     let source = cached
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Cached repo path is not valid UTF-8"))?;
-    match git2::build::RepoBuilder::new().clone(source, &temp_dir) {
+    let deadline = Instant::now() + Duration::from_secs(CLONE_TIMEOUT_SECS);
+    let cancel_for_transfer = cancel.cloned();
+    let cancel_for_sideband = cancel.cloned();
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.transfer_progress(move |_| {
+        !cancel_for_transfer
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::SeqCst))
+            && Instant::now() <= deadline
+    });
+    callbacks.sideband_progress(move |_| {
+        !cancel_for_sideband
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::SeqCst))
+            && Instant::now() <= deadline
+    });
+    let mut fetch_opts = git2::FetchOptions::new();
+    fetch_opts.remote_callbacks(callbacks);
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fetch_opts);
+    match builder.clone(source, &temp_dir) {
         Ok(_) => Ok(temp_dir),
         Err(err) => {
             let _ = std::fs::remove_dir_all(&temp_dir);
+            if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+                anyhow::bail!("从仓库缓存创建检出时已取消");
+            }
             let detail = system_git_stderr
                 .filter(|s| !s.trim().is_empty())
                 .map(|s| format!(" (system git: {})", s.trim()))
@@ -423,7 +531,7 @@ pub fn clone_repo_ref_with_progress(
     on_progress: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
     let cached_dir = repo_cache_dir(url);
-    let _cache_lock = lock_repo_cache(&cached_dir, &on_progress)?;
+    let _cache_lock = lock_repo_cache(&cached_dir, &on_progress, cancel)?;
 
     // Try cached repo first.
     if cached_dir.exists() {
@@ -518,6 +626,10 @@ pub fn clone_repo_ref_with_progress(
     }
 
     // Fallback to git2 with timeout and shallow clone.
+    if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+        let _ = std::fs::remove_dir_all(&cached_dir);
+        anyhow::bail!("克隆 Git 仓库时已取消");
+    }
     if let Some(ref cb) = on_progress {
         cb("Trying alternative clone method…");
     }
@@ -528,6 +640,7 @@ pub fn clone_repo_ref_with_progress(
     }
 
     let cancel_clone = cancel.cloned();
+    let cancel_sideband = cancel.cloned();
     let clone_deadline = Instant::now() + Duration::from_secs(CLONE_TIMEOUT_SECS);
     let mut callbacks = git2::RemoteCallbacks::new();
 
@@ -557,6 +670,12 @@ pub fn clone_repo_ref_with_progress(
         }
         true
     });
+    callbacks.sideband_progress(move |_| {
+        !cancel_sideband
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::SeqCst))
+            && Instant::now() <= clone_deadline
+    });
 
     let mut fetch_opts = git2::FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
@@ -572,6 +691,9 @@ pub fn clone_repo_ref_with_progress(
         Ok(_) => materialize_cached_repo(&cached_dir, cancel),
         Err(git2_err) => {
             let _ = std::fs::remove_dir_all(&cached_dir);
+            if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+                anyhow::bail!("克隆 Git 仓库时已取消");
+            }
             // Include system git stderr in the error if available.
             let detail = system_git_stderr
                 .filter(|s| !s.trim().is_empty())
@@ -605,31 +727,74 @@ pub fn resolve_remote_revision(
     branch: Option<&str>,
     proxy_url: Option<&str>,
 ) -> Result<String> {
-    if let Ok(revision) = resolve_remote_revision_with_git(url, branch, proxy_url) {
+    resolve_remote_revision_with_cancel(url, branch, proxy_url, None)
+}
+
+/// 解析远端修订，并让前台批次可以终止在途网络请求。
+pub fn resolve_remote_revision_with_cancel(
+    url: &str,
+    branch: Option<&str>,
+    proxy_url: Option<&str>,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<String> {
+    if let Ok(revision) = resolve_remote_revision_with_git(url, branch, proxy_url, cancel) {
         return Ok(revision);
     }
-
-    let repo = Repository::init_bare(
-        std::env::temp_dir().join(format!("skill-expert-remote-{}", uuid::Uuid::new_v4())),
-    )?;
-    let mut remote = repo.remote_anonymous(url)?;
-    let mut proxy_opts = git2::ProxyOptions::new();
-    if let Some(proxy) = proxy_url.filter(|s| !s.is_empty()) {
-        proxy_opts.url(proxy);
+    if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+        anyhow::bail!("Git 远端查询已取消");
     }
-    remote.connect_auth(Direction::Fetch, None, Some(proxy_opts))?;
-    let refs = remote.list()?;
 
-    if let Some(branch) = branch {
-        let target = format!("refs/heads/{branch}");
-        if let Some(head) = refs.iter().find(|head| head.name() == target) {
-            return Ok(head.oid().to_string());
+    let temp_dir =
+        std::env::temp_dir().join(format!("skill-expert-remote-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let repo = Repository::init_bare(&temp_dir)?;
+        let mut remote = repo.remote_anonymous(url)?;
+        let mut proxy_opts = git2::ProxyOptions::new();
+        if let Some(proxy) = proxy_url.filter(|s| !s.is_empty()) {
+            proxy_opts.url(proxy);
         }
-    } else if let Some(head) = refs.iter().find(|head| head.name() == "HEAD") {
-        return Ok(head.oid().to_string());
-    }
 
-    anyhow::bail!("Unable to resolve remote revision for {}", url)
+        let deadline = Instant::now() + Duration::from_secs(REMOTE_QUERY_TIMEOUT_SECS);
+        let cancel_for_transfer = cancel.cloned();
+        let cancel_for_sideband = cancel.cloned();
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.transfer_progress(move |_| {
+            !cancel_for_transfer
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::SeqCst))
+                && Instant::now() <= deadline
+        });
+        callbacks.sideband_progress(move |_| {
+            !cancel_for_sideband
+                .as_ref()
+                .is_some_and(|token| token.load(Ordering::SeqCst))
+                && Instant::now() <= deadline
+        });
+
+        if let Err(err) = remote.connect_auth(Direction::Fetch, Some(callbacks), Some(proxy_opts)) {
+            if cancel.is_some_and(|token| token.load(Ordering::SeqCst)) {
+                anyhow::bail!("Git 远端查询已取消");
+            }
+            if Instant::now() > deadline {
+                anyhow::bail!("Git 远端查询超时");
+            }
+            return Err(err.into());
+        }
+        let refs = remote.list()?;
+        let revision = if let Some(branch) = branch {
+            let target = format!("refs/heads/{branch}");
+            refs.iter()
+                .find(|head| head.name() == target)
+                .map(|head| head.oid().to_string())
+        } else {
+            refs.iter()
+                .find(|head| head.name() == "HEAD")
+                .map(|head| head.oid().to_string())
+        };
+        revision.ok_or_else(|| anyhow::anyhow!("无法解析远端修订：{url}"))
+    })();
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    result
 }
 
 pub fn checkout_revision(repo_dir: &Path, revision: &str) -> Result<()> {
@@ -909,6 +1074,7 @@ fn resolve_remote_revision_with_git(
     url: &str,
     branch: Option<&str>,
     proxy_url: Option<&str>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<String> {
     let target = branch
         .map(|branch| format!("refs/heads/{branch}"))
@@ -918,10 +1084,13 @@ fn resolve_remote_revision_with_git(
         cmd.arg("-c").arg(format!("http.proxy={proxy}"));
         cmd.arg("-c").arg(format!("https.proxy={proxy}"));
     }
-    let output = cmd
-        .args(["ls-remote", url, &target])
-        .output()
-        .with_context(|| format!("Failed to query remote {}", url))?;
+    cmd.args(["ls-remote", url, &target]);
+    let output = run_command_with_cancel(
+        &mut cmd,
+        cancel,
+        Duration::from_secs(REMOTE_QUERY_TIMEOUT_SECS),
+        "Git 远端查询",
+    )?;
 
     if !output.status.success() {
         anyhow::bail!("git ls-remote exited with {}", output.status);
@@ -943,6 +1112,68 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    const CANCELLABLE_PROCESS_FIXTURE_ENV: &str = "SKILL_EXPERT_CANCELLABLE_PROCESS_FIXTURE";
+
+    #[test]
+    fn cancellable_process_fixture() {
+        if std::env::var_os(CANCELLABLE_PROCESS_FIXTURE_ENV).is_some() {
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    }
+
+    #[test]
+    fn cancellable_git_process_stops_after_token_is_set() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_thread = cancel.clone();
+        let trigger = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            cancel_for_thread.store(true, Ordering::SeqCst);
+        });
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "core::git_fetcher::tests::cancellable_process_fixture",
+            ])
+            .env(CANCELLABLE_PROCESS_FIXTURE_ENV, "1");
+
+        let started = Instant::now();
+        let error = run_command_with_cancel(
+            &mut command,
+            Some(&cancel),
+            Duration::from_secs(5),
+            "Git remote query",
+        )
+        .unwrap_err();
+        trigger.join().unwrap();
+
+        assert!(error.to_string().contains("已取消"));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "停止令牌必须及时终止在途 Git 子进程"
+        );
+    }
+
+    #[test]
+    fn pre_cancelled_remote_revision_does_not_fall_back_to_git2() {
+        let cancel = Arc::new(AtomicBool::new(true));
+        let started = Instant::now();
+
+        let error = resolve_remote_revision_with_cancel(
+            "https://example.invalid/slow.git",
+            None,
+            None,
+            Some(&cancel),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("已取消"));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "已取消的远端查询不得进入 git2 回退路径"
+        );
+    }
 
     // ── parse_git_source ──
 
