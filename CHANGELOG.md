@@ -16,6 +16,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Developer & Governance
 - 批次停止令牌已贯通远端修订解析、仓库缓存锁、Git 克隆和批量更新路径，并为 Git 远端查询增加有界超时与子进程回收。
+- CLI 身份契约现在从权威模块校验管理 Skill 的独立仓库来源，并单独验证首页入口的可信安装接线，避免重构后误报。
 
 ## [1.0.14] - 2026-09-01
 
