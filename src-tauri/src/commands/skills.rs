@@ -1357,7 +1357,13 @@ pub async fn check_all_skill_updates(
                 &adapter,
                 force_check,
                 |key, skill_ids| {
-                    resolve_remote_content_for_check(&store, key, skill_ids, proxy_url.as_deref())
+                    resolve_remote_content_for_check(
+                        &store,
+                        key,
+                        skill_ids,
+                        proxy_url.as_deref(),
+                        None,
+                    )
                 },
             )?;
             Ok(CheckSkillUpdatesBatchResult {
@@ -1404,7 +1410,7 @@ fn run_foreground_skill_update_checks(
     batch_id: &str,
     force_check: bool,
     requested_skill_ids: Option<&[String]>,
-    stop: &AtomicBool,
+    stop: &Arc<AtomicBool>,
     proxy_url: Option<&str>,
     app: &tauri::AppHandle,
 ) -> Result<CheckSkillUpdatesBatchResult, AppError> {
@@ -1416,9 +1422,11 @@ fn run_foreground_skill_update_checks(
             batch_id,
             force_check,
             requested_skill_ids,
-            stop,
+            stop: stop.as_ref(),
         },
-        |key, skill_ids| resolve_remote_content_for_check(store, key, skill_ids, proxy_url),
+        |key, skill_ids| {
+            resolve_remote_content_for_check(store, key, skill_ids, proxy_url, Some(stop))
+        },
         |event| {
             if let Err(err) = app.emit(SKILL_UPDATE_BATCH_PROGRESS_EVENT, event) {
                 log::warn!("前台 Skill 检查：发送进度事件失败：{err}");
@@ -1434,10 +1442,15 @@ fn resolve_remote_content_for_check(
     key: &RemoteKey,
     skill_ids: &[String],
     proxy_url: Option<&str>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<ResolvedRemote, String> {
-    let remote_revision =
-        git_fetcher::resolve_remote_revision(&key.clone_url, key.branch.as_deref(), proxy_url)
-            .map_err(|err| err.to_string())?;
+    let remote_revision = git_fetcher::resolve_remote_revision_with_cancel(
+        &key.clone_url,
+        key.branch.as_deref(),
+        proxy_url,
+        cancel,
+    )
+    .map_err(|err| err.to_string())?;
 
     let mut requested = Vec::with_capacity(skill_ids.len());
     let mut needs_snapshot = false;
@@ -1483,7 +1496,7 @@ fn resolve_remote_content_for_check(
     }
 
     let temp_dir =
-        git_fetcher::clone_repo_ref(&key.clone_url, key.branch.as_deref(), None, proxy_url)
+        git_fetcher::clone_repo_ref(&key.clone_url, key.branch.as_deref(), cancel, proxy_url)
             .map_err(|err| err.to_string())?;
     let result = (|| {
         // 分支可能在 ls-remote 与 clone 之间移动。所有哈希都绑定到实际落盘的修订，
@@ -1544,8 +1557,13 @@ pub fn prefetch_skill_remote(
     }
     let source = git_source_from_skill(&skill).ok()?;
     let key = RemoteKey::new(source.clone_url, source.branch);
-    let result =
-        resolve_remote_content_for_check(store, &key, std::slice::from_ref(&skill.id), proxy_url);
+    let result = resolve_remote_content_for_check(
+        store,
+        &key,
+        std::slice::from_ref(&skill.id),
+        proxy_url,
+        None,
+    );
     Some(skill_update_batch::prefetched_remote(key, result))
 }
 
@@ -1603,10 +1621,11 @@ fn execute_batch_update(
     store: &SkillStore,
     skill: &SkillRecord,
     proxy_url: Option<&str>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<BatchUpdateExecution, String> {
     match skill.source_type.as_str() {
         "git" | "skillssh" => {
-            let outcome = update_git_skill_internal(store, &skill.id, proxy_url, None, None);
+            let outcome = update_git_skill_internal(store, &skill.id, proxy_url, cancel, None);
             log_update_outcome(store, &skill.id, "git", outcome.as_ref());
             match outcome {
                 Ok(result) if !result.pending_removals.is_empty() => {
@@ -1659,7 +1678,7 @@ pub async fn batch_update_skills(
                 &batch_id,
                 skill_ids,
                 &stop,
-                |skill| execute_batch_update(&store, skill, proxy_url.as_deref()),
+                |skill| execute_batch_update(&store, skill, proxy_url.as_deref(), Some(&stop)),
                 |event| {
                     if let Err(err) = app.emit(SKILL_UPDATE_BATCH_PROGRESS_EVENT, event) {
                         log::warn!("全部更新：发送进度事件失败：{err}");
@@ -1681,7 +1700,7 @@ pub async fn batch_update_skills(
                     continue;
                 }
             };
-            match execute_batch_update(&store, &skill, proxy_url.as_deref()) {
+            match execute_batch_update(&store, &skill, proxy_url.as_deref(), None) {
                 Ok(BatchUpdateExecution::Updated) => refreshed += 1,
                 Ok(BatchUpdateExecution::Unchanged) => unchanged += 1,
                 Ok(BatchUpdateExecution::NeedsConfirmation { .. }) => {
@@ -1977,10 +1996,11 @@ pub fn update_git_skill_internal(
 
     let git_source = git_source_from_skill(&skill)?;
     git_fetcher::validate_git_url(&git_source.clone_url).map_err(AppError::git)?;
-    let remote_revision = git_fetcher::resolve_remote_revision(
+    let remote_revision = git_fetcher::resolve_remote_revision_with_cancel(
         &git_source.clone_url,
         git_source.branch.as_deref(),
         proxy_url,
+        cancel,
     )
     .map_err(|e| {
         let message = e.to_string();
