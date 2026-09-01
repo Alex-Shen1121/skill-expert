@@ -237,14 +237,25 @@ test('fails without partial writes when the target tag exists only on origin', (
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 
-test('fails without partial writes when the target would roll back the tagged release line', (t) => {
+test('同一版本线存在更高标签时拒绝回退且不修改仓库', (t) => {
   const root = fixture(t);
-  git(root, 'tag', 'v1.3.0');
+  git(root, 'tag', 'v1.2.5');
 
   const result = runPrepare(root, 'patch');
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /目标版本 1\.2\.4 必须高于已有标签 v1\.3\.0/);
+  assert.match(result.stderr, /目标版本 1\.2\.4 必须高于同一版本线已有标签 v1\.2\.5/);
+  assert.equal(git(root, 'status', '--porcelain'), '');
+});
+
+test('忽略独立产品版本线之外的更高稳定标签', (t) => {
+  const root = fixture(t);
+  git(root, 'tag', 'v1.36.0');
+
+  const result = runPrepare(root, 'patch', '--dry-run');
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /\[dry-run\] 1\.2\.3 -> 1\.2\.4/);
   assert.equal(git(root, 'status', '--porcelain'), '');
 });
 

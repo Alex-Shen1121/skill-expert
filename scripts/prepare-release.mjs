@@ -193,17 +193,24 @@ function main() {
     }
   }
   const stableTags = [...tagNames]
-    .map((tag) => ({ tag, version: tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1] }))
-    .filter(({ version }) => version);
+    .map((tag) => {
+      const version = tag.match(/^v(\d+\.\d+\.\d+)$/)?.[1];
+      return { tag, version, parsed: version ? parseProductVersion(version) : null };
+    })
+    .filter(({ parsed }) => parsed);
   if (stableTags.some(({ tag }) => tag === tagName)) {
     throw new Error(`标签 ${tagName} 已存在`);
   }
-  const latestTag = stableTags.sort(
+  const targetVersion = parseProductVersion(nextVersion);
+  const releaseLineTags = stableTags.filter(
+    ({ parsed }) => parsed.major === targetVersion.major && parsed.minor === targetVersion.minor,
+  );
+  const latestTag = releaseLineTags.sort(
     (left, right) => compareSemver(right.version, left.version),
   )[0];
   if (latestTag && compareSemver(nextVersion, latestTag.version) <= 0) {
     throw new Error(
-      `目标版本 ${nextVersion} 必须高于已有标签 ${latestTag.tag}`,
+      `目标版本 ${nextVersion} 必须高于同一版本线已有标签 ${latestTag.tag}`,
     );
   }
 
