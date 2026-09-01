@@ -9,13 +9,28 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.14] - 2026-09-01
+
+### Release Overview
+- 修复 Agent 管理 Skills 中关闭态开关滑块错误显示在右侧的问题。
 - 修复同一 Git 仓库包含多个 Skill 时，仓库中无关目录变化导致所有 Skill 错误显示可用更新的问题。
 
 ### User-facing
+- Agent 管理 Skills 的关闭态滑块现在稳定显示在左侧，开启态显示在右侧。
 - “检查更新”和差异页现在使用同一份 Skill 有效内容判断；只有文件内容或可执行权限真正不同的 Skill 才显示“有可用更新”。
 
 ### Developer & Governance
+- 本地 Tauri、CLI、质量检查、测试包和正式发布统一固定使用 Rust 1.98.0 工具链，并自动发现用户默认 rustup 目录。
 - 更新检查按仓库与分支复用一次远端内容快照，持久化已对齐来源内容哈希，并继续隔离来源失败、停止后的未开始项目及中央技能库本地修改。
+- 正式版本准备只比较目标主次版本线内的稳定标签，保留目标标签防复用与同版本线防回退检查，避免上游独立版本标签误阻断发布。
 
 ## [1.0.13] - 2026-08-31
 
