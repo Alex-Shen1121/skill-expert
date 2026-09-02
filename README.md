@@ -1,233 +1,154 @@
 <p align="center">
-  <img src="assets/icon.png" width="80" />
-</p>
-
-<h1 align="center">Agent 技能管家</h1>
-
-<p align="center">
-  One app to manage AI agent skills across all your coding tools.
+  <img src="./assets/readme/hero.png" width="100%" alt="Agent 技能管家：一个中央技能库连接多个 AI Agent">
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/Alex-Shen1121/skill-expert">GitHub</a></strong>
+  <strong>One desktop control plane for every Agent Skill.</strong><br>
+  Import once, organize clearly, deploy by Agent or project, and keep every change recoverable.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Alex-Shen1121/skill-expert/releases"><strong>Download</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Alex-Shen1121/skill-expert/releases">Releases</a>
+  <a href="#start-in-three-steps">Quick start</a>
+  &nbsp;·&nbsp;
+  <a href="#cli">CLI</a>
   &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">中文说明</a>
 </p>
 
-## Features
-
-- **Unified skill library** — Install skills from Git repos, local folders, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace. Everything goes into one central repo, which defaults to `~/.skill-expert` and can be customized in **Settings**.
-- **Marketplace** — Browse popular skills from the marketplace and find them with keyword search.
-- **Presets** — Group skills into named presets. In any workspace, click a preset pill to instantly activate or deactivate all its skills for the current agent scope. The sidebar lists all presets for quick access.
-- **Global Workspace** — Each agent gets its own page listing every skill in its global folder — including ones installed outside Agent 技能管家 — so the view always reflects what the agent actually sees. Add or remove skills per agent, or use the All Agents overview to manage every installed agent at once.
-- **Project Workspaces** — View and manage project-local skill folders for supported agents, compare them with your central library, and sync changes in either direction. Supports nested skill directories and per-agent assignment when exporting.
-- **Linked Workspaces** — Point to any directory as a skills root — useful for skills that live outside the default agent paths. Managed as a standalone workspace without participating in global preset sync.
-- **Multi-tool sync** — Sync skills to any supported tool via symlink or copy with a single click. Every skill card shows an agent icon badge per enabled agent — click a badge to install or remove that skill for that agent right from the card, with the badge reflecting live sync state.
-- **Add from Library sheet** — In any workspace, click **+ Add Skills** to open a unified picker: search your central library, toggle target agents with always-visible chips (with select-all/clear), and batch-add multiple skills in one click.
-- **Batch operations** — Multi-select skills for bulk enable/disable, export, or delete. Project Workspaces also support bulk enable/disable for project-local skills.
-- **Skill tagging and filters** — Tag skills, use tags to group similar skills, and filter by source or tag — including an **Untagged** pill to quickly find skills missing labels.
-- **Update tracking** — Check for upstream updates on Git-based skills; re-import local ones.
-- **Skill preview and source inspection** — Read `SKILL.md` / `README.md`, inspect source metadata, and compare local content with the upstream version inside the app.
-- **Custom tools** — Add your own agents/tools with custom skills directories, or override the default path for any built-in tool.
-- **Backup & multi-device sync** — Connect a private GitHub repository with one sign-in (or any Git remote), and the app backs your library up automatically and keeps all connected devices in sync. Merges are skill-aware — a rename on one machine combines cleanly with an edit on another — and true conflicts never block: your local version stays put until you choose keep mine / use remote / keep both. Snapshot versions are restorable at any time.
-- **Activity log & Export Logs** — Install / remove / update / sync operations are recorded locally. Use **Settings → Export Logs** to bundle recent logs and activity history into a single zip for easier issue reports.
-- **Flexible app settings** — Configure repo path, sync mode, theme, text size, language, tray behavior, proxy, Git remote, update checks, and the order agents appear throughout the app — all in one place.
-- **In-app updates** — The app tells you when a new version is out and installs it for you on macOS and Windows. Nothing downloads or installs on its own: checking only notifies, and installing and restarting each take a click.
-
-## Core Concepts
-
 <p align="center">
-  <img src="assets/diagram-concept-map.png" width="640" alt="Concept map: Library, Preset, Global Workspace, Project Workspace, Agent" />
+  <a href="https://github.com/Alex-Shen1121/skill-expert/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alex-Shen1121/skill-expert?display_name=tag&sort=semver&style=flat-square&color=10b981"></a>
+  <img alt="Platforms: macOS, Windows, Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-18181b?style=flat-square">
+  <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square"></a>
 </p>
 
-- **Presets are reusable skill groups** — A preset is a named collection of skills. Activate a preset in any workspace to add all its skills to the selected agents; deactivate to remove them. Applying a preset is a one-time copy — not a live sync.
-- **Global Workspace manages per-agent global skills** — Each installed agent has its own global skills folder (e.g. `~/.claude/skills/` for Claude Code). Each agent page lists everything in that folder — even skills installed without Agent 技能管家 — so you can add, remove, or adopt them; the All Agents overview manages every agent at once.
-- **Project Workspaces are project-local skill sets** — A project workspace manages the skills that live inside a specific project (e.g. `<project>/.claude/skills/`). Skills added here only apply to that project.
-- **Tags are for grouping and filtering** — Use tags to label similar skills, then filter by tag to find the subset you want quickly.
-- **Batch control works everywhere** — Multi-select skills in any workspace for bulk operations.
+## Why Agent 技能管家
 
-## Quick Start
+Agent Skills usually end up scattered across global folders, project folders, Git repositories, archives, and different coding tools. Agent 技能管家 gives them one visible operating model:
 
-1. Install skills from local folders, Git repositories, archives, or the marketplace.
-2. Open **Global Workspace** from the sidebar and pick an agent (e.g. Claude Code).
-3. Click a **Preset** pill to activate its skills for that agent, or use **+ Add Skills** to pick from your library and toggle target agents inline. Active presets show a ✓; partial installs show a count badge.
-4. To manage project-local skills, open a **Project Workspace** and use the same preset pills or the **+ Add Skills** picker with its multi-agent target selector.
-5. Configure agent paths, custom tools, theme, language, proxy, and Git preferences in **Settings**.
-6. If you want history or multi-machine sync, open **Backup** in the sidebar and click **Sign in with GitHub** — backup and cross-device sync run automatically from then on.
+- **One library, many sources** — install from Git, a local folder, `.zip` / `.skill` archives, or the [skills.sh](https://skills.sh) marketplace.
+- **Deploy by real scope** — manage user-level Agent folders, project-local folders, or any linked skills root without mixing their boundaries.
+- **Know what will change** — inspect `SKILL.md`, compare local and upstream content, batch-check updates, and stop before a removal needs human confirmation.
+- **Recover from mistakes** — keep skill-aware Git history, restorable snapshots, and non-blocking conflict choices while secrets stay local.
 
-## Backup & Multi-Device Sync
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="Skills flow from import sources into the central library, through presets and workspaces, to individual Agents, with Git backup underneath">
+</p>
 
-The **Backup** page (sidebar) keeps your skill library versioned in a Git repository. One device gets versioned backup with restorable snapshots; several devices connected to the same repository stay in sync with each other automatically. The remote stays a plain Git repository — you can `git clone` it anywhere, no lock-in.
+The concepts stay deliberately separate:
 
-### Connect
+- **Library** is the central source of managed Skills.
+- **Preset** is a reusable group applied as a one-time write, not a hidden live binding.
+- **Global Workspace** reflects what an Agent actually sees in its user-level skills folder, including Skills installed outside this app.
+- **Project Workspace** manages project-local Agent folders and syncs them with the library in either direction.
+- **Linked Workspace** manages an arbitrary skills root as a standalone workspace.
 
-- **Sign in with GitHub** (recommended): an 8-digit device-flow sign-in creates a private `skill-expert-backup` repository for you. The token is stored in the OS keychain — never in files or the repo config.
-- **Advanced**: paste any Git URL (HTTPS + PAT, SSH, self-hosted) under **Settings → Git Sync Configuration**.
-- On a new machine with an empty library, the first launch asks: **start fresh, or restore from a backup?**
+## Start in three steps
 
-### How syncing works
+1. Download the package for your platform from [Releases](https://github.com/Alex-Shen1121/skill-expert/releases).
+2. Add a Skill from Git, a local folder, an archive, or the marketplace.
+3. Click an Agent badge on the Skill card, or open **Global Workspace** / **Project Workspace** to deploy it at the right scope.
 
-- **Automatic**: local changes are committed and pushed in the background a couple of minutes after you stop editing; updates pushed by your other devices are merged in and pushed back automatically. **Back Up Now** is always available for an immediate run, and every backup in the history shows which device made it.
-- **Skill-aware merging**: changes are merged per skill, not per text line — renaming a skill on one machine combines cleanly with editing its content on another.
-- **Conflicts never block or overwrite**: if the same skill was edited on two devices at once, everything else syncs normally while that skill keeps your local version and appears under **Needs attention** (also badged on its card in the Library). Pick **keep mine / use remote / keep both** — a safety snapshot is taken before any choice is applied, so every decision is undoable.
-- **Snapshots & restore**: manual backups create snapshot versions; open the Backup page history to restore any of them. A restore first saves the current state as its own snapshot.
+Optional: open **Backup**, sign in with GitHub once, and let versioned backup and multi-device sync run automatically.
 
-### What's included
+## What you can manage
 
-Skills, tags, presets, and per-agent skill toggles are backed up. Secrets (API keys, tokens, proxy settings) and machine-specific wiring never leave the machine. Skills over 100 MB stay local and are excluded from backup automatically (labeled on the Backup page). The SQLite database is not in Git — it stores metadata that is rebuilt from the skill files.
+- **Skills** — search, preview, tag, filter, multi-select, export, delete, inspect sources, and compare upstream changes.
+- **Presets** — build named Skill groups and activate them for selected Agents without losing per-Agent visibility.
+- **Agents** — use 52 built-in integrations, reorder the Agents you use, change their paths, or add custom tools.
+- **Workspaces** — control global, project, and linked Skills from the same interaction model.
+- **Updates** — check and update in the foreground with visible batch progress, retry, stop, and configurable concurrency.
+- **Operations** — choose symlink or copy mode, configure a proxy and theme, inspect activity history, and export logs for issue reports.
+- **App updates** — receive update notifications on macOS and Windows; download, install, and restart only when you choose.
 
-### Disconnecting
+## Supported Agents
 
-The Backup page offers three levels: **disconnect this machine** (other devices and remote data untouched), **revoke the GitHub authorization**, or **delete the remote backup** entirely (routed through GitHub's own type-the-name confirmation).
-
-## Supported Tools
-
-52 agents are supported out of the box, including:
+52 integrations are built in, including:
 
 Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 
-**Settings** lists them all, leading with the ones detected on your machine. You can also add custom tools there and manage their skills the same way.
+Detected Agents appear first in **Settings**. Custom tools use the same library, workspace, and deployment controls.
 
-## In-App Help
+## Backup without lock-in
 
-The **Help** button in **Settings** mirrors the current product flow: recommended workflows, presets, skill installation, the Library (with the Untagged filter and per-card delete), the Global Workspace and the **+ Add Skills** sheet, Project Workspaces with the multi-agent target picker, backup & multi-device sync, and environment-level settings (including Export Logs for issue reports). It is intended as the in-app version of this quick-start guide.
+The **Backup** page stores the library in a normal Git repository. The guided GitHub setup creates a private `skill-expert-backup` repository, or you can connect any Git remote.
 
-## Tech Stack
+- Local changes are committed after you stop editing; updates from other devices are merged automatically.
+- Merging is Skill-aware: a rename on one device can combine cleanly with an edit on another.
+- True conflicts never overwrite the local version. Choose **keep mine**, **use remote**, or **keep both** after a safety snapshot is created.
+- Skills, tags, Presets, and Agent toggles are backed up. Tokens, proxy settings, machine-specific wiring, and Skills over 100 MB stay local.
+- The remote remains plain Git, so it can be cloned or inspected without Agent 技能管家.
 
-| Layer | Tech |
-|-------|------|
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS |
-| Desktop | Tauri 2 |
-| Backend | Rust |
-| Storage | SQLite (`rusqlite`) |
-| i18n | react-i18next |
+## CLI
 
-## Getting Started
+The desktop app and `skill-expert-cli` use the same Rust core, SQLite database, central library, and deployment engine.
+
+```bash
+# Inspect the library
+npm run cli -- repo status
+npm run cli -- skills list
+
+# Install, then deploy to selected Agents
+npm run cli -- skills install vercel-labs/agent-skills@react-best-practices
+npm run cli -- skills deploy <ref> --agent claude_code --agent codex
+
+# Check upstream sources without changing deployed files
+npm run cli -- skills check --all
+```
+
+<details>
+<summary><strong>More CLI workflows</strong></summary>
+
+```bash
+# Preview a destructive or structural operation first
+npm run cli -- skills remove <ref> --dry-run
+npm run cli -- skills set-source <ref> --git-url you/skills --subpath my-skill --dry-run
+
+# Organize and deploy a Preset
+npm run cli -- presets create Frontend --description "Frontend workflow"
+npm run cli -- presets add-skill Frontend <ref>
+npm run cli -- presets deploy Frontend --agent codex
+
+# Inspect actual per-Agent deployment state
+npm run cli -- skills status <ref>
+npm run cli -- skills undeploy <ref> --agent codex --dry-run
+
+# Operate on an external skills checkout without polluting it
+npm run -s cli -- --skills-root /path/to/my-skills --json skills list
+
+# Install the binary on PATH
+npm run cli:install
+```
+
+An update replaces the Skill folder. If upstream removed paths that still exist locally, the CLI applies nothing and reports `held_back_removals`; a person must confirm that loss in the desktop app.
+
+The CLI and desktop app share the same repository lock. If the app was suspended while a command ran, trigger one manual refresh.
+
+</details>
+
+## Development
 
 ### Prerequisites
 
 - Node.js 18+
 - Rust toolchain
-- [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
-
-### Development
+- [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-### CLI
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS |
+| Desktop | Tauri 2 |
+| Core | Rust |
+| Storage | SQLite (`rusqlite`) |
+| Localization | `react-i18next` |
 
-The repository includes an agent-friendly CLI built on the same Rust shared core used by the desktop app. Both the CLI and the desktop app go through the same SQLite database, central library, and sync engine.
-
-```bash
-# Repository / library overview
-npm run cli -- repo status
-npm run cli -- skills list
-npm run cli -- skills show db
-
-# Install skills (default: enter library only — does NOT sync to agents)
-npm run cli -- skills install ./my-skill                       # local path
-npm run cli -- skills install https://github.com/foo/bar.git   # git URL
-npm run cli -- skills install vercel-labs/agent-skills@react-best-practices  # skills.sh
-npm run cli -- skills deploy <ref> --agent claude_code --agent codex  # deploy to both agents
-
-# Update / check from upstream (git skills re-clone, local skills re-import source).
-# An update replaces the skill's folder, so if the new version lacks paths that
-# exist now, the CLI applies nothing and lists them as `held_back_removals`
-# instead — confirming the loss needs a person, so only the app can proceed.
-npm run cli -- skills update --all
-npm run cli -- skills check --all
-
-# Re-point an installed skill at a git source, keeping its id, tags, presets
-# and deployments (e.g. a local skill you have since published)
-npm run cli -- skills set-source <ref> --git-url https://github.com/you/skills/tree/main/my-skill --dry-run
-npm run cli -- skills set-source <ref> --git-url you/skills --subpath my-skill --force
-
-# Search the skills.sh marketplace (no API key needed)
-npm run cli -- skills search react --limit 5
-
-# Remove (--yes required; --dry-run available)
-npm run cli -- skills remove <ref> --dry-run
-npm run cli -- skills remove <ref> --yes
-
-# Organize preset membership (does not change agent files)
-npm run cli -- presets add-skill <preset> <ref>
-npm run cli -- presets remove-skill <preset> <ref>
-
-# Inspect or change actual per-agent deployments
-npm run cli -- skills status <ref>
-npm run cli -- skills undeploy <ref> --agent codex --dry-run
-
-# Legacy exclusive active-preset sync
-npm run cli -- skills sync --dry-run
-npm run cli -- skills sync --tool claude_code
-
-# Adopt skills that already exist in an agent directory (e.g. ~/.claude/skills/)
-npm run cli -- skills adopt ~/.claude/skills --dry-run
-npm run cli -- skills adopt ~/.claude/skills
-
-# Tag
-npm run cli -- skills tag add <ref> web frontend
-npm run cli -- skills tag set <ref> web frontend
-npm run cli -- skills tag rename frontend web
-npm run cli -- skills tag delete obsolete --dry-run
-npm run cli -- skills tag list
-
-# Presets (CRUD and membership are organization-only; deploy changes agent files)
-npm run cli -- presets list
-npm run cli -- presets create "Web Dev" --description "Frontend work"
-npm run cli -- presets update "Web Dev" --name Frontend
-npm run cli -- presets deploy Frontend --agent codex
-npm run cli -- presets undeploy Frontend --agent claude_code
-npm run cli -- presets status Frontend
-npm run cli -- presets add-skill <preset> <skill>
-npm run cli -- presets remove-skill <preset> <skill>
-
-# Export one skill to an arbitrary directory (one-shot copy, not managed)
-npm run cli -- skills export db --dest ~/.claude/skills/db
-
-# Git-backed skills repo
-npm run cli -- git status
-npm run cli -- git pull
-npm run cli -- git commit -m "chore: update skills"
-```
-
-Available command groups:
-- `repo` — inspect or change the configured base directory
-- `agents` (`tools` alias) — list agents and globally enable or disable them
-- `skills` — manage the central library and real per-agent deployments (`deploy / undeploy / status`)
-- `presets` — create, update, delete, organize, deploy, undeploy, and inspect presets
-- `git` — operate on the git-backed `skills/` repository (`clone`, `pull`, `push`, `commit`, `versions`, `restore`)
-
-Extra flags:
-- `--skills-root <path>` — operate on a cloned/exported skills repo directly instead of the local app default. The manager's state (DB, presets, cache, logs) lives in `~/.skill-expert/external/<name>-<hash>/`, namespaced by the canonical path of the skills root, so the external checkout itself stays clean.
-- `--json` — machine-readable output for scripts/agents
-
-```bash
-npm run -s cli -- --skills-root /path/to/my-skills --json skills list
-```
-
-#### Install the binary on PATH
-
-Agents and scripts that invoke `skill-expert-cli` directly (without `npm run`) need the binary on PATH. Install it with:
-
-```bash
-npm run cli:install
-# equivalent to:
-# cargo install --path src-tauri --bin skill-expert-cli --locked --force
-```
-
-This drops the binary at `~/.cargo/bin/skill-expert-cli`. Re-run after pulling updates to refresh it.
-
-#### Concurrent use with the desktop app
-
-The CLI and desktop app share the same SQLite database and repository lock. The app's filesystem watcher normally refreshes after CLI metadata or deployment changes. If the app was suspended while a command ran, trigger one manual refresh.
-
-### Build
+Build commands:
 
 ```bash
 npm run tauri:build
@@ -240,19 +161,10 @@ Download current packages from [Agent 技能管家 Releases](https://github.com/
 
 ### Opening the macOS app safely
 
-Agent 技能管家 macOS downloads are ad-hoc signed but not notarized, so macOS may block the
-first launch even though the package's structural signature has been verified. Try opening
-the app once, then open **System Settings → Privacy & Security → Open Anyway** and confirm
-that you want to open Agent 技能管家. Keep Gatekeeper enabled; these steps approve only this
-app. On-demand test-package details are in the
-[test package guide](docs/test-packages.md).
+macOS packages are ad-hoc signed but not notarized. If Gatekeeper blocks the first launch, try opening the app once, then go to **System Settings → Privacy & Security → Open Anyway** and confirm. Keep Gatekeeper enabled; this approves only Agent 技能管家. See the [test package guide](docs/test-packages.md) for on-demand test builds.
 
-Report reproducible problems with the in-app **Settings → Report Issue** action or in the
-[Agent 技能管家 issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues).
-
-Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the issue,
-discussion, and pull-request workflow.
+Report reproducible problems with **Settings → Report Issue** or the [Issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues). Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a Pull Request.
 
 ## License
 
-MIT
+[MIT](LICENSE)

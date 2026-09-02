@@ -1,187 +1,154 @@
 <p align="center">
-  <img src="assets/icon.png" width="80" />
-</p>
-
-<h1 align="center">Agent 技能管家</h1>
-
-<p align="center">
-  一个应用，统一管理所有 AI 编码工具的 Skills。
+  <img src="./assets/readme/hero.png" width="100%" alt="Agent 技能管家：一个中央技能库连接多个 AI Agent">
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/Alex-Shen1121/skill-expert">GitHub</a></strong>
+  <strong>统一管理所有 Agent Skills 的桌面控制台。</strong><br>
+  一次导入，清晰组织；按 Agent 或项目精准部署，并让每次变更都可恢复。
+</p>
+
+<p align="center">
+  <a href="https://github.com/Alex-Shen1121/skill-expert/releases"><strong>下载</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/Alex-Shen1121/skill-expert/releases">下载</a>
+  <a href="#三步上手">三步上手</a>
+  &nbsp;·&nbsp;
+  <a href="#cli">CLI</a>
   &nbsp;·&nbsp;
   <a href="./README.md">English</a>
 </p>
 
-## 功能
+<p align="center">
+  <a href="https://github.com/Alex-Shen1121/skill-expert/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/Alex-Shen1121/skill-expert?display_name=tag&sort=semver&style=flat-square&color=10b981"></a>
+  <img alt="支持 macOS、Windows、Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-18181b?style=flat-square">
+  <a href="./LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square"></a>
+</p>
 
-- **统一技能库** — 从 Git 仓库、本地目录、`.zip` / `.skill` 文件或 [skills.sh](https://skills.sh) 市场安装技能，统一存放在 `~/.skill-expert`。
-- **Preset（预设）** — 将技能分组为命名 Preset。在任意工作区点击 Preset 标签，即可一键为当前 Agent 范围激活或停用其全部技能，激活的 Preset 显示 ✓，部分安装显示数量。
-- **全局工作区** — 每个 Agent 都有自己的页面，列出其全局目录里的所有 Skills（包括不是通过 Agent 技能管家安装的），始终反映 Agent 实际看到的内容。可按 Agent 添加或移除 Skills，也可通过「全部 Agents」总览跨所有已安装 Agent 统一管理。
-- **项目工作区** — 查看并管理任意项目的本地 Skills 目录，支持与中央库双向同步。支持嵌套 Skill 目录和导出时按 Agent 分配。
-- **关联工作区** — 将任意目录指定为 Skills 根目录，适合管理不在默认 Agent 路径下的 Skills。作为独立工作区管理，不参与全局 Preset 同步。
-- **多工具同步** — 一键将技能同步到任意支持的工具，支持软链接和复制两种模式。每张 Skill 卡片会为每个已启用 Agent 显示一个图标角标，点击角标即可直接在卡片上为该 Agent 安装或移除这个 Skill，角标会实时反映同步状态。
-- **「添加 Skills」弹层** — 任意工作区点击 **+ 添加 Skills** 即可打开统一的挑选弹层：搜索中央库，用始终可见的 Agent 标签切换目标（含一键全选/清空），一次提交批量添加多个 Skills。
-- **批量操作** — 多选技能后批量启用/禁用、导出或删除。项目工作区中的项目 Skills 也支持批量启用/禁用。
-- **技能标签** — 为技能添加标签，用于归类同类技能，并按来源或标签筛选；新增的 **未标签** 过滤项可快速定位漏打标签的 Skills。
-- **更新检查** — 为 Git 类技能检查远端更新；本地技能支持重新导入。
-- **文档预览** — 直接在应用内查看 `SKILL.md` / `README.md`。
-- **自定义工具** — 添加自定义 Agent/工具并指定 Skills 目录，也可覆盖内置工具的默认路径。
-- **备份与多设备同步** — 一次 GitHub 登录（或任意 Git 远端）接入私有备份仓库，之后自动备份、多台设备自动保持一致。合并以技能为单位——一台改名、另一台改内容会自动组合；真冲突不阻塞不覆盖，本机版本保留待你三选一处理。快照版本随时可恢复。
-- **活动日志 & 导出日志** — 应用会记录本地的安装/移除/更新/同步操作。在 **设置 → 导出日志** 可把最近日志和活动记录打包成压缩文件，方便提交 Issue 时附上。
-- **灵活的应用设置** — 在一个页面里配置仓库路径、同步模式、主题、字号、语言、托盘行为、代理、Git 远程、更新检查，以及 Agent 在全应用中的显示顺序。
-- **应用内更新** — 有新版本时应用会主动提醒，并在 macOS 和 Windows 上直接完成安装。不会自行下载或安装：检查只负责告知，安装和重启各需一次点击。
+## 为什么需要 Agent 技能管家
 
-## 核心概念
+Agent Skills 往往散落在全局目录、项目目录、Git 仓库、压缩包和不同编码工具中。Agent 技能管家把它们收束为一套看得见的管理模型：
 
-- **Preset 是可复用的 Skills 分组** — Preset 是一组命名的 Skills 集合。在任意工作区激活 Preset，即可将其所有 Skills 添加到选定 Agent；停用则反向移除。应用 Preset 是一次性复制，不是实时同步。
-- **全局工作区管理每个 Agent 的全局 Skills** — 每个已安装 Agent 都有自己的全局 Skills 目录（如 Claude Code 对应 `~/.claude/skills/`）。每个 Agent 页面会列出该目录里的所有内容（包括不是通过 Agent 技能管家安装的 Skills），可以添加、移除或纳入管理；「全部 Agents」总览则跨 Agent 统一管理。
-- **项目工作区是项目专属 Skills 集合** — 项目工作区管理某个项目里的本地 Skills（如 `<project>/.claude/skills/`），只对该项目生效。
-- **标签用于归类和筛选** — 给同类 Skills 打上相同标签后，可以按标签快速筛选出需要的一组 Skills。
-- **批量操作随处可用** — 在任意工作区多选 Skills，进行批量操作。
+- **一个技能库，多种来源** —— 从 Git、本地目录、`.zip` / `.skill` 归档或 [skills.sh](https://skills.sh) 市场安装。
+- **按真实范围部署** —— 分开管理 Agent 的用户级目录、项目级目录和任意关联目录，不混淆边界。
+- **变更前先看清楚** —— 预览 `SKILL.md`、比较本地与上游内容、批量检查更新；涉及删除时停下来等待人工确认。
+- **出错也能恢复** —— 保留按 Skill 合并的 Git 历史、可恢复快照和不阻塞的冲突选择，机密信息始终留在本机。
 
-## 快速上手
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="Skills 从多种来源进入中央技能库，通过预设和工作区组织后部署给不同 Agent，并由 Git 备份保护">
+</p>
 
-1. 从本地目录、Git 仓库、压缩包或市场安装 Skills。
-2. 从侧边栏进入 **全局工作区**，选择一个 Agent（如 Claude Code）。
-3. 点击 **Preset** 标签为该 Agent 一键激活对应 Skills，或点 **+ 添加 Skills** 从技能库挑选并即时切换目标 Agent。激活的 Preset 显示 ✓，部分安装显示计数角标。
-4. 如需管理项目本地 Skills，打开 **项目工作区**，同样使用 Preset 标签，或通过 **+ 添加 Skills** 弹层用多 Agent 目标选择器挑选。
-5. 在 **设置** 中配置 Agent 路径、自定义工具、主题、语言、代理和 Git 偏好。
-6. 如果需要历史版本或多机同步，从侧边栏打开 **备份** 页，点击 **使用 GitHub 登录**——之后备份和跨设备同步都会自动进行。
+几个概念刻意保持独立：
 
-## 备份与多设备同步
+- **技能库** 是受管 Skills 的中央来源。
+- **Preset（预设）** 是可复用的技能分组；应用时执行一次写入，不是隐藏的实时绑定。
+- **全局工作区** 反映 Agent 用户级技能目录里的真实内容，包括未通过本应用安装的 Skills。
+- **项目工作区** 管理项目级 Agent 目录，并支持与技能库双向同步。
+- **关联工作区** 把任意 Skills 根目录作为独立工作区管理。
 
-侧边栏的 **备份** 页把技能库托管在一个 Git 仓库里：单台设备是带版本历史、可恢复快照的备份；多台设备连接同一仓库时会自动保持一致。远端始终是纯 Git 仓库——随时可以 `git clone` 走，没有锁定。
+## 三步上手
 
-### 连接
+1. 从 [Releases](https://github.com/Alex-Shen1121/skill-expert/releases) 下载当前平台的安装包。
+2. 从 Git、本地目录、归档文件或市场添加一个 Skill。
+3. 点击 Skill 卡片上的 Agent 角标，或进入 **全局工作区** / **项目工作区**，把它部署到正确范围。
 
-- **使用 GitHub 登录**（推荐）：输入 8 位码完成授权，应用会自动创建私有仓库 `skill-expert-backup`。令牌只存在系统钥匙串里，绝不落入文件或仓库配置。
-- **高级方式**：在 **设置 → Git 同步配置** 粘贴任意 Git 地址（HTTPS + PAT、SSH、自建服务均可）。
-- 新机器上技能库为空时，首次启动会询问：**全新开始，还是从备份恢复？**
+可选：打开 **备份** 页，使用 GitHub 登录一次，即可自动获得版本化备份和多设备同步。
 
-### 同步如何工作
+## 可以管理什么
 
-- **全自动**：本地改动停止编辑约两分钟后自动提交并上传；其他设备推送的更新会自动合并进来并推送回去。随时可点 **立即备份**，备份历史会显示每一条来自哪台设备。
-- **按技能合并**：同步以技能为单位而非文本行——一台设备改名、另一台改内容，会自动正确组合。
-- **冲突不阻塞、不覆盖**：同一技能在两台设备被同时修改时，其余技能照常同步，该技能保留本机版本并进入 **需要处理** 列表（技能卡上也有徽章）。三选一：**保留本机 / 使用远端 / 两个都保留**——应用任一选择前都会先建安全快照，每个决定都可撤销。
-- **快照与恢复**：手动备份会创建快照版本，在备份页历史中可恢复任意一个；恢复前会先把当前状态存为新快照。
+- **Skills** —— 搜索、预览、标签、筛选、多选、导出、删除、来源检查和上游差异比较。
+- **Presets** —— 创建命名技能组，并为选定 Agent 激活，同时保留每个 Agent 的可见状态。
+- **Agents** —— 使用 52 个内置集成，调整常用 Agent 顺序、修改路径，或添加自定义工具。
+- **工作区** —— 用一致的交互管理全局、项目和关联 Skills。
+- **更新** —— 在前台批量检查与更新，显示进度，支持重试、停止和并发数配置。
+- **日常运维** —— 选择软链接或复制模式，配置代理、主题，查看活动记录并导出 Issue 所需日志。
+- **应用更新** —— macOS 与 Windows 上只负责提醒；下载、安装与重启都由你主动触发。
 
-### 备份包含什么
-
-技能文件、标签、Preset 及每个 Agent 的技能开关会被备份。机密信息（API Key、令牌、代理配置）和本机接线永不上传。超过 100 MB 的技能自动留在本机、不进备份（备份页会标注）。SQLite 数据库不进 Git——其中的元数据可从技能文件重建。
-
-### 断开连接
-
-备份页提供三档：**断开本机**（其他设备与远端数据不受影响）、**撤销 GitHub 授权**、以及 **删除远端备份**（经 GitHub 原生的输入仓库名确认流程）。
-
-## 支持的工具
+## 支持的 Agents
 
 开箱支持 52 个 Agent，包括：
 
 Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 
-**设置**页会列出全部，并优先展示在你机器上检测到的那些。你也可以在那里添加自定义工具，以相同方式管理其 Skills。
+**设置** 会优先展示当前机器已检测到的 Agent。自定义工具同样可以使用技能库、工作区和部署控制。
 
-## 应用内帮助
+## 不锁定你的备份
 
-设置页中的 **帮助** 按钮会展示与上面一致的快速流程：推荐工作流、Preset、安装 Skills、技能库（含「未标签」筛选与卡片删除按钮）、全局工作区与 **+ 添加 Skills** 弹层、项目工作区的多 Agent 目标选择器、备份与多设备同步，以及环境设置（含「导出日志」用于 Issue 反馈），方便用户不离开应用也能快速理解使用方式。
+侧边栏的 **备份** 页把技能库保存在普通 Git 仓库中。GitHub 向导会创建私有 `skill-expert-backup` 仓库，也可以配置任意 Git 远端。
 
-## 技术栈
+- 本地停止编辑后自动提交；其他设备的更新会自动合并。
+- 合并以 Skill 为单位：一台设备改名、另一台编辑内容时可以正确组合。
+- 真冲突不会覆盖本机版本。系统先创建安全快照，再让你选择 **保留本机**、**使用远端** 或 **两个都保留**。
+- Skills、标签、Presets 和 Agent 开关会备份；令牌、代理设置、本机接线和超过 100 MB 的 Skills 留在本机。
+- 远端始终是普通 Git 仓库，无需 Agent 技能管家也能克隆和检查。
 
-| 层 | 技术 |
-|----|------|
-| 前端 | React 19、TypeScript、Vite、Tailwind CSS |
-| 桌面 | Tauri 2 |
-| 后端 | Rust |
-| 存储 | SQLite（`rusqlite`） |
-| 国际化 | react-i18next |
+## CLI
 
-## 快速开始
+桌面应用与 `skill-expert-cli` 共用同一套 Rust 核心、SQLite 数据库、中央技能库和部署引擎。
+
+```bash
+# 查看技能库
+npm run cli -- repo status
+npm run cli -- skills list
+
+# 安装 Skill，然后部署给指定 Agent
+npm run cli -- skills install vercel-labs/agent-skills@react-best-practices
+npm run cli -- skills deploy <ref> --agent claude_code --agent codex
+
+# 只检查上游来源，不修改已部署文件
+npm run cli -- skills check --all
+```
+
+<details>
+<summary><strong>更多 CLI 工作流</strong></summary>
+
+```bash
+# 先预览会删除内容或改变结构的操作
+npm run cli -- skills remove <ref> --dry-run
+npm run cli -- skills set-source <ref> --git-url you/skills --subpath my-skill --dry-run
+
+# 整理并部署 Preset
+npm run cli -- presets create Frontend --description "前端工作流"
+npm run cli -- presets add-skill Frontend <ref>
+npm run cli -- presets deploy Frontend --agent codex
+
+# 检查实际的 Agent 部署状态
+npm run cli -- skills status <ref>
+npm run cli -- skills undeploy <ref> --agent codex --dry-run
+
+# 操作外部 Skills 检出目录，不污染该目录
+npm run -s cli -- --skills-root /path/to/my-skills --json skills list
+
+# 把二进制安装到 PATH
+npm run cli:install
+```
+
+更新会替换整个 Skill 目录。如果上游删除了本地仍存在的路径，CLI 不会应用更新，而是报告 `held_back_removals`；这类内容损失必须由人在桌面应用中确认。
+
+CLI 与桌面应用共用同一个仓库锁。如果运行命令时应用处于休眠状态，手动刷新一次即可。
+
+</details>
+
+## 本地开发
 
 ### 前置依赖
 
 - Node.js 18+
 - Rust 工具链
-- 当前系统的 [Tauri 依赖](https://v2.tauri.app/start/prerequisites/)
-
-### 开发
+- 当前平台的 [Tauri 2 依赖](https://v2.tauri.app/start/prerequisites/)
 
 ```bash
 npm install
 npm run tauri:dev
 ```
 
-### CLI
+| 层 | 技术 |
+| --- | --- |
+| 前端 | React 19、TypeScript、Vite、Tailwind CSS |
+| 桌面 | Tauri 2 |
+| 核心 | Rust |
+| 存储 | SQLite（`rusqlite`） |
+| 国际化 | `react-i18next` |
 
-仓库现在包含一个面向 agent 的 CLI，而且它是建立在与桌面应用共用的 Rust shared core 之上。也就是：repo 初始化、tool 解析、scenario 同步/应用逻辑，以及 metadata reindex，都被抽到了可复用 core 模块中，而不是另外在 CLI 里重写一份。
-
-```bash
-# 查看当前仓库路径和统计信息
-npm run cli -- repo status
-
-# 列出技能 / 查看单个技能
-npm run cli -- skills list
-npm run cli -- skills show db
-
-# 把中央库 skill 部署给具体 Agent
-npm run cli -- skills deploy db --agent claude_code --agent codex
-npm run cli -- skills status db
-
-# 把已安装的技能改指向 git 源，技能 id、标签、Preset 归属和已有部署都保留
-# （典型场景：本地写的技能后来发布到了 GitHub）
-npm run cli -- skills set-source db --git-url https://github.com/you/skills/tree/main/db --dry-run
-npm run cli -- skills set-source db --git-url you/skills --subpath db --force
-
-# 管理和部署 Preset（CRUD/成员调整只整理数据，deploy 才修改 Agent 文件）
-npm run cli -- presets create "Web Dev" --description "前端开发"
-npm run cli -- presets add-skill "Web Dev" db
-npm run cli -- presets deploy "Web Dev" --agent codex
-npm run cli -- presets status "Web Dev"
-
-# 导出单个技能到其他 agent 工作目录
-npm run cli -- skills export db --dest ~/.claude/skills/db
-
-# 查看或同步 git 管理的 skills 仓库
-npm run cli -- git status
-npm run cli -- git pull
-npm run cli -- git commit -m "chore: update skills"
-```
-
-可用命令分组：
-- `repo`：查看或修改当前 base directory
-- `agents`（兼容别名 `tools`）：列出 Agent，并全局启用或禁用 Agent
-- `skills`：管理中央库、标签，以及 skill 在各 Agent 中的真实部署
-- `presets`：创建、修改、删除、整理、部署或撤下 Preset
-- `git`：操作 git 管理的 `skills/` 仓库（`clone`、`pull`、`push`、`commit`、`versions`、`restore`）
-
-额外参数：
-- `--skills-root <path>`：直接针对某个已 clone / 已导出的 skills repo 操作，而不是本机 app 默认目录。manager 的状态（DB、scenarios、cache、logs）会落在 `~/.skill-expert/external/<name>-<hash>/`，按 skills root 的规范化路径分目录隔离，外部仓库本身保持干净。
-- `--json`：给脚本 / agent 使用的机器可读输出
-
-```bash
-npm run -s cli -- --skills-root /path/to/my-skills --json skills list
-```
-
-#### 把 CLI 二进制安装到 PATH
-
-如果 agent / 脚本直接调用 `skill-expert-cli`（而不是 `npm run`），需要先把二进制放到 PATH 上：
-
-```bash
-npm run cli:install
-# 等价于：
-# cargo install --path src-tauri --bin skill-expert-cli --locked --force
-```
-
-二进制会装到 `~/.cargo/bin/skill-expert-cli`。代码更新后再跑一次即可刷新。
-
-#### 与桌面应用并发使用
-
-CLI 和桌面应用共享同一个 SQLite 数据库及仓库锁。CLI 修改 metadata 或 Agent 部署后，桌面应用通常会通过文件监听自动刷新；如果应用当时处于休眠状态，手动刷新一次即可。
-
-### 构建
+构建命令：
 
 ```bash
 npm run tauri:build
@@ -194,17 +161,10 @@ npm run cli:build
 
 ### 在 macOS 上安全打开
 
-Agent 技能管家的 macOS 下载包采用 ad-hoc 签名但未经公证，因此即使结构签名已经验证，macOS
-仍可能阻止首次启动。先尝试打开应用一次，然后进入 **系统设置 → 隐私与安全性 → 仍要打开**，
-确认打开 Agent 技能管家。请保持 Gatekeeper 启用；这套操作只批准当前应用。按需测试包的构建
-方式参见[手工测试包指南](docs/test-packages.md)。
+macOS 安装包采用 ad-hoc 签名但未经公证。如果 Gatekeeper 阻止首次启动，请先尝试打开应用一次，再进入 **系统设置 → 隐私与安全性 → 仍要打开** 并确认。请保持 Gatekeeper 启用；这只会批准 Agent 技能管家。按需测试包的说明参见 [手工测试包指南](docs/test-packages.md)。
 
-可通过应用内的 **设置 → 报告问题** 提交可复现问题，或直接访问
-[Agent 技能管家 Issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues)。
+可以通过 **设置 → 报告问题** 提交可复现问题，也可以使用 [Issue tracker](https://github.com/Alex-Shen1121/skill-expert/issues)。欢迎贡献；提交 Pull Request 前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-欢迎参与贡献；Issue、Discussion 和 Pull Request 流程请参见
-[CONTRIBUTING.md](CONTRIBUTING.md)。
+## 许可证
 
-## License
-
-MIT
+[MIT](LICENSE)

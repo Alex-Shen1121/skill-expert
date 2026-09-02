@@ -126,8 +126,8 @@ for (const [syntax, imageReference] of unapprovedImageReferences) {
     replaceInFixture(
       fixtureRoot,
       'README.md',
-      '<img src="assets/icon.png" width="80" />',
-      `<img src="assets/icon.png" width="80" />\n${imageReference}`,
+      '<img src="./assets/readme/hero.png" width="100%" alt="Agent 技能管家：一个中央技能库连接多个 AI Agent">',
+      `<img src="./assets/readme/hero.png" width="100%" alt="Agent 技能管家：一个中央技能库连接多个 AI Agent">\n${imageReference}`,
     );
 
     const result = runChecker(fixtureRoot);
