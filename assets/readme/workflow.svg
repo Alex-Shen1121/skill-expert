@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="300" viewBox="0 0 1200 300"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Agent 技能管家工作流</title>
+  <desc id="desc">从多种来源导入技能，进入中央技能库，通过预设和工作区组织，再部署给不同 Agent，并由 Git 备份保护。</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0C0C0F"/>
+      <stop offset="1" stop-color="#151029"/>
+    </linearGradient>
+    <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#10B981"/>
+      <stop offset="0.55" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#71717A"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="300" rx="26" fill="url(#bg)"/>
+  <text x="56" y="51" fill="#A7F3D0" font-size="16" font-weight="700"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="1.5">ONE CONTROLLED PATH</text>
+  <text x="56" y="83" fill="#F4F4F5" font-size="30" font-weight="730"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">从来源到 Agent，每一步都可见、可控、可恢复</text>
+
+  <g transform="translate(56 112)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <g>
+      <rect width="236" height="104" rx="18" fill="#15151A" stroke="#2A2A34"/>
+      <text x="18" y="28" fill="#34D399" font-size="16" font-weight="800"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace">01 · IMPORT</text>
+      <text x="18" y="59" fill="#F4F4F5" font-size="23" font-weight="700">多源导入</text>
+      <text x="18" y="84" fill="#8E8E96" font-size="16">Git · 本地 · 归档 · skills.sh</text>
+    </g>
+    <path d="M246 52H278" stroke="#71717A" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <g transform="translate(286 0)">
+      <rect width="236" height="104" rx="18" fill="#15151A" stroke="#10B981" stroke-opacity="0.34"/>
+      <text x="18" y="28" fill="#34D399" font-size="16" font-weight="800"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace">02 · LIBRARY</text>
+      <text x="18" y="59" fill="#F4F4F5" font-size="23" font-weight="700">中央技能库</text>
+      <text x="18" y="84" fill="#8E8E96" font-size="16">标签 · 预览 · 差异 · 更新</text>
+    </g>
+    <path d="M532 52H564" stroke="#71717A" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <g transform="translate(572 0)">
+      <rect width="236" height="104" rx="18" fill="#15151A" stroke="#22D3EE" stroke-opacity="0.32"/>
+      <text x="18" y="28" fill="#67E8F9" font-size="16" font-weight="800"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace">03 · WORKSPACE</text>
+      <text x="18" y="59" fill="#F4F4F5" font-size="23" font-weight="700">按范围组织</text>
+      <text x="18" y="84" fill="#8E8E96" font-size="16">Preset · 全局 · 项目 · 关联</text>
+    </g>
+    <path d="M818 52H850" stroke="#71717A" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <g transform="translate(858 0)">
+      <rect width="236" height="104" rx="18" fill="#15151A" stroke="#8B5CF6" stroke-opacity="0.34"/>
+      <text x="18" y="28" fill="#C4B5FD" font-size="16" font-weight="800"
+            font-family="ui-monospace, SFMono-Regular, Menlo, monospace">04 · AGENTS</text>
+      <text x="18" y="59" fill="#F4F4F5" font-size="23" font-weight="700">精准部署</text>
+      <text x="18" y="84" fill="#8E8E96" font-size="16">52 个内置 Agent + 自定义工具</text>
+    </g>
+  </g>
+
+  <g transform="translate(56 238)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <rect width="1088" height="34" rx="12" fill="#FFFFFF" fill-opacity="0.045" stroke="#FFFFFF" stroke-opacity="0.08"/>
+    <rect width="6" height="34" rx="3" fill="url(#rail)"/>
+    <text x="22" y="23" fill="#A1A1AA" font-size="15">GIT BACKUP · SKILL-AWARE MERGE · RESTORABLE SNAPSHOTS · SECRETS STAY LOCAL</text>
+    <circle cx="1064" cy="17" r="5" fill="#34D399"/>
+  </g>
+
+  <rect x="1" y="1" width="1198" height="298" rx="25" fill="none" stroke="#FFFFFF" stroke-opacity="0.08"/>
+</svg>

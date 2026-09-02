@@ -75,8 +75,11 @@ for (const relativePath of ['assets/star-history.svg', '.github/FUNDING.yml']) {
 const readme = read('README.md');
 const readmeZh = read('README.zh-CN.md');
 const approvedPublishedImageAssets = new Set([
-  'assets/icon.png',
-  'assets/diagram-concept-map.png',
+  './assets/readme/hero.png',
+  './assets/readme/workflow.svg',
+  'https://img.shields.io/github/v/release/Alex-Shen1121/skill-expert?display_name=tag&sort=semver&style=flat-square&color=10b981',
+  'https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-18181b?style=flat-square',
+  'https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square',
 ]);
 const publishedImageAssets = new Set();
 
@@ -123,7 +126,10 @@ for (const [relativePath, contents] of [
   collectPublishedImageAssets(contents);
   expect(
     `${relativePath} product heading`,
-    contents.includes(`<h1 align="center">${expectedProduct}</h1>`),
+    contents.includes(`<h1 align="center">${expectedProduct}</h1>`) ||
+      new RegExp(
+        `<img\\s+[^>]*src=["']\\./assets/readme/hero\\.png["'][^>]*alt=["'][^"']*${expectedProduct}`,
+      ).test(contents),
     `expected ${expectedProduct}`,
   );
   expect(
