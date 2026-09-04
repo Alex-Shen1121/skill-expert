@@ -199,9 +199,15 @@
       "onUse": "Authentication may be required during use",
       "none": "No authentication required"
     },
+    "actions": {
+      "openCliSettings": "Open Codex CLI settings",
+      "retry": "Retry read"
+    },
     "errors": {
       "title": "Plugin status could not be read",
       "cliUnavailable": "The plugin CLI is unavailable. Confirm that Codex CLI is installed and accessible from this environment.",
+      "configuredPathInvalid": "The configured Codex CLI path is invalid. Open settings to choose it again or restore environment resolution.",
+      "cliNotRunnable": "Codex CLI could not be executed. Check file permissions or choose it again in settings.",
       "commandUnsupported": "This Codex CLI does not support the plugin catalog command. Update Codex first.",
       "timedOut": "Reading plugin status timed out. Try again later.",
       "commandFailed": "Codex CLI failed. No previous result is being shown as current.",
@@ -771,6 +777,43 @@
   },
   "settings": {
     "title": "Settings",
+    "codexCli": {
+      "title": "Codex CLI path",
+      "description": "Specify Codex CLI for launches with an incomplete PATH, such as Finder. Choosing a file does not read plugins; the read-only catalog command runs only during validation or save.",
+      "inputLabel": "Codex CLI executable",
+      "placeholder": "Leave empty to resolve from the desktop process environment",
+      "select": "Choose executable",
+      "validate": "Validate path",
+      "save": "Save path",
+      "reset": "Use environment resolution",
+      "loading": "Reading Codex CLI path settings",
+      "environmentActive": "Codex CLI is currently resolved from the desktop process environment.",
+      "explicitActive": "The explicitly configured Codex CLI path is currently in use.",
+      "validationSuccess": "Validated: the command runs and supports the plugin JSON contract.",
+      "saved": "Explicit path saved.",
+      "facts": {
+        "configurationDirectory": "Configuration directory",
+        "executableResolution": "Executable resolution",
+        "commandRuntime": "Command runtime",
+        "pluginJsonContract": "Plugin JSON contract"
+      },
+      "factStatus": {
+        "confirmed": "Confirmed",
+        "unavailable": "Unavailable",
+        "unchecked": "Not checked"
+      },
+      "errors": {
+        "cliUnavailable": "Codex CLI could not be resolved from the desktop environment. Choose an explicit executable.",
+        "configuredPathInvalid": "The selected path is missing or is not a regular file. The last working configuration was not replaced.",
+        "cliNotRunnable": "The file exists, but the app cannot execute it. Check its permissions or choose another file.",
+        "commandUnsupported": "This Codex CLI does not support the plugin catalog command. Update it and try again.",
+        "timedOut": "Codex CLI validation timed out. Try again later.",
+        "commandFailed": "Codex CLI ran but failed. The last working configuration was not replaced.",
+        "invalidJson": "Codex CLI returned data that could not be parsed.",
+        "contractIncompatible": "This Codex CLI plugin JSON contract is incompatible with the current version.",
+        "internal": "An internal error occurred while reading or validating Codex CLI settings."
+      }
+    },
     "supportedAgents": "Supported Agents",
     "agentsSummary": "{{detected}} detected, {{enabled}} enabled, {{custom}} custom",
     "detectedAgents": "Detected",

@@ -31,6 +31,8 @@ import { cn } from "../utils";
 
 const ERROR_KEYS: Record<AgentPluginCatalogErrorKind, string> = {
   cli_unavailable: "plugins.errors.cliUnavailable",
+  configured_path_invalid: "plugins.errors.configuredPathInvalid",
+  cli_not_runnable: "plugins.errors.cliNotRunnable",
   command_unsupported: "plugins.errors.commandUnsupported",
   timed_out: "plugins.errors.timedOut",
   command_failed: "plugins.errors.commandFailed",
@@ -234,6 +236,27 @@ export function Plugins() {
               <p className="mt-1 text-[12px] leading-5 text-muted">
                 {t(ERROR_KEYS[projection.error.kind])}
               </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {[
+                  "cli_unavailable",
+                  "configured_path_invalid",
+                  "cli_not_runnable",
+                ].includes(projection.error.kind) && (
+                  <a
+                    href="/settings?section=codex-cli#codex-cli-settings"
+                    className="app-button-secondary"
+                  >
+                    {t("plugins.actions.openCliSettings")}
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={loadProjection}
+                  className="app-button-secondary"
+                >
+                  {t("plugins.actions.retry")}
+                </button>
+              </div>
             </div>
           </div>
         ) : (

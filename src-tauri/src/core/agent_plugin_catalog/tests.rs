@@ -1013,6 +1013,65 @@ printf '%s' '{"installed":[{"pluginId":"fixture","name":"Fixture","marketplaceNa
     ));
 }
 
+#[test]
+fn explicit_cli_path_is_revalidated_immediately_before_each_catalog_execution() {
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("codex");
+    std::fs::write(&executable, b"fixture").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+    }
+    let adapter = codex::CodexCatalogAdapter::with_explicit_executable(executable.clone());
+    std::fs::remove_file(executable).unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(AgentPluginAgent::Codex, &adapter);
+
+    assert!(matches!(
+        projection,
+        AgentPluginProjection::Error {
+            error: AgentPluginCatalogError {
+                kind: AgentPluginCatalogErrorKind::ConfiguredPathInvalid,
+                ..
+            },
+            ..
+        }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_cli_path_drives_the_public_catalog_projection() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("custom-codex");
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+printf '%s' '{"installed":[{"pluginId":"configured","marketplaceName":"fixture","installed":true,"enabled":true}],"available":[]}'
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+
+    let projection = get_agent_plugin_projection(
+        AgentPluginAgent::Codex,
+        Some(executable.to_string_lossy().as_ref()),
+    );
+
+    assert!(matches!(
+        projection,
+        AgentPluginProjection::Ready { installed, .. }
+            if installed.len() == 1 && installed[0].identity.plugin_id == "configured"
+    ));
+}
+
 fn projection_timestamp(projection: &AgentPluginProjection) -> u64 {
     match projection {
         AgentPluginProjection::Ready {

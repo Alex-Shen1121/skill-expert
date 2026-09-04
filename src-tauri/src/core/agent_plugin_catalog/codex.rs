@@ -1,35 +1,60 @@
+#[cfg(test)]
+use super::codex_cli::CodexCliResolutionSource;
 use super::{
-    catalog_error, AgentPluginCatalogError, AgentPluginCatalogErrorKind, CatalogAdapter,
-    CatalogCommandOutput,
+    catalog_error,
+    codex_cli::{
+        allowed_environment, resolve_codex_cli, revalidate_resolved_codex_cli, CodexCliEnvironment,
+        CodexCliResolutionError, ResolvedCodexCli,
+    },
+    AgentPluginCatalogError, AgentPluginCatalogErrorKind, CatalogAdapter, CatalogCommandOutput,
 };
 use crate::core::process_runner::{run_process, ProcessError, ProcessRequest};
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::PathBuf;
 
 pub(super) struct CodexCatalogAdapter {
-    executable: Option<PathBuf>,
+    resolution: Result<ResolvedCodexCli, CodexCliResolutionError>,
 }
 
 impl CodexCatalogAdapter {
-    pub(super) fn from_environment() -> Self {
+    pub(super) fn from_configured_path(configured_path: Option<&str>) -> Self {
         Self {
-            executable: resolve_codex_executable(),
+            resolution: resolve_codex_cli(configured_path, &CodexCliEnvironment::capture()),
         }
     }
 
     #[cfg(test)]
     pub(super) fn with_executable(executable: PathBuf) -> Self {
         Self {
-            executable: Some(executable),
+            resolution: Ok(ResolvedCodexCli {
+                path: executable,
+                source: CodexCliResolutionSource::Environment,
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_explicit_executable(executable: PathBuf) -> Self {
+        Self {
+            resolution: Ok(ResolvedCodexCli {
+                path: executable,
+                source: CodexCliResolutionSource::Explicit,
+            }),
         }
     }
 }
 
 impl CatalogAdapter for CodexCatalogAdapter {
     fn read(&self) -> Result<CatalogCommandOutput, AgentPluginCatalogError> {
-        let executable = self.executable.as_ref().ok_or_else(cli_unavailable)?;
+        let resolved = self
+            .resolution
+            .as_ref()
+            .map_err(|error| catalog_error(resolution_error_kind(*error), None))?;
+        revalidate_resolved_codex_cli(resolved)
+            .map_err(|error| catalog_error(resolution_error_kind(error), None))?;
         let request = ProcessRequest::new(
-            executable,
+            &resolved.path,
             ["plugin", "list", "--available", "--json"]
                 .into_iter()
                 .map(OsString::from)
@@ -46,83 +71,21 @@ impl CatalogAdapter for CodexCatalogAdapter {
     }
 }
 
-fn resolve_codex_executable() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .flat_map(executable_candidates)
-        .find(|candidate| is_executable_file(candidate))
-}
-
-fn executable_candidates(directory: PathBuf) -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        let extensions = std::env::var_os("PATHEXT")
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .split(';')
-                    .filter(|extension| !extension.is_empty())
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<_>>()
-            })
-            .filter(|extensions| !extensions.is_empty())
-            .unwrap_or_else(|| vec![".COM".into(), ".EXE".into()]);
-        let mut candidates = Vec::with_capacity(extensions.len() + 1);
-        candidates.push(directory.join("codex"));
-        candidates.extend(
-            extensions
-                .into_iter()
-                .map(|extension| directory.join(format!("codex{extension}"))),
-        );
-        candidates
+fn resolution_error_kind(error: CodexCliResolutionError) -> AgentPluginCatalogErrorKind {
+    match error {
+        CodexCliResolutionError::Unavailable => AgentPluginCatalogErrorKind::CliUnavailable,
+        CodexCliResolutionError::ConfiguredPathInvalid => {
+            AgentPluginCatalogErrorKind::ConfiguredPathInvalid
+        }
+        CodexCliResolutionError::NotRunnable => AgentPluginCatalogErrorKind::CliNotRunnable,
     }
-    #[cfg(not(windows))]
-    {
-        vec![directory.join("codex")]
-    }
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = path.metadata() else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
-fn allowed_environment() -> Vec<(OsString, OsString)> {
-    const KEYS: &[&str] = &[
-        "HOME",
-        "PATH",
-        "PATHEXT",
-        "USERPROFILE",
-        "CODEX_HOME",
-        "XDG_CONFIG_HOME",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "SYSTEMROOT",
-        "TMPDIR",
-        "TMP",
-        "TEMP",
-    ];
-    KEYS.iter()
-        .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
-        .collect()
 }
 
 pub(super) fn classify_process_error(error: ProcessError) -> AgentPluginCatalogError {
     match error {
-        ProcessError::SpawnFailed(_) => cli_unavailable(),
+        ProcessError::SpawnFailed(_) => {
+            catalog_error(AgentPluginCatalogErrorKind::CliNotRunnable, None)
+        }
         ProcessError::TimedOut { .. } => catalog_error(AgentPluginCatalogErrorKind::TimedOut, None),
         _ => catalog_error(AgentPluginCatalogErrorKind::Internal, None),
     }
@@ -147,8 +110,4 @@ pub(super) fn classify_completed_output(
         AgentPluginCatalogErrorKind::CommandFailed
     };
     Err(catalog_error(kind, exit_code))
-}
-
-fn cli_unavailable() -> AgentPluginCatalogError {
-    catalog_error(AgentPluginCatalogErrorKind::CliUnavailable, None)
 }

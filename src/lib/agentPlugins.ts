@@ -65,6 +65,8 @@ export interface AgentPluginSummary {
 
 export type AgentPluginCatalogErrorKind =
   | "cli_unavailable"
+  | "configured_path_invalid"
+  | "cli_not_runnable"
   | "command_unsupported"
   | "timed_out"
   | "command_failed"
@@ -75,6 +77,20 @@ export type AgentPluginCatalogErrorKind =
 export interface AgentPluginCatalogError {
   kind: AgentPluginCatalogErrorKind;
   exit_code?: number;
+}
+
+export type CodexCliFactStatus = "confirmed" | "unavailable" | "unchecked";
+
+export interface CodexCliConfiguration {
+  resolution_source: "explicit" | "environment";
+  configured_path: string | null;
+  facts: {
+    configuration_directory: CodexCliFactStatus;
+    executable_resolution: CodexCliFactStatus;
+    command_runtime: CodexCliFactStatus;
+    plugin_json_contract: CodexCliFactStatus;
+  };
+  error?: AgentPluginCatalogErrorKind;
 }
 
 export type AgentPluginProjection =
@@ -102,3 +118,15 @@ export function agentPluginIdentityKey(identity: AgentPluginIdentity): string {
 
 export const getAgentPluginProjection = (agent: AgentPluginAgent) =>
   invoke<AgentPluginProjection>("get_agent_plugin_projection", { agent });
+
+export const getCodexCliConfiguration = () =>
+  invoke<CodexCliConfiguration>("get_codex_cli_configuration");
+
+export const validateCodexCliPath = (path: string) =>
+  invoke<CodexCliConfiguration>("validate_codex_cli_path", { path });
+
+export const setCodexCliPath = (path: string) =>
+  invoke<CodexCliConfiguration>("set_codex_cli_path", { path });
+
+export const resetCodexCliPath = () =>
+  invoke<CodexCliConfiguration>("reset_codex_cli_path");

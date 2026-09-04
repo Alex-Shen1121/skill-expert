@@ -6,7 +6,14 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod codex;
+mod codex_cli;
 mod manifest;
+
+pub use codex_cli::{
+    get_codex_cli_configuration, reset_codex_cli_path, save_codex_cli_path,
+    validate_codex_cli_path, CodexCliConfiguration, CodexCliFactStatus, CodexCliFacts,
+    CodexCliResolutionSource, CODEX_CLI_PATH_SETTING_KEY,
+};
 
 /// 首版支持读取插件目录的 Agent。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -137,6 +144,8 @@ pub struct AgentPluginSummary {
 #[serde(rename_all = "snake_case")]
 pub enum AgentPluginCatalogErrorKind {
     CliUnavailable,
+    ConfiguredPathInvalid,
+    CliNotRunnable,
     CommandUnsupported,
     TimedOut,
     CommandFailed,
@@ -179,8 +188,11 @@ trait CatalogAdapter {
 }
 
 /// 按 Agent 生成当前内存态插件状态投影的唯一公开行为接口。
-pub fn get_agent_plugin_projection(agent: AgentPluginAgent) -> AgentPluginProjection {
-    let adapter = codex::CodexCatalogAdapter::from_environment();
+pub fn get_agent_plugin_projection(
+    agent: AgentPluginAgent,
+    configured_cli_path: Option<&str>,
+) -> AgentPluginProjection {
+    let adapter = codex::CodexCatalogAdapter::from_configured_path(configured_cli_path);
     get_agent_plugin_projection_with_adapter(agent, &adapter)
 }
 
@@ -346,6 +358,10 @@ fn catalog_error(
 
 fn contract_incompatible() -> AgentPluginCatalogError {
     catalog_error(AgentPluginCatalogErrorKind::ContractIncompatible, None)
+}
+
+fn validate_catalog_contract(stdout: &[u8]) -> Result<(), AgentPluginCatalogError> {
+    parse_projection(AgentPluginAgent::Codex, stdout).map(|_| ())
 }
 
 #[cfg(test)]
