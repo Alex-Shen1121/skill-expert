@@ -140,6 +140,12 @@
     "title": "Codex 外掛檢查器",
     "subtitle": "選擇一個外掛，在同一檢視中檢查 Codex 目前確認的身分和安裝狀態。",
     "readOnly": "唯讀狀態",
+    "updateAvailable": "有可用更新",
+    "installStatusIndicator": "安裝狀態：{{status}}",
+    "authPolicyIndicator": "認證策略：{{policy}}",
+    "detailsCompletenessIndicator": "詳情完整性：{{status}}",
+    "detailsComplete": "詳情完整",
+    "detailsIncompleteShort": "詳情不完整",
     "loading": "正在讀取 Codex 外掛狀態",
     "refreshing": "正在重新整理外掛狀態",
     "refresh": "重新整理",
@@ -192,7 +198,9 @@
       "connectors": "連接器",
       "browserExtensions": "瀏覽器擴充功能",
       "customUi": "自訂 UI",
-      "undeclared": "未宣告"
+      "undeclared": "未宣告",
+      "declaredIndicator": "{{label}}：已宣告 {{count}} 項",
+      "undeclaredIndicator": "{{label}}：未宣告"
     },
     "auth": {
       "onInstall": "安裝時可能需要認證",

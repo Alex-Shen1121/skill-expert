@@ -7,6 +7,21 @@ import i18n, { i18nReady } from "../../i18n";
 import type { AgentPluginSummary } from "../../lib/agentPlugins";
 import { PluginDetails } from "./PluginDetails";
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map((offset) => Number.parseInt(
+      hex.slice(offset, offset + 2),
+      16,
+    ) / 255).map((value) => (
+      value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    ));
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const left = luminance(foreground);
+  const right = luminance(background);
+  return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
+}
+
 const completePlugin = {
   identity: {
     agent: "codex",
@@ -106,7 +121,7 @@ describe("PluginDetails 安全详情", () => {
     } as AgentPluginSummary;
     render(<PluginDetails plugin={plugin} />);
 
-    expect(screen.getByRole("status").textContent).toContain("详情不完整");
+    expect(screen.getByRole("note").textContent).toContain("详情不完整");
     expect(screen.getByRole("img", { name: "默认插件图标" })).toBeTruthy();
     expect(screen.getAllByText("未提供").length).toBeGreaterThan(0);
     expect(screen.queryByText("浏览器扩展已提供")).toBeNull();
@@ -138,5 +153,56 @@ describe("PluginDetails 安全详情", () => {
       expect(screen.getByRole("region", { name: customUi })).toBeTruthy();
       view.unmount();
     }
+  });
+
+  it("只在 CLI 明确报告更新时显示带图标的更新提示", () => {
+    const view = render(
+      <PluginDetails plugin={{ ...completePlugin, update_available: true }} />,
+    );
+
+    expect(screen.getByRole("status", { name: "有可用更新" })).toBeTruthy();
+    expect(screen.getByText("有可用更新")).toBeTruthy();
+
+    view.rerender(
+      <PluginDetails plugin={{ ...completePlugin, update_available: false }} />,
+    );
+    expect(screen.queryByRole("status", { name: "有可用更新" })).toBeNull();
+
+    view.rerender(
+      <PluginDetails plugin={{ ...completePlugin, update_available: null }} />,
+    );
+    expect(screen.queryByRole("status", { name: "有可用更新" })).toBeNull();
+  });
+
+  it("为安装状态、认证策略、详情完整性和每类能力提供可访问语义指示", () => {
+    render(<PluginDetails plugin={completePlugin} />);
+
+    for (const label of [
+      "安装状态：已安装且启用",
+      "认证策略：安装时可能需要认证",
+      "详情完整性：详情完整",
+      "Skills：已声明 1 项",
+      "MCP：已声明 1 项",
+      "Hooks：已声明 1 项",
+      "连接器：已声明 1 项",
+      "浏览器扩展：未声明",
+      "自定义 UI：未声明",
+    ]) {
+      const indicator = screen.getByRole("status", { name: label });
+      expect(indicator.className).toMatch(/text-(emerald|amber|sky|accent|muted)/);
+      expect(indicator.querySelector("svg")).toBeTruthy();
+      expect(indicator.textContent?.trim()).not.toBe("");
+    }
+
+    const skillsIndicator = screen.getByRole("status", { name: "Skills：已声明 1 项" });
+    expect(skillsIndicator.className).toContain("text-emerald-700");
+    expect(skillsIndicator.className).toContain("dark:text-emerald-300");
+    expect(within(skillsIndicator).getByText("1").className).toContain("text-tertiary");
+    const browserGroup = screen.getByRole("region", { name: "浏览器扩展" });
+    expect(within(browserGroup).getByText("未声明").className).toContain("text-muted");
+    expect(contrastRatio("#047857", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#6EE7B7", "#131317")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#71717A", "#FFFFFF")).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#8E8E96", "#131317")).toBeGreaterThanOrEqual(4.5);
   });
 });

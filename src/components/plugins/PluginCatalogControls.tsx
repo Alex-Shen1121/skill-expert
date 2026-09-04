@@ -1,4 +1,5 @@
 import { ChevronDown, Search } from "lucide-react";
+import { useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentPluginScope } from "../../lib/agentPluginView";
 import { cn } from "../../utils";
@@ -27,31 +28,58 @@ export function PluginCatalogControls({
   onMarketplaceChange,
 }: PluginCatalogControlsProps) {
   const { t } = useTranslation();
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const scopes = ["installed", "available"] as const;
+
+  const handleScopeKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (index + 1) % scopes.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (index - 1 + scopes.length) % scopes.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = scopes.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    onScopeChange(scopes[nextIndex]);
+    tabRefs.current[nextIndex]?.focus();
+  };
 
   return (
     <div className="shrink-0 space-y-3 border-b border-border-subtle p-3">
       <div
         role="tablist"
+        aria-orientation="horizontal"
         aria-label={t("plugins.scopeLabel")}
         className="app-segmented"
       >
-        {([
-          ["installed", installedCount],
-          ["available", availableCount],
-        ] as const).map(([value, count]) => (
+        {scopes.map((value, index) => (
           <button
             key={value}
+            ref={(element) => {
+              tabRefs.current[index] = element;
+            }}
             type="button"
             role="tab"
             aria-selected={scope === value}
             aria-controls="plugin-catalog-list"
+            tabIndex={scope === value ? 0 : -1}
             onClick={() => onScopeChange(value)}
+            onKeyDown={(event) => handleScopeKeyDown(event, index)}
             className={cn(
               "app-segmented-button flex-1 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
               scope === value && "app-segmented-button-active",
             )}
           >
-            {t(`plugins.${value}`)} {t("plugins.count", { count })}
+            {t(`plugins.${value}`)} {t("plugins.count", {
+              count: value === "installed" ? installedCount : availableCount,
+            })}
           </button>
         ))}
       </div>

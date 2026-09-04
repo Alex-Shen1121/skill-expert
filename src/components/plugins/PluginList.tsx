@@ -1,4 +1,5 @@
 import { Puzzle } from "lucide-react";
+import { useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { agentPluginIdentityKey } from "../../lib/agentPlugins";
 import type { AgentPluginViewItem } from "../../lib/agentPluginView";
@@ -43,6 +44,28 @@ export function PluginList({
   onSelect,
 }: PluginListProps) {
   const { t } = useTranslation();
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const handleOptionKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      nextIndex = (index + 1) % plugins.length;
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + plugins.length) % plugins.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = plugins.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const next = plugins[nextIndex];
+    onSelect(agentPluginIdentityKey(next.identity));
+    optionRefs.current[nextIndex]?.focus();
+  };
 
   if (plugins.length === 0) {
     return (
@@ -62,17 +85,24 @@ export function PluginList({
       aria-label={listLabel}
       className="min-h-0 flex-1 overflow-y-auto p-2 scrollbar-hide"
     >
-      {plugins.map((plugin) => {
+      {plugins.map((plugin, index) => {
         const key = agentPluginIdentityKey(plugin.identity);
         const active = selectedKey === key;
+        const version = plugin.version ?? t("plugins.unknown");
+        const status = t(`plugins.status.${plugin.install_status}`);
         return (
           <button
             key={key}
+            ref={(element) => {
+              optionRefs.current[index] = element;
+            }}
             type="button"
             role="option"
             aria-selected={active}
-            aria-label={`${plugin.display_name} · ${plugin.identity.marketplace_name} · ${plugin.identity.plugin_id}`}
+            aria-label={`${plugin.display_name} · ${plugin.identity.marketplace_name} · ${plugin.identity.plugin_id} · ${version} · ${status}`}
+            tabIndex={active ? 0 : -1}
             onClick={() => onSelect(key)}
+            onKeyDown={(event) => handleOptionKeyDown(event, index)}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-accent/50",
               active ? "bg-surface-active" : "hover:bg-surface-hover",
@@ -86,8 +116,8 @@ export function PluginList({
               )}>
                 {plugin.display_name}
               </span>
-              <span className="mt-0.5 block truncate text-[11px] text-faint">
-                {plugin.identity.marketplace_name} · {plugin.version ?? t("plugins.unknown")}
+              <span className="mt-0.5 block truncate text-[11px] text-tertiary">
+                {plugin.identity.marketplace_name} · {version}
               </span>
             </span>
             <PluginStatusBadge status={plugin.install_status} />

@@ -51,3 +51,23 @@ test('稳定文件名重新签名复用构建阶段生成的同一临时私钥',
     /echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$TEST_KEY_PASSWORD" >> "\$GITHUB_ENV"/,
   );
 });
+
+test('Windows 与 Linux 在构建不可晋级测试包前运行受控进程 fixture', () => {
+  const builder = readFileSync(
+    path.join(repositoryRoot, '.github/workflows/test-package-build.yml'),
+    'utf8',
+  );
+  const testStep = builder.indexOf('- name: 运行受控进程跨平台测试');
+  const cliBuildStep = builder.indexOf('- name: 构建独立 CLI');
+
+  assert.ok(testStep > 0);
+  assert.ok(testStep < cliBuildStep);
+  assert.match(
+    builder.slice(testStep, cliBuildStep),
+    /if: runner\.os == 'Windows' \|\| runner\.os == 'Linux'/,
+  );
+  assert.match(
+    builder.slice(testStep, cliBuildStep),
+    /cargo test --locked[\s\S]*--target "\$\{\{ matrix\.rust_target \}\}"[\s\S]*core::process_runner::tests/,
+  );
+});

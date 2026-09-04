@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { StatusBanner } from "./StatusBanner";
 import { CommandPalette } from "./CommandPalette";
@@ -12,6 +12,15 @@ export function Layout() {
   const { appError, refreshAppData } = useApp();
   const onDrag = useDragWindow();
   const navigate = useNavigate();
+  const location = useLocation();
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const content = contentScrollRef.current;
+    if (!content) return;
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
+  }, [location.pathname]);
 
   // Cmd+, to open Settings
   useEffect(() => {
@@ -42,7 +51,10 @@ export function Layout() {
       />
       <Sidebar />
       <div className="relative flex min-w-[600px] flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto px-5 pb-5 pt-[calc(28px+20px)] scrollbar-hide">
+        <div
+          ref={contentScrollRef}
+          className="flex-1 overflow-y-auto px-5 pb-5 pt-[calc(28px+20px)] scrollbar-hide"
+        >
           <div className="mx-auto flex min-h-full max-w-[1200px] flex-col gap-4">
             {appError ? (
               <StatusBanner

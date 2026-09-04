@@ -78,6 +78,16 @@ export function Plugins() {
       }))
       .then((next) => {
         if (requestSequence.current === requestId) {
+          if (next.read_status === "ready") {
+            setMarketplace((current) => (
+              current === "all"
+              || [...next.installed, ...next.available].some(
+                (plugin) => plugin.identity.marketplace_name === current,
+              )
+                ? current
+                : "all"
+            ));
+          }
           setProjection(next);
           setLoading(false);
         }
@@ -183,7 +193,7 @@ export function Plugins() {
 
   return (
     <div
-      className="flex h-[calc(100vh-68px)] min-h-[560px] flex-col"
+      className="plugin-catalog-page flex flex-col"
       aria-busy={loading}
     >
       <header className="flex shrink-0 items-start justify-between gap-4">
@@ -220,7 +230,8 @@ export function Plugins() {
         </div>
       </header>
 
-      <div className="mt-4 grid min-h-0 flex-1 grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)] overflow-hidden rounded-xl border border-border-subtle bg-surface">
+      <div className="plugin-catalog-frame mt-4 min-h-0 flex-1">
+        <div className="plugin-catalog-grid grid h-full min-h-0 overflow-hidden rounded-xl border border-border-subtle bg-surface">
         {!projection ? (
           <LoadingPanel />
         ) : projection.read_status === "error" ? (
@@ -299,6 +310,7 @@ export function Plugins() {
             )}
           </>
         )}
+        </div>
       </div>
     </div>
   );

@@ -140,6 +140,12 @@
     "title": "Codex 插件检查器",
     "subtitle": "选择一个插件，在同一视图中检查 Codex 当前确认的身份和安装状态。",
     "readOnly": "只读状态",
+    "updateAvailable": "有可用更新",
+    "installStatusIndicator": "安装状态：{{status}}",
+    "authPolicyIndicator": "认证策略：{{policy}}",
+    "detailsCompletenessIndicator": "详情完整性：{{status}}",
+    "detailsComplete": "详情完整",
+    "detailsIncompleteShort": "详情不完整",
     "loading": "正在读取 Codex 插件状态",
     "refreshing": "正在刷新插件状态",
     "refresh": "刷新",
@@ -192,7 +198,9 @@
       "connectors": "连接器",
       "browserExtensions": "浏览器扩展",
       "customUi": "自定义 UI",
-      "undeclared": "未声明"
+      "undeclared": "未声明",
+      "declaredIndicator": "{{label}}：已声明 {{count}} 项",
+      "undeclaredIndicator": "{{label}}：未声明"
     },
     "auth": {
       "onInstall": "安装时可能需要认证",
