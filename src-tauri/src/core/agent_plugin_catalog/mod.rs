@@ -5,6 +5,8 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(debug_assertions)]
+mod acceptance;
 mod codex;
 mod codex_cli;
 mod manifest;
@@ -204,9 +206,17 @@ fn get_agent_plugin_projection_with_adapter(
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or_default();
-    let result = adapter
-        .read()
-        .and_then(|output| parse_projection(agent, &output.stdout));
+    let result = adapter.read().and_then(|output| {
+        parse_projection(agent, &output.stdout).map(|(installed, available)| {
+            #[cfg(debug_assertions)]
+            if let Err(error) =
+                acceptance::record_identity_evidence(&output.stdout, &installed, &available)
+            {
+                log::warn!("插件验收身份摘要未写入：{error}");
+            }
+            (installed, available)
+        })
+    });
 
     match result {
         Ok((installed, available)) => AgentPluginProjection::Ready {

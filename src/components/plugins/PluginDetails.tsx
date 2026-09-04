@@ -1,12 +1,16 @@
 import {
   AppWindow,
+  BadgeCheck,
   BookOpen,
   Check,
   CircleAlert,
   Download,
   Globe2,
+  KeyRound,
   Plug,
+  RefreshCw,
   Unplug,
+  CircleHelp,
   Wrench,
   Zap,
   type LucideIcon,
@@ -41,12 +45,60 @@ export function PluginStatusBadge({ status }: { status: AgentPluginInstallStatus
       ? { Icon: Unplug, className: "bg-amber-500/10 text-amber-700 dark:text-amber-300" }
       : { Icon: Download, className: "bg-sky-500/10 text-sky-700 dark:text-sky-300" };
   return (
-    <span className={cn(
-      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-      content.className,
-    )}>
+    <span
+      role="status"
+      aria-label={t("plugins.installStatusIndicator", { status: t(statusKey(status)) })}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        content.className,
+      )}
+    >
       <content.Icon className="h-3 w-3" aria-hidden="true" />
       {t(statusKey(status))}
+    </span>
+  );
+}
+
+function AuthPolicyBadge({ policy }: { policy: AgentPluginAuthPolicy | null }) {
+  const { t } = useTranslation();
+  const label = t(authKey(policy));
+  const content = policy === "none"
+    ? { Icon: BadgeCheck, className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
+    : policy === "on_install" || policy === "on_use"
+      ? { Icon: KeyRound, className: "bg-amber-500/10 text-amber-700 dark:text-amber-300" }
+      : { Icon: CircleHelp, className: "bg-bg-secondary text-muted" };
+  return (
+    <span
+      role="status"
+      aria-label={t("plugins.authPolicyIndicator", { policy: label })}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium",
+        content.className,
+      )}
+    >
+      <content.Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+function DetailsCompletenessBadge({ complete }: { complete: boolean }) {
+  const { t } = useTranslation();
+  const label = t(complete ? "plugins.detailsComplete" : "plugins.detailsIncompleteShort");
+  const Icon = complete ? BadgeCheck : CircleAlert;
+  return (
+    <span
+      role="status"
+      aria-label={t("plugins.detailsCompletenessIndicator", { status: label })}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        complete
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      )}
+    >
+      <Icon className="h-3 w-3" aria-hidden="true" />
+      {label}
     </span>
   );
 }
@@ -60,12 +112,27 @@ interface CapabilityGroupProps {
 
 function CapabilityGroup({ label, Icon, items, skills = false }: CapabilityGroupProps) {
   const { t } = useTranslation();
+  const declared = items.length > 0;
   return (
     <section role="region" aria-label={label}>
-      <div className="mb-2 flex items-center gap-2">
-        <Icon className="h-3.5 w-3.5 text-muted" aria-hidden="true" />
-        <h3 className="text-[12px] font-semibold tracking-[0.04em] text-muted">{label}</h3>
-        <span className="text-[11px] tabular-nums text-faint">{items.length}</span>
+      <div
+        role="status"
+        aria-label={t(
+          declared
+            ? "plugins.capabilities.declaredIndicator"
+            : "plugins.capabilities.undeclaredIndicator",
+          { label, count: items.length },
+        )}
+        className={cn(
+          "mb-2 flex items-center gap-2",
+          declared
+            ? "text-emerald-700 dark:text-emerald-300"
+            : "text-muted",
+        )}
+      >
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        <h3 className="text-[12px] font-semibold tracking-[0.04em]">{label}</h3>
+        <span className="text-[11px] tabular-nums text-tertiary">{items.length}</span>
       </div>
       {items.length > 0 ? (
         <div className="divide-y divide-border-faint rounded-lg border border-border-subtle bg-surface">
@@ -83,7 +150,7 @@ function CapabilityGroup({ label, Icon, items, skills = false }: CapabilityGroup
           })}
         </div>
       ) : (
-        <p className="text-[12px] text-faint">{t("plugins.capabilities.undeclared")}</p>
+        <p className="text-[12px] text-muted">{t("plugins.capabilities.undeclared")}</p>
       )}
     </section>
   );
@@ -112,6 +179,19 @@ export function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
                 {plugin.display_name}
               </h2>
               <PluginStatusBadge status={plugin.install_status} />
+              <DetailsCompletenessBadge
+                complete={plugin.details.completeness === "complete"}
+              />
+              {plugin.update_available === true && (
+                <span
+                  role="status"
+                  aria-label={t("plugins.updateAvailable")}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300"
+                >
+                  <RefreshCw className="h-3 w-3" aria-hidden="true" />
+                  {t("plugins.updateAvailable")}
+                </span>
+              )}
             </div>
             <p className="mt-1 break-all font-mono text-[11px] text-muted">
               {plugin.identity.plugin_id}
@@ -122,7 +202,7 @@ export function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 pb-20 scrollbar-hide">
           {plugin.details.completeness === "incomplete" && (
             <div
-              role="status"
+              role="note"
               className="flex gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-800 dark:text-amber-200"
             >
               <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -166,7 +246,7 @@ export function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
             <dt className="text-muted">{t("plugins.fields.status")}</dt>
             <dd className="text-secondary">{t(statusKey(plugin.install_status))}</dd>
             <dt className="text-muted">{t("plugins.fields.auth")}</dt>
-            <dd className="text-secondary">{t(authKey(plugin.auth_policy))}</dd>
+            <dd><AuthPolicyBadge policy={plugin.auth_policy} /></dd>
           </dl>
 
           {plugin.details.default_prompts.length > 0 && (

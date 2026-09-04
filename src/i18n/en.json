@@ -140,6 +140,12 @@
     "title": "Codex Plugin Inspector",
     "subtitle": "Select a plugin to inspect the identity and installation status currently confirmed by Codex.",
     "readOnly": "Read-only status",
+    "updateAvailable": "Update available",
+    "installStatusIndicator": "Installation status: {{status}}",
+    "authPolicyIndicator": "Authentication policy: {{policy}}",
+    "detailsCompletenessIndicator": "Details completeness: {{status}}",
+    "detailsComplete": "Details complete",
+    "detailsIncompleteShort": "Details incomplete",
     "loading": "Reading Codex plugin status",
     "refreshing": "Refreshing plugin status",
     "refresh": "Refresh",
@@ -192,7 +198,9 @@
       "connectors": "Connectors",
       "browserExtensions": "Browser extensions",
       "customUi": "Custom UI",
-      "undeclared": "Not declared"
+      "undeclared": "Not declared",
+      "declaredIndicator": "{{label}}: {{count}} declared",
+      "undeclaredIndicator": "{{label}}: not declared"
     },
     "auth": {
       "onInstall": "Authentication may be required during installation",

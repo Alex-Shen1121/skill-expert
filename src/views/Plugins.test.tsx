@@ -175,8 +175,8 @@ describe("Plugins 可信基础快照", () => {
     const list = screen.getByRole("listbox", { name: "已安装插件" });
     const options = within(list).getAllByRole("option");
     expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
-      "同名插件 · market-one · same-name@first",
-      "同名插件 · market-two · same-name@second",
+      "同名插件 · market-one · same-name@first · 1.2.3 · 已安装且启用",
+      "同名插件 · market-two · same-name@second · 2.0.0 · 已安装但停用",
     ]);
     expect(screen.queryByText("可安装插件")).toBeNull();
     expect(options[0].getAttribute("aria-selected")).toBe("true");
@@ -189,6 +189,44 @@ describe("Plugins 可信基础快照", () => {
     const details = screen.getByRole("complementary", { name: "插件详情" });
     expect(within(details).getByText("same-name@second")).toBeTruthy();
     expect(within(details).getAllByText("已安装但停用")).toHaveLength(2);
+  });
+
+  it("列表小字号来源信息使用浅深主题均达标的高对比文字令牌", async () => {
+    render(<Plugins />);
+
+    const metadata = await screen.findByText("market-one · 1.2.3");
+    expect(metadata.className).toContain("text-tertiary");
+    expect(metadata.className).not.toContain("text-faint");
+  });
+
+  it("方向键可切换状态视图并在列表中移动焦点与选择", async () => {
+    const user = userEvent.setup();
+    render(<Plugins />);
+
+    const installedTab = await screen.findByRole("tab", { name: "已安装 2 个" });
+    installedTab.focus();
+    await user.keyboard("{ArrowRight}");
+    const availableTab = screen.getByRole("tab", { name: "可安装 2 个" });
+    expect(document.activeElement).toBe(availableTab);
+    expect(availableTab.getAttribute("aria-selected")).toBe("true");
+
+    await user.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(installedTab);
+    expect(installedTab.getAttribute("aria-selected")).toBe("true");
+    const options = within(screen.getByRole("listbox", { name: "已安装插件" }))
+      .getAllByRole("option");
+    expect(options.map((option) => option.tabIndex)).toEqual([0, -1]);
+
+    options[0].focus();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(options[1]);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(within(screen.getByRole("complementary", { name: "插件详情" }))
+      .getByText("same-name@second")).toBeTruthy();
+
+    await user.keyboard("{Home}");
+    expect(document.activeElement).toBe(options[0]);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
   });
 
   it("逐类显示结构化错误，且不把失败呈现为空插件快照", async () => {
@@ -326,7 +364,7 @@ describe("Plugins 可信基础快照", () => {
     await user.click(refresh);
     await user.click(refresh);
 
-    expect(screen.getByRole("status").textContent).toContain("正在刷新插件状态");
+    expect(screen.getByText("正在刷新插件状态")).toBeTruthy();
     newest.resolve({
       ...projection,
       installed: [{
@@ -377,6 +415,26 @@ describe("Plugins 可信基础快照", () => {
     expect(within(error).getByText("读取插件状态超时，请稍后再试。")).toBeTruthy();
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.queryByText("same-name@first")).toBeNull();
+  });
+
+  it("刷新后已消失的 Marketplace 筛选会归一为全部并展示新快照", async () => {
+    const user = userEvent.setup();
+    render(<Plugins />);
+    await user.click(await screen.findByRole("tab", { name: "可安装 2 个" }));
+    const marketplace = screen.getByRole("combobox", { name: "Marketplace" });
+    await user.selectOptions(marketplace, "market-three");
+    expect(screen.getByRole("option", { name: /available-only/ })).toBeTruthy();
+
+    apiMocks.getAgentPluginProjection.mockResolvedValueOnce({
+      ...projection,
+      available: [projection.available[1]],
+    });
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(await screen.findByRole("option", { name: /other-available/ })).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Marketplace" }) as HTMLSelectElement).value)
+      .toBe("all");
+    expect(screen.queryByText("没有匹配的插件")).toBeNull();
   });
 
   it("CLI 不可用时提供设置跳转与重试，并在恢复后重新读取当前快照", async () => {

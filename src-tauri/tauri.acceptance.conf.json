@@ -1,0 +1,33 @@
+{
+  "productName": "Agent 技能管家 · 插件验收",
+  "identifier": "com.codingshen.skill-expert.acceptance.plugins",
+  "build": {
+    "devUrl": "http://127.0.0.1:1432",
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 1432"
+  },
+  "app": {
+    "windows": [
+      {
+        "create": false,
+        "title": "Agent 技能管家 · 插件验收",
+        "width": 1100,
+        "height": 640,
+        "minWidth": 1100,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "devtools": true,
+        "dataDirectory": "plugin-acceptance"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost data: blob: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https: ws://127.0.0.1:* ws://localhost:*"
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}

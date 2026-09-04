@@ -8,6 +8,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use super::central_repo;
+
 const UPSTREAM_DATABASE_FILE: &str = "skills-manager.db";
 const TARGET_DATABASE_FILE: &str = "skill-expert.db";
 const IMPORT_RECEIPT_FILE: &str = ".skill-expert-existing-install-import.json";
@@ -50,10 +52,9 @@ static PROCESS_LIFETIME_LOCK: OnceLock<std::result::Result<ProcessLifetimeLock, 
     OnceLock::new();
 
 fn process_lock_path() -> Result<PathBuf> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
-    let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
-    Ok(config_dir.join("skill-expert").join("process.lock"))
+    Ok(central_repo::runtime_config_dir()
+        .join("skill-expert")
+        .join("process.lock"))
 }
 
 fn open_process_lock_file(path: &Path) -> Result<File> {
@@ -113,10 +114,7 @@ fn acquire_process_lock_at(path: &Path, mode: ProcessLockMode, timeout: Duration
 }
 
 fn import_state_file_path() -> Result<PathBuf> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
-    let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
-    Ok(config_dir
+    Ok(central_repo::runtime_config_dir()
         .join("skill-expert")
         .join("existing-installation-import.json"))
 }
@@ -287,9 +285,8 @@ struct ImportEnvironment {
 }
 
 fn production_environment() -> Result<ImportEnvironment> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
-    let config_dir = dirs::config_dir().unwrap_or_else(|| home_dir.join(".config"));
+    let home_dir = central_repo::runtime_home_dir();
+    let config_dir = central_repo::runtime_config_dir();
     Ok(ImportEnvironment {
         home_dir,
         upstream_config_file: config_dir.join("skills-manager").join("repo-config.json"),

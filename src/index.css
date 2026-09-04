@@ -148,4 +148,23 @@
   .app-badge {
     @apply inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-hover px-2.5 py-1 text-[12px] font-medium text-tertiary;
   }
+
+  .plugin-catalog-page {
+    height: calc(100vh / var(--app-scale) - 68px);
+    min-height: 420px;
+  }
+
+  .plugin-catalog-frame {
+    container-type: inline-size;
+  }
+
+  .plugin-catalog-grid {
+    grid-template-columns: minmax(290px, 0.9fr) minmax(330px, 1.1fr);
+  }
+
+  @container (min-width: 940px) {
+    .plugin-catalog-grid {
+      grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+    }
+  }
 }

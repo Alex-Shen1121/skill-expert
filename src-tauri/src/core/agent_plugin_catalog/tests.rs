@@ -1084,3 +1084,51 @@ fn projection_timestamp(projection: &AgentPluginProjection) -> u64 {
         } => *refreshed_at_unix_ms,
     }
 }
+
+#[test]
+fn debug_acceptance_summary_compares_raw_and_projected_identities_without_storing_rows() {
+    let raw = br#"{
+      "installed":[{"pluginId":"one","marketplaceName":"market-a","installed":true,"enabled":true}],
+      "available":[{"pluginId":"two","marketplaceName":"market-b","installed":false,"enabled":false}]
+    }"#;
+    let (installed, available) = parse_projection(AgentPluginAgent::Codex, raw).unwrap();
+
+    let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
+
+    assert_eq!((evidence.raw_installed, evidence.raw_available), (1, 1));
+    assert_eq!(
+        (evidence.projected_installed, evidence.projected_available),
+        (1, 1)
+    );
+    assert!(evidence.identities_match);
+    assert!(evidence.installed_identities_match);
+    assert!(evidence.available_identities_match);
+    assert_eq!(
+        evidence.raw_identities_sha256,
+        evidence.projected_identities_sha256
+    );
+    let serialized = serde_json::to_string(&evidence).unwrap();
+    assert!(!serialized.contains("market-a"));
+    assert!(!serialized.contains("market-b"));
+    assert!(!serialized.contains("\"one\""));
+    assert!(!serialized.contains("\"two\""));
+}
+
+#[test]
+fn debug_acceptance_summary_rejects_identities_swapped_between_status_collections() {
+    let raw = br#"{
+      "installed":[{"pluginId":"one","marketplaceName":"market","installed":true,"enabled":true}],
+      "available":[{"pluginId":"two","marketplaceName":"market","installed":false,"enabled":false}]
+    }"#;
+    let swapped = br#"{
+      "installed":[{"pluginId":"two","marketplaceName":"market","installed":true,"enabled":true}],
+      "available":[{"pluginId":"one","marketplaceName":"market","installed":false,"enabled":false}]
+    }"#;
+    let (installed, available) = parse_projection(AgentPluginAgent::Codex, swapped).unwrap();
+
+    let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
+
+    assert!(!evidence.installed_identities_match);
+    assert!(!evidence.available_identities_match);
+    assert!(!evidence.identities_match);
+}
