@@ -21,6 +21,7 @@ pub mod migrations;
 pub mod panic_log;
 pub mod path_guard;
 pub mod pending_removal;
+pub mod process_runner;
 pub mod project_scanner;
 pub mod removals;
 pub mod repo_lock;
