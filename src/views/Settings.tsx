@@ -62,6 +62,7 @@ import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage } from "../lib/error";
 import type { Theme } from "../hooks/useTheme";
+import { SettingsHierarchyPrototype } from "./SettingsHierarchyPrototype";
 
 const IS_WINDOWS = navigator.userAgent.includes("Windows");
 const IS_MACOS = navigator.userAgent.includes("Mac");
@@ -1124,6 +1125,13 @@ export function Settings() {
       </div>
     </div>
   );
+
+  if (
+    import.meta.env.DEV ||
+    import.meta.env.VITE_SETTINGS_HIERARCHY_PROTOTYPE === "1"
+  ) {
+    return <SettingsHierarchyPrototype tools={tools} />;
+  }
 
   return (
     <div className="app-page app-page-narrow">
