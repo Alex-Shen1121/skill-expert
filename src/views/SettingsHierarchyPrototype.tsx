@@ -13,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import type { ToolInfo } from "../lib/tauri";
 import { cn } from "../utils";
 
@@ -166,29 +167,6 @@ function PreferenceSettings() {
   );
 }
 
-function AgentToggle({ enabled, label, onClick }: { enabled: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      onClick={onClick}
-      className={cn(
-        "relative h-5 w-9 shrink-0 rounded-full outline-none ring-offset-2 ring-offset-surface transition-colors focus-visible:ring-2 focus-visible:ring-accent",
-        enabled ? "bg-accent" : "bg-surface-active",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-          enabled ? "translate-x-[18px]" : "translate-x-0.5",
-        )}
-      />
-    </button>
-  );
-}
-
 function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
   const installed = useMemo(() => tools.filter((tool) => tool.installed).slice(0, 8), [tools]);
   const [enabledKeys, setEnabledKeys] = useState(
@@ -224,7 +202,11 @@ function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
                 <div className="truncate font-mono text-[11px] text-muted">{tool.skills_dir}</div>
               </div>
               <span className="text-[12px] text-muted">{enabled ? "已启用" : "未启用"}</span>
-              <AgentToggle enabled={enabled} label={`${enabled ? "关闭" : "开启"} ${tool.display_name}`} onClick={() => toggle(tool.key)} />
+              <ToggleSwitch
+                checked={enabled}
+                title={`${enabled ? "关闭" : "开启"} ${tool.display_name}`}
+                onChange={() => toggle(tool.key)}
+              />
             </div>
           );
         })}
@@ -286,7 +268,11 @@ function AgentManagementSettings({ tools }: SettingsHierarchyPrototypeProps) {
                 <div className="text-[13px] font-semibold text-primary">{tool.display_name}</div>
                 <div className="text-[11px] text-muted">{enabled ? "当前已启用管理能力" : "可启用"}</div>
               </div>
-              <AgentToggle enabled={enabled} label={`${enabled ? "关闭" : "开启"} ${tool.display_name} 的管理能力`} onClick={() => toggle(tool.key)} />
+              <ToggleSwitch
+                checked={enabled}
+                title={`${enabled ? "关闭" : "开启"} ${tool.display_name} 的管理能力`}
+                onChange={() => toggle(tool.key)}
+              />
             </div>
           );
         })}

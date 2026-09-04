@@ -1126,10 +1126,7 @@ export function Settings() {
     </div>
   );
 
-  if (
-    import.meta.env.DEV ||
-    import.meta.env.VITE_SETTINGS_HIERARCHY_PROTOTYPE === "1"
-  ) {
+  if (import.meta.env.VITE_SETTINGS_HIERARCHY_PROTOTYPE === "1") {
     return <SettingsHierarchyPrototype tools={tools} />;
   }
 
