@@ -17,9 +17,9 @@ import {
 import {
   agentPluginIdentityKey,
   getAgentPluginProjection,
-  type AgentPluginCatalogErrorKind,
   type AgentPluginProjection,
 } from "../lib/agentPlugins";
+import { agentPluginErrorMessageKey } from "../lib/agentPluginErrors";
 import {
   getAgentPluginMarketplaces,
   getAgentPluginScopeCounts,
@@ -28,18 +28,6 @@ import {
   type AgentPluginScope,
 } from "../lib/agentPluginView";
 import { cn } from "../utils";
-
-const ERROR_KEYS: Record<AgentPluginCatalogErrorKind, string> = {
-  cli_unavailable: "plugins.errors.cliUnavailable",
-  configured_path_invalid: "plugins.errors.configuredPathInvalid",
-  cli_not_runnable: "plugins.errors.cliNotRunnable",
-  command_unsupported: "plugins.errors.commandUnsupported",
-  timed_out: "plugins.errors.timedOut",
-  command_failed: "plugins.errors.commandFailed",
-  invalid_json: "plugins.errors.invalidJson",
-  contract_incompatible: "plugins.errors.contractIncompatible",
-  internal: "plugins.errors.internal",
-};
 
 function LoadingPanel() {
   const { t } = useTranslation();
@@ -245,7 +233,7 @@ export function Plugins() {
                 {t("plugins.errors.title")}
               </h2>
               <p className="mt-1 text-[12px] leading-5 text-muted">
-                {t(ERROR_KEYS[projection.error.kind])}
+                {t(agentPluginErrorMessageKey("plugins", projection.error.kind))}
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {[

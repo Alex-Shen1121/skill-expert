@@ -7,23 +7,11 @@ import {
   resetCodexCliPath,
   setCodexCliPath,
   validateCodexCliPath,
-  type AgentPluginCatalogErrorKind,
   type CodexCliConfiguration,
   type CodexCliFactStatus,
 } from "../../lib/agentPlugins";
+import { agentPluginErrorMessageKey } from "../../lib/agentPluginErrors";
 import { cn } from "../../utils";
-
-const ERROR_KEYS: Record<AgentPluginCatalogErrorKind, string> = {
-  cli_unavailable: "settings.codexCli.errors.cliUnavailable",
-  configured_path_invalid: "settings.codexCli.errors.configuredPathInvalid",
-  cli_not_runnable: "settings.codexCli.errors.cliNotRunnable",
-  command_unsupported: "settings.codexCli.errors.commandUnsupported",
-  timed_out: "settings.codexCli.errors.timedOut",
-  command_failed: "settings.codexCli.errors.commandFailed",
-  invalid_json: "settings.codexCli.errors.invalidJson",
-  contract_incompatible: "settings.codexCli.errors.contractIncompatible",
-  internal: "settings.codexCli.errors.internal",
-};
 
 type Completion = "none" | "validated" | "saved" | "reset";
 type PendingAction = "loading" | "validating" | "saving" | "resetting" | null;
@@ -137,7 +125,7 @@ export function CodexCliPathSettings() {
   };
 
   const message = configuration?.error
-    ? t(ERROR_KEYS[configuration.error])
+    ? t(agentPluginErrorMessageKey("settings.codexCli", configuration.error))
     : completion === "validated"
       ? t("settings.codexCli.validationSuccess")
       : completion === "saved"
