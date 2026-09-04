@@ -8,6 +8,7 @@
     "globalWorkspace": "Global Workspace",
     "lobsterAgents": "Lobster Agents",
     "installSkills": "Install Skills",
+    "plugins": "Plugins",
     "backup": "Backup",
     "presets": "Presets",
     "newPreset": "New Preset",
@@ -134,6 +135,48 @@
     "retryFailed": "Retry failed items",
     "retrySuccess": "Failed items were retried successfully.",
     "errorNotFound": "The management Skill was still missing from the library after installation."
+  },
+  "plugins": {
+    "title": "Codex Plugin Inspector",
+    "subtitle": "Select a plugin to inspect the identity and installation status currently confirmed by Codex.",
+    "readOnly": "Read-only status",
+    "loading": "Reading Codex plugin status",
+    "installed": "Installed",
+    "count": "{{count}}",
+    "listLabel": "Installed plugins",
+    "detailsLabel": "Plugin details",
+    "basicDetails": "Basic details",
+    "unknown": "Not provided",
+    "noSelection": "Select a plugin to view details",
+    "emptyTitle": "No installed plugins",
+    "emptyDescription": "Codex CLI successfully returned an empty current snapshot.",
+    "status": {
+      "installed_enabled": "Installed and enabled",
+      "installed_disabled": "Installed but disabled",
+      "available": "Available"
+    },
+    "fields": {
+      "agent": "Supported agent",
+      "marketplace": "Marketplace",
+      "version": "Version",
+      "status": "Installation status",
+      "auth": "Authentication policy"
+    },
+    "auth": {
+      "onInstall": "Authentication may be required during installation",
+      "onUse": "Authentication may be required during use",
+      "none": "No authentication required"
+    },
+    "errors": {
+      "title": "Plugin status could not be read",
+      "cliUnavailable": "The plugin CLI is unavailable. Confirm that Codex CLI is installed and accessible from this environment.",
+      "commandUnsupported": "This Codex CLI does not support the plugin catalog command. Update Codex first.",
+      "timedOut": "Reading plugin status timed out. Try again later.",
+      "commandFailed": "Codex CLI failed. No previous result is being shown as current.",
+      "invalidJson": "Codex CLI returned data that could not be parsed.",
+      "contractIncompatible": "The data contract returned by Codex CLI is not compatible with this version.",
+      "internal": "An internal error occurred while reading plugin status."
+    }
   },
   "backup": {
     "title": "Backup",

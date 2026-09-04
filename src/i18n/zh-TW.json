@@ -8,6 +8,7 @@
     "globalWorkspace": "全域工作區",
     "lobsterAgents": "龍蝦 Agent",
     "installSkills": "安裝 Skills",
+    "plugins": "外掛",
     "backup": "備份",
     "presets": "Preset",
     "newPreset": "新增 Preset",
@@ -134,6 +135,48 @@
     "retryFailed": "重試失敗項目",
     "retrySuccess": "失敗項目已重試完成。",
     "errorNotFound": "管理 Skill 安裝完成後仍未在技能庫中找到。"
+  },
+  "plugins": {
+    "title": "Codex 外掛檢查器",
+    "subtitle": "選擇一個外掛，在同一檢視中檢查 Codex 目前確認的身分和安裝狀態。",
+    "readOnly": "唯讀狀態",
+    "loading": "正在讀取 Codex 外掛狀態",
+    "installed": "已安裝",
+    "count": "{{count}} 個",
+    "listLabel": "已安裝外掛",
+    "detailsLabel": "外掛詳情",
+    "basicDetails": "基礎詳情",
+    "unknown": "未提供",
+    "noSelection": "選擇一個外掛查看詳情",
+    "emptyTitle": "沒有已安裝外掛",
+    "emptyDescription": "Codex CLI 已成功傳回目前的空快照。",
+    "status": {
+      "installed_enabled": "已安裝且啟用",
+      "installed_disabled": "已安裝但停用",
+      "available": "可安裝"
+    },
+    "fields": {
+      "agent": "支援 Agent",
+      "marketplace": "Marketplace",
+      "version": "版本",
+      "status": "安裝狀態",
+      "auth": "認證策略"
+    },
+    "auth": {
+      "onInstall": "安裝時可能需要認證",
+      "onUse": "使用時可能需要認證",
+      "none": "無需認證"
+    },
+    "errors": {
+      "title": "無法讀取外掛狀態",
+      "cliUnavailable": "外掛 CLI 不可用，請確認 Codex CLI 已安裝且可從目前環境存取。",
+      "commandUnsupported": "目前的 Codex CLI 不支援外掛目錄命令，請先更新 Codex。",
+      "timedOut": "讀取外掛狀態逾時，請稍後再試。",
+      "commandFailed": "Codex CLI 傳回失敗，目前結果未被保留。",
+      "invalidJson": "Codex CLI 傳回了無法解析的資料。",
+      "contractIncompatible": "Codex CLI 傳回的資料契約與目前版本不相容。",
+      "internal": "讀取外掛狀態時發生內部錯誤。"
+    }
   },
   "backup": {
     "title": "備份",
