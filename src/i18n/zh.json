@@ -8,6 +8,7 @@
     "globalWorkspace": "全局工作区",
     "lobsterAgents": "龙虾 Agent",
     "installSkills": "安装 Skills",
+    "plugins": "插件",
     "backup": "备份",
     "presets": "Preset",
     "newPreset": "新建 Preset",
@@ -134,6 +135,48 @@
     "retryFailed": "重试失败项",
     "retrySuccess": "失败项已重试完成。",
     "errorNotFound": "管理 Skill 安装完成后仍未在技能库中找到。"
+  },
+  "plugins": {
+    "title": "Codex 插件检查器",
+    "subtitle": "选择一个插件，在同一视图中检查 Codex 当前确认的身份和安装状态。",
+    "readOnly": "只读状态",
+    "loading": "正在读取 Codex 插件状态",
+    "installed": "已安装",
+    "count": "{{count}} 个",
+    "listLabel": "已安装插件",
+    "detailsLabel": "插件详情",
+    "basicDetails": "基础详情",
+    "unknown": "未提供",
+    "noSelection": "选择一个插件查看详情",
+    "emptyTitle": "没有已安装插件",
+    "emptyDescription": "Codex CLI 已成功返回当前空快照。",
+    "status": {
+      "installed_enabled": "已安装且启用",
+      "installed_disabled": "已安装但停用",
+      "available": "可安装"
+    },
+    "fields": {
+      "agent": "支持 Agent",
+      "marketplace": "Marketplace",
+      "version": "版本",
+      "status": "安装状态",
+      "auth": "认证策略"
+    },
+    "auth": {
+      "onInstall": "安装时可能需要认证",
+      "onUse": "使用时可能需要认证",
+      "none": "无需认证"
+    },
+    "errors": {
+      "title": "无法读取插件状态",
+      "cliUnavailable": "插件 CLI 不可用，请确认 Codex CLI 已安装并可从当前环境访问。",
+      "commandUnsupported": "当前 Codex CLI 不支持插件目录命令，请先更新 Codex。",
+      "timedOut": "读取插件状态超时，请稍后再试。",
+      "commandFailed": "Codex CLI 返回失败，当前结果未被保留。",
+      "invalidJson": "Codex CLI 返回了无法解析的数据。",
+      "contractIncompatible": "Codex CLI 返回的数据契约与当前版本不兼容。",
+      "internal": "读取插件状态时发生内部错误。"
+    }
   },
   "backup": {
     "title": "备份",

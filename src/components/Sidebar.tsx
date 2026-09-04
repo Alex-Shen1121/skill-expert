@@ -14,6 +14,7 @@ import {
   FolderOpen,
   GripVertical,
   Link2,
+  Puzzle,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -168,6 +169,7 @@ export function Sidebar() {
     { name: t("sidebar.dashboard"), path: "/", icon: LayoutDashboard },
     { name: t("sidebar.mySkills"), path: "/my-skills", icon: Layers },
     { name: t("sidebar.installSkills"), path: "/install", icon: Download },
+    { name: t("sidebar.plugins"), path: "/plugins", icon: Puzzle },
     { name: t("sidebar.backup"), path: "/backup", icon: CloudUpload },
   ];
 

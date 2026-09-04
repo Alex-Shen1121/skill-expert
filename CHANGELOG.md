@@ -10,13 +10,16 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### Release Overview
 - 修复 Skill 批量检查或更新点击停止后，在途网络任务卡住并导致进度窗口无法关闭的问题。
+- 新增 Codex 插件的只读基础状态检查页面。
 
 ### User-facing
 - 停止请求现在会取消可取消的在途 Git 查询与克隆，并立即允许通过关闭按钮或 `Esc` 退出进度窗口。
+- 侧边栏新增“插件”入口，可在主从视图中查看 Codex 当前确认的已安装插件身份、版本与启用状态。
 
 ### Developer & Governance
 - 批次停止令牌已贯通远端修订解析、仓库缓存锁、Git 克隆和批量更新路径，并为 Git 远端查询增加有界超时与子进程回收。
 - CLI 身份契约现在从权威模块校验管理 Skill 的独立仓库来源，并单独验证首页入口的可信安装接线，避免重构后误报。
+- Agent 插件目录通过受控进程接缝读取同一次 Codex CLI 快照，并以复合身份、严格 JSON 契约和脱敏结构化错误形成内存态投影。
 
 ## [1.0.14] - 2026-09-01
 

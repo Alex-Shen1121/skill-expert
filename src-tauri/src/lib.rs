@@ -1066,6 +1066,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Agent plugins
+            commands::agent_plugins::get_agent_plugin_projection,
             // Tools
             commands::tools::get_tool_status,
             commands::tools::set_tool_enabled,
