@@ -13,10 +13,7 @@ const STATUS_ORDER = {
 
 export type AgentPluginScope = "installed" | "available";
 
-export interface AgentPluginViewItem extends AgentPluginSummary {
-  description?: string | null;
-  developer?: string | null;
-}
+export type AgentPluginViewItem = AgentPluginSummary;
 
 type ReadyAgentPluginProjection = Extract<
   AgentPluginProjection,
@@ -113,13 +110,12 @@ export function getVisibleAgentPlugins({
     ))
     .filter((plugin) => {
       if (!normalizedQuery) return true;
-      const viewPlugin = plugin as AgentPluginViewItem;
       return [
         plugin.display_name,
         plugin.identity.plugin_id,
-        viewPlugin.description,
+        plugin.details.description ?? "",
         plugin.identity.marketplace_name,
-        viewPlugin.developer,
+        plugin.details.developer ?? "",
       ].some((value) => normalizeSearchValue(value, language).includes(normalizedQuery));
     })
     .sort((left, right) => {

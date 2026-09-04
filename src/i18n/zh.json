@@ -155,6 +155,13 @@
     "allMarketplaces": "全部 Marketplace",
     "detailsLabel": "插件详情",
     "basicDetails": "基础详情",
+    "detailsIncomplete": "详情不完整：Codex 已确认插件状态，但部分 manifest 或资源无法安全读取。",
+    "technicalDetails": "技术详情",
+    "defaultPrompts": "默认提示词",
+    "screenshots": "截图",
+    "screenshotAlt": "插件截图 {{index}}",
+    "defaultIcon": "默认插件图标",
+    "pluginIcon": "{{name}} 图标",
     "unknown": "未提供",
     "noSelection": "选择一个插件查看详情",
     "emptyTitle": "没有已安装插件",
@@ -169,10 +176,23 @@
     },
     "fields": {
       "agent": "支持 Agent",
+      "developer": "开发者",
+      "category": "类别",
       "marketplace": "Marketplace",
       "version": "版本",
       "status": "安装状态",
-      "auth": "认证策略"
+      "auth": "认证策略",
+      "sourceType": "来源类型",
+      "location": "收敛位置"
+    },
+    "capabilities": {
+      "skills": "Skills",
+      "mcp": "MCP",
+      "hooks": "Hooks",
+      "connectors": "连接器",
+      "browserExtensions": "浏览器扩展",
+      "customUi": "自定义 UI",
+      "undeclared": "未声明"
     },
     "auth": {
       "onInstall": "安装时可能需要认证",

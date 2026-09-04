@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
-  Download,
   LoaderCircle,
   Puzzle,
   RefreshCw,
   ShieldCheck,
-  Unplug,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PluginCatalogControls } from "../components/plugins/PluginCatalogControls";
@@ -15,12 +12,13 @@ import {
   PluginList,
 } from "../components/plugins/PluginList";
 import {
+  PluginDetails,
+} from "../components/plugins/PluginDetails";
+import {
   agentPluginIdentityKey,
   getAgentPluginProjection,
   type AgentPluginCatalogErrorKind,
-  type AgentPluginInstallStatus,
   type AgentPluginProjection,
-  type AgentPluginSummary,
 } from "../lib/agentPlugins";
 import {
   getAgentPluginMarketplaces,
@@ -40,110 +38,6 @@ const ERROR_KEYS: Record<AgentPluginCatalogErrorKind, string> = {
   contract_incompatible: "plugins.errors.contractIncompatible",
   internal: "plugins.errors.internal",
 };
-
-function statusKey(status: AgentPluginInstallStatus): string {
-  return `plugins.status.${status}`;
-}
-
-function StatusBadge({ status }: { status: AgentPluginInstallStatus }) {
-  const { t } = useTranslation();
-  const appearance = status === "installed_enabled"
-    ? {
-        Icon: Check,
-        className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-      }
-    : status === "installed_disabled"
-      ? {
-          Icon: Unplug,
-          className: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        }
-      : {
-          Icon: Download,
-          className: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
-        };
-  const { Icon } = appearance;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        appearance.className,
-      )}
-    >
-      <Icon className="h-3 w-3" aria-hidden="true" />
-      {t(statusKey(status))}
-    </span>
-  );
-}
-
-function PluginMark({ name, large = false }: { name: string; large?: boolean }) {
-  const text = name.trim().slice(0, 2).toLocaleUpperCase() || "P";
-  return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 font-semibold text-accent",
-        large ? "h-14 w-14 text-[17px]" : "h-9 w-9 text-[12px]",
-      )}
-      aria-hidden="true"
-    >
-      {text}
-    </span>
-  );
-}
-
-function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
-  const { t } = useTranslation();
-  const authKey = plugin.auth_policy === "ON_INSTALL"
-    ? "plugins.auth.onInstall"
-    : plugin.auth_policy === "ON_USE"
-      ? "plugins.auth.onUse"
-      : plugin.auth_policy === "NONE"
-        ? "plugins.auth.none"
-        : "plugins.unknown";
-  return (
-    <aside
-      aria-label={t("plugins.detailsLabel")}
-      className="min-h-0 bg-background/40"
-    >
-      <div className="flex h-full min-h-0 flex-col">
-        <div className="flex items-start gap-3 border-b border-border-subtle p-5">
-          <PluginMark name={plugin.display_name} large />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[17px] font-semibold tracking-tight text-primary">
-                {plugin.display_name}
-              </h2>
-              <StatusBadge status={plugin.install_status} />
-            </div>
-            <p className="mt-1 break-all font-mono text-[11px] text-muted">
-              {plugin.identity.plugin_id}
-            </p>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5 scrollbar-hide">
-          <h3 className="mb-4 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
-            {t("plugins.basicDetails")}
-          </h3>
-          <dl className="grid grid-cols-[112px_1fr] gap-x-4 gap-y-3 text-[12px]">
-            <dt className="text-muted">{t("plugins.fields.agent")}</dt>
-            <dd className="text-secondary">Codex</dd>
-            <dt className="text-muted">{t("plugins.fields.marketplace")}</dt>
-            <dd className="break-all font-mono text-[11px] text-secondary">
-              {plugin.identity.marketplace_name}
-            </dd>
-            <dt className="text-muted">{t("plugins.fields.version")}</dt>
-            <dd className="font-mono text-[11px] text-secondary">
-              {plugin.version ?? t("plugins.unknown")}
-            </dd>
-            <dt className="text-muted">{t("plugins.fields.status")}</dt>
-            <dd className="text-secondary">{t(statusKey(plugin.install_status))}</dd>
-            <dt className="text-muted">{t("plugins.fields.auth")}</dt>
-            <dd className="text-secondary">{t(authKey)}</dd>
-          </dl>
-        </div>
-      </div>
-    </aside>
-  );
-}
 
 function LoadingPanel() {
   const { t } = useTranslation();

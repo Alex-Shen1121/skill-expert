@@ -4,6 +4,10 @@ struct FixtureAdapter {
     stdout: &'static [u8],
 }
 
+struct OwnedFixtureAdapter {
+    stdout: Vec<u8>,
+}
+
 struct CompletedCommandAdapter {
     success: bool,
     exit_code: Option<i32>,
@@ -39,6 +43,674 @@ impl CatalogAdapter for FixtureAdapter {
         Ok(CatalogCommandOutput {
             stdout: self.stdout.to_vec(),
         })
+    }
+}
+
+impl CatalogAdapter for OwnedFixtureAdapter {
+    fn read(&self) -> Result<CatalogCommandOutput, AgentPluginCatalogError> {
+        Ok(CatalogCommandOutput {
+            stdout: self.stdout.clone(),
+        })
+    }
+}
+
+#[test]
+fn complete_manifest_supplements_details_without_overriding_cli_facts() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("skills/safe-skill")).unwrap();
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    std::fs::write(
+        root.join("skills/safe-skill/SKILL.md"),
+        "---\nname: safe-skill\ndescription: 只读处理文档\n---\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".mcp.json"),
+        r#"{"mcp_servers":{"docs":{"command":"secret-command","env":{"TOKEN":"secret-value"}}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".app.json"),
+        r#"{"apps":{"docs-connector":{"id":"plugin_asdk_secret"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("assets/icon.png"),
+        base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r##"{
+          "name":"manifest-name",
+          "version":"99.0.0",
+          "description":"顶层说明",
+          "author":{"name":"顶层开发者","email":"secret@example.com"},
+          "skills":"./skills/",
+          "mcpServers":"./.mcp.json",
+          "apps":"./.app.json",
+          "hooks":{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo secret"}]}]}},
+          "interface":{
+            "displayName":"安全详情插件",
+            "longDescription":"只展示可信补充资料。",
+            "developerName":"可信开发者",
+            "category":"效率",
+            "capabilities":["Read","Write"],
+            "defaultPrompt":["总结文档","检查变更"],
+            "composerIcon":"./assets/icon.png"
+          }
+        }"##,
+    )
+    .unwrap();
+
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed": [{
+            "pluginId": "safe-details@market",
+            "name": "CLI 名称",
+            "marketplaceName": "market",
+            "version": "1.2.3",
+            "installed": true,
+            "enabled": false,
+            "authPolicy": "ON_INSTALL",
+            "source": {"source": "local", "path": root}
+        }],
+        "available": []
+    }))
+    .unwrap();
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("合法 manifest 应保留就绪投影");
+    };
+    let plugin = &installed[0];
+    assert_eq!(plugin.identity.plugin_id, "safe-details@market");
+    assert_eq!(plugin.version.as_deref(), Some("1.2.3"));
+    assert_eq!(
+        plugin.install_status,
+        AgentPluginInstallStatus::InstalledDisabled
+    );
+    assert_eq!(plugin.display_name, "安全详情插件");
+    assert_eq!(
+        plugin.details.description.as_deref(),
+        Some("只展示可信补充资料。")
+    );
+    assert_eq!(plugin.details.developer.as_deref(), Some("可信开发者"));
+    assert_eq!(plugin.details.category.as_deref(), Some("效率"));
+    assert_eq!(plugin.details.default_prompts, ["总结文档", "检查变更"]);
+    assert_eq!(plugin.details.declared_capabilities, ["Read", "Write"]);
+    assert_eq!(
+        plugin.details.skills,
+        [AgentPluginSkill {
+            name: "safe-skill".into(),
+            description: Some("只读处理文档".into()),
+        }]
+    );
+    assert_eq!(plugin.details.mcp_servers, ["docs"]);
+    assert_eq!(plugin.details.hook_events, ["SessionStart"]);
+    assert_eq!(plugin.details.connectors, ["docs-connector"]);
+    assert!(plugin.details.browser_extensions.is_empty());
+    assert!(plugin.details.custom_ui.is_empty());
+    assert!(plugin
+        .details
+        .icon_data_url
+        .as_deref()
+        .is_some_and(|value| value.starts_with("data:image/png;base64,")));
+    assert_eq!(
+        plugin.details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+    assert!(plugin.details.issues.is_empty());
+    assert_eq!(
+        plugin.details.technical.source_type.as_deref(),
+        Some("local")
+    );
+    assert!(plugin
+        .details
+        .technical
+        .location
+        .as_deref()
+        .is_some_and(|value| !value.contains(temp.path().to_string_lossy().as_ref())));
+    let serialized = serde_json::to_string(plugin).unwrap();
+    for secret in [
+        "secret-command",
+        "secret-value",
+        "plugin_asdk_secret",
+        "secret@example.com",
+    ] {
+        assert!(!serialized.contains(secret));
+    }
+}
+
+#[test]
+fn manifest_screenshots_are_returned_only_after_safe_image_validation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    let png = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+    std::fs::write(root.join("assets/screen.png"), png).unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"fixture","interface":{"screenshots":["./assets/screen.png"]}}"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed": [{
+            "pluginId":"fixture",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("安全截图不应影响 CLI 就绪投影");
+    };
+
+    assert_eq!(installed[0].details.screenshot_data_urls.len(), 1);
+    assert!(installed[0].details.screenshot_data_urls[0].starts_with("data:image/png;base64,"));
+    assert_eq!(
+        installed[0].details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unsafe_visual_resources_fall_back_per_plugin_without_reducing_the_cli_collection() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let png = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+    std::fs::write(temp.path().join("outside.png"), &png).unwrap();
+    let cases = [
+        (
+            "traversal",
+            "./../outside.png",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+        (
+            "absolute",
+            "/tmp/skill-expert-absolute-icon.png",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+        (
+            "remote",
+            "https://example.com/icon.png",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+        (
+            "missing",
+            "./assets/missing.png",
+            AgentPluginDetailsIssue::ComponentUnreadable,
+        ),
+        (
+            "unsupported",
+            "./assets/icon.svg",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+        (
+            "oversized",
+            "./assets/large.png",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+        (
+            "symlink",
+            "./assets/link.png",
+            AgentPluginDetailsIssue::ResourceRejected,
+        ),
+    ];
+    let mut entries = Vec::new();
+    for (id, icon, _) in cases {
+        let root = temp.path().join(id);
+        std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        match id {
+            "unsupported" => std::fs::write(root.join("assets/icon.svg"), b"<svg/>").unwrap(),
+            "oversized" => {
+                let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+                bytes.resize(2 * 1024 * 1024 + 1, 0);
+                std::fs::write(root.join("assets/large.png"), bytes).unwrap();
+            }
+            "symlink" => symlink(
+                temp.path().join("outside.png"),
+                root.join("assets/link.png"),
+            )
+            .unwrap(),
+            _ => {}
+        }
+        std::fs::write(
+            root.join(".codex-plugin/plugin.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "name": id,
+                "interface": {"composerIcon": icon}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        entries.push(serde_json::json!({
+            "pluginId": id,
+            "marketplaceName": "market",
+            "installed": true,
+            "enabled": true,
+            "source": {"source": "local", "path": root}
+        }));
+    }
+    let healthy_root = temp.path().join("healthy");
+    std::fs::create_dir_all(healthy_root.join(".codex-plugin")).unwrap();
+    std::fs::write(
+        healthy_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"healthy","description":"仍可读取"}"#,
+    )
+    .unwrap();
+    entries.push(serde_json::json!({
+        "pluginId":"healthy",
+        "marketplaceName":"market",
+        "installed":true,
+        "enabled":true,
+        "source":{"source":"local","path":healthy_root}
+    }));
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed": entries,
+        "available": []
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("单条视觉资源失败不能提升为 Agent 失败");
+    };
+
+    assert_eq!(installed.len(), 8);
+    for (id, _, expected_issue) in cases {
+        let plugin = installed
+            .iter()
+            .find(|plugin| plugin.identity.plugin_id == id)
+            .unwrap();
+        assert_eq!(
+            plugin.details.completeness,
+            AgentPluginDetailsCompleteness::Incomplete
+        );
+        assert!(plugin.details.icon_data_url.is_none());
+        assert!(
+            plugin.details.issues.contains(&expected_issue),
+            "{id} 应包含 {expected_issue:?}，实际为 {:?}",
+            plugin.details.issues
+        );
+    }
+    let healthy = installed
+        .iter()
+        .find(|plugin| plugin.identity.plugin_id == "healthy")
+        .unwrap();
+    assert_eq!(
+        healthy.details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+    assert_eq!(healthy.details.description.as_deref(), Some("仍可读取"));
+}
+
+#[cfg(unix)]
+#[test]
+fn manifest_skill_directory_rejects_symlink_entries_that_escape_the_plugin_root() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    let outside = temp.path().join("outside-skill");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("skills")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(
+        outside.join("SKILL.md"),
+        "---\nname: escaped\ndescription: 不得读取\n---\n",
+    )
+    .unwrap();
+    symlink(&outside, root.join("skills/escaped")).unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"fixture","skills":"./skills/"}"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"fixture",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("越界 Skill 不能破坏 Agent 状态投影");
+    };
+
+    assert!(installed[0].details.skills.is_empty());
+    assert_eq!(
+        installed[0].details.completeness,
+        AgentPluginDetailsCompleteness::Incomplete
+    );
+    assert!(installed[0]
+        .details
+        .issues
+        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+}
+
+#[test]
+fn authentication_policy_is_limited_to_three_declared_states() {
+    let installed = [
+        ("install", Some("ON_INSTALL")),
+        ("use", Some("ON_USE")),
+        ("none", Some("NONE")),
+        ("future", Some("FUTURE_POLICY")),
+        ("missing", None),
+    ]
+    .into_iter()
+    .map(|(id, policy)| {
+        let mut entry = serde_json::json!({
+            "pluginId":id,
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true
+        });
+        if let Some(policy) = policy {
+            entry["authPolicy"] = Value::String(policy.into());
+        }
+        entry
+    })
+    .collect::<Vec<_>>();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":installed,
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("未知认证策略应前向兼容，而不是破坏投影");
+    };
+
+    assert_eq!(
+        installed[0].auth_policy,
+        Some(AgentPluginAuthPolicy::OnInstall)
+    );
+    assert_eq!(installed[1].auth_policy, Some(AgentPluginAuthPolicy::OnUse));
+    assert_eq!(installed[2].auth_policy, Some(AgentPluginAuthPolicy::None));
+    assert_eq!(installed[3].auth_policy, None);
+    assert_eq!(installed[4].auth_policy, None);
+}
+
+#[test]
+fn malformed_mcp_wrapper_degrades_only_details_and_default_hook_files_are_not_inferred() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("hooks")).unwrap();
+    std::fs::write(
+        root.join(".mcp.json"),
+        r#"{"mcp_servers":"secret-server-name","command":"secret-command"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("hooks/hooks.json"),
+        r#"{"hooks":{"SecretDefaultEvent":[{"hooks":[{"command":"secret-hook"}]}]}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"fixture","mcpServers":"./.mcp.json"}"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"fixture",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("组件字段不兼容不能否定 CLI 投影");
+    };
+
+    let plugin = &installed[0];
+    assert!(plugin.details.mcp_servers.is_empty());
+    assert!(plugin.details.hook_events.is_empty());
+    assert!(plugin.details.browser_extensions.is_empty());
+    assert!(plugin.details.custom_ui.is_empty());
+    assert_eq!(
+        plugin.details.completeness,
+        AgentPluginDetailsCompleteness::Incomplete
+    );
+    assert!(plugin
+        .details
+        .issues
+        .contains(&AgentPluginDetailsIssue::ManifestIncompatible));
+    let serialized = serde_json::to_string(plugin).unwrap();
+    for secret in [
+        "secret-server-name",
+        "secret-command",
+        "SecretDefaultEvent",
+        "secret-hook",
+    ] {
+        assert!(!serialized.contains(secret));
+    }
+}
+
+#[test]
+fn safe_logo_can_replace_an_unsafe_composer_icon_without_hiding_the_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    std::fs::write(
+        root.join("assets/logo.png"),
+        base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"fixture","interface":{"composerIcon":"https://example.com/unsafe.png","logo":"./assets/logo.png"}}"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"fixture",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("视觉候选失败不能破坏状态投影");
+    };
+    let details = &installed[0].details;
+
+    assert!(details
+        .icon_data_url
+        .as_deref()
+        .is_some_and(|value| value.starts_with("data:image/png;base64,")));
+    assert_eq!(
+        details.completeness,
+        AgentPluginDetailsCompleteness::Incomplete
+    );
+    assert!(details
+        .issues
+        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+}
+
+#[test]
+fn image_dimensions_are_bounded_even_when_the_png_file_is_small() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    image::RgbaImage::new(5000, 1)
+        .save(root.join("assets/wide.png"))
+        .unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"fixture","interface":{"logo":"./assets/wide.png"}}"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"fixture",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("不安全图片不能破坏状态投影");
+    };
+    let details = &installed[0].details;
+
+    assert!(details.icon_data_url.is_none());
+    assert_eq!(
+        details.completeness,
+        AgentPluginDetailsCompleteness::Incomplete
+    );
+    assert!(details
+        .issues
+        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+}
+
+#[test]
+fn missing_invalid_and_incompatible_manifests_degrade_only_their_own_cli_entries() {
+    let temp = tempfile::tempdir().unwrap();
+    let fixtures = [
+        (
+            "partial",
+            Some(r#"{"name":"manifest-name","description":"部分字段仍然有效"}"#),
+        ),
+        ("missing", None),
+        ("invalid", Some("{not-json")),
+        (
+            "incompatible",
+            Some(r#"{"name":"fixture","interface":"wrong-type"}"#),
+        ),
+    ];
+    let mut entries = Vec::new();
+    for (id, manifest) in fixtures {
+        let root = temp.path().join(id);
+        std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+        if let Some(manifest) = manifest {
+            std::fs::write(root.join(".codex-plugin/plugin.json"), manifest).unwrap();
+        }
+        entries.push(serde_json::json!({
+            "pluginId":id,
+            "name":format!("CLI {id}"),
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }));
+    }
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":entries,
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("manifest 资料质量不得提升为 Agent 失败");
+    };
+
+    assert_eq!(installed.len(), 4);
+    let partial = &installed[0];
+    assert_eq!(partial.display_name, "CLI partial");
+    assert_eq!(
+        partial.details.description.as_deref(),
+        Some("部分字段仍然有效")
+    );
+    assert_eq!(
+        partial.details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+    for (index, issue) in [
+        AgentPluginDetailsIssue::ManifestMissing,
+        AgentPluginDetailsIssue::ManifestInvalid,
+        AgentPluginDetailsIssue::ManifestIncompatible,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let plugin = &installed[index + 1];
+        assert_eq!(
+            plugin.details.completeness,
+            AgentPluginDetailsCompleteness::Incomplete
+        );
+        assert!(plugin.details.issues.contains(&issue));
+        assert!(plugin.details.skills.is_empty());
     }
 }
 
@@ -112,7 +784,8 @@ fn one_snapshot_preserves_every_identity_and_maps_installed_states() {
                     install_status: AgentPluginInstallStatus::InstalledEnabled,
                     update_available: Some(false),
                     install_policy: Some("AVAILABLE".into()),
-                    auth_policy: Some("ON_INSTALL".into()),
+                    auth_policy: Some(AgentPluginAuthPolicy::OnInstall),
+                    details: AgentPluginDetails::default(),
                 },
                 AgentPluginSummary {
                     identity: AgentPluginIdentity {
@@ -126,6 +799,7 @@ fn one_snapshot_preserves_every_identity_and_maps_installed_states() {
                     update_available: None,
                     install_policy: None,
                     auth_policy: None,
+                    details: AgentPluginDetails::default(),
                 },
             ],
             vec![AgentPluginSummary {
@@ -140,6 +814,7 @@ fn one_snapshot_preserves_every_identity_and_maps_installed_states() {
                 update_available: None,
                 install_policy: None,
                 auth_policy: None,
+                details: AgentPluginDetails::default(),
             }],
         )
     );

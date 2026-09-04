@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentPluginIdentityKey,
+  type AgentPluginDetails,
   type AgentPluginProjection,
   type AgentPluginSummary,
 } from "./agentPlugins";
@@ -19,7 +20,7 @@ function plugin(
   pluginId: string,
   displayName: string,
   installStatus: AgentPluginSummary["install_status"],
-  details: Partial<Pick<AgentPluginViewItem, "description" | "developer">> = {},
+  details: Partial<Pick<AgentPluginDetails, "description" | "developer">> = {},
 ): AgentPluginViewItem {
   return {
     identity: {
@@ -33,7 +34,24 @@ function plugin(
     update_available: null,
     install_policy: "AVAILABLE",
     auth_policy: null,
-    ...details,
+    details: {
+      description: details.description ?? null,
+      developer: details.developer ?? null,
+      category: null,
+      default_prompts: [],
+      declared_capabilities: [],
+      skills: [],
+      mcp_servers: [],
+      hook_events: [],
+      connectors: [],
+      browser_extensions: [],
+      custom_ui: [],
+      icon_data_url: null,
+      screenshot_data_urls: [],
+      completeness: "incomplete",
+      issues: ["manifest_missing"],
+      technical: { source_type: null, location: null },
+    },
   };
 }
 

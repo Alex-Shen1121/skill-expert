@@ -155,6 +155,13 @@
     "allMarketplaces": "All Marketplaces",
     "detailsLabel": "Plugin details",
     "basicDetails": "Basic details",
+    "detailsIncomplete": "Details are incomplete: Codex confirmed the plugin status, but some manifest data or resources could not be read safely.",
+    "technicalDetails": "Technical details",
+    "defaultPrompts": "Default prompts",
+    "screenshots": "Screenshots",
+    "screenshotAlt": "Plugin screenshot {{index}}",
+    "defaultIcon": "Default plugin icon",
+    "pluginIcon": "{{name}} icon",
     "unknown": "Not provided",
     "noSelection": "Select a plugin to view details",
     "emptyTitle": "No installed plugins",
@@ -169,10 +176,23 @@
     },
     "fields": {
       "agent": "Supported agent",
+      "developer": "Developer",
+      "category": "Category",
       "marketplace": "Marketplace",
       "version": "Version",
       "status": "Installation status",
-      "auth": "Authentication policy"
+      "auth": "Authentication policy",
+      "sourceType": "Source type",
+      "location": "Reduced location"
+    },
+    "capabilities": {
+      "skills": "Skills",
+      "mcp": "MCP",
+      "hooks": "Hooks",
+      "connectors": "Connectors",
+      "browserExtensions": "Browser extensions",
+      "customUi": "Custom UI",
+      "undeclared": "Not declared"
     },
     "auth": {
       "onInstall": "Authentication may be required during installation",
