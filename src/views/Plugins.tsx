@@ -1,6 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, LoaderCircle, Puzzle, ShieldCheck, Unplug } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  Download,
+  LoaderCircle,
+  Puzzle,
+  RefreshCw,
+  ShieldCheck,
+  Unplug,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { PluginCatalogControls } from "../components/plugins/PluginCatalogControls";
+import {
+  PluginCatalogEmptyState,
+  PluginList,
+} from "../components/plugins/PluginList";
 import {
   agentPluginIdentityKey,
   getAgentPluginProjection,
@@ -9,6 +22,13 @@ import {
   type AgentPluginProjection,
   type AgentPluginSummary,
 } from "../lib/agentPlugins";
+import {
+  getAgentPluginMarketplaces,
+  getAgentPluginScopeCounts,
+  getMigratedAgentPluginSelection,
+  getVisibleAgentPlugins,
+  type AgentPluginScope,
+} from "../lib/agentPluginView";
 import { cn } from "../utils";
 
 const ERROR_KEYS: Record<AgentPluginCatalogErrorKind, string> = {
@@ -27,15 +47,26 @@ function statusKey(status: AgentPluginInstallStatus): string {
 
 function StatusBadge({ status }: { status: AgentPluginInstallStatus }) {
   const { t } = useTranslation();
-  const enabled = status === "installed_enabled";
-  const Icon = enabled ? Check : Unplug;
+  const appearance = status === "installed_enabled"
+    ? {
+        Icon: Check,
+        className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      }
+    : status === "installed_disabled"
+      ? {
+          Icon: Unplug,
+          className: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        }
+      : {
+          Icon: Download,
+          className: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+        };
+  const { Icon } = appearance;
   return (
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        enabled
-          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        appearance.className,
       )}
     >
       <Icon className="h-3 w-3" aria-hidden="true" />
@@ -119,7 +150,9 @@ function LoadingPanel() {
   return (
     <div className="col-span-2 flex min-h-[360px] items-center justify-center">
       <div className="flex items-center gap-2 text-[13px] text-muted" role="status">
-        <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+        <span className="animate-spin" aria-hidden="true">
+          <LoaderCircle className="h-4 w-4" />
+        </span>
         {t("plugins.loading")}
       </div>
     </div>
@@ -127,44 +160,136 @@ function LoadingPanel() {
 }
 
 export function Plugins() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [projection, setProjection] = useState<AgentPluginProjection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [scope, setScope] = useState<AgentPluginScope>("installed");
+  const [query, setQuery] = useState("");
+  const [marketplace, setMarketplace] = useState("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const requestSequence = useRef(0);
 
-  useEffect(() => {
-    let active = true;
-    getAgentPluginProjection("codex")
+  const commitProjectionRequest = useCallback((
+    requestId: number,
+    request: Promise<AgentPluginProjection>,
+  ) => {
+    void request
+      .catch((): AgentPluginProjection => ({
+        read_status: "error",
+        agent: "codex",
+        refreshed_at_unix_ms: Date.now(),
+        error: { kind: "internal" },
+      }))
       .then((next) => {
-        if (active) setProjection(next);
-      })
-      .catch(() => {
-        if (active) {
-          setProjection({
-            read_status: "error",
-            agent: "codex",
-            refreshed_at_unix_ms: Date.now(),
-            error: { kind: "internal" },
-          });
+        if (requestSequence.current === requestId) {
+          setProjection(next);
+          setLoading(false);
         }
       });
-    return () => {
-      active = false;
-    };
   }, []);
 
-  const installed = useMemo(
-    () => projection?.read_status === "ready" ? projection.installed : [],
-    [projection],
+  const loadProjection = useCallback(() => {
+    const requestId = requestSequence.current + 1;
+    requestSequence.current = requestId;
+    setLoading(true);
+    commitProjectionRequest(requestId, getAgentPluginProjection("codex"));
+  }, [commitProjectionRequest]);
+
+  useEffect(() => {
+    const requestId = requestSequence.current + 1;
+    requestSequence.current = requestId;
+    commitProjectionRequest(requestId, getAgentPluginProjection("codex"));
+    return () => {
+      requestSequence.current += 1;
+    };
+  }, [commitProjectionRequest]);
+
+  const readyProjection = projection?.read_status === "ready" ? projection : null;
+  const counts = useMemo(
+    () => readyProjection
+      ? getAgentPluginScopeCounts(readyProjection)
+      : { installed: 0, available: 0 },
+    [readyProjection],
+  );
+  const marketplaces = useMemo(
+    () => readyProjection
+      ? getAgentPluginMarketplaces(readyProjection, i18n.resolvedLanguage ?? i18n.language)
+      : [],
+    [i18n.language, i18n.resolvedLanguage, readyProjection],
+  );
+  const visiblePlugins = useMemo(
+    () => readyProjection
+      ? getVisibleAgentPlugins({
+          projection: readyProjection,
+          scope,
+          query,
+          marketplace,
+          language: i18n.resolvedLanguage ?? i18n.language,
+        })
+      : [],
+    [i18n.language, i18n.resolvedLanguage, marketplace, query, readyProjection, scope],
+  );
+  const migratedSelectedKey = useMemo(
+    () => getMigratedAgentPluginSelection(visiblePlugins, selectedKey),
+    [selectedKey, visiblePlugins],
   );
   const selected = useMemo(
-    () => installed.find((plugin) => agentPluginIdentityKey(plugin.identity) === selectedKey)
-      ?? installed[0]
-      ?? null,
-    [installed, selectedKey],
+    () => visiblePlugins.find(
+      (plugin) => agentPluginIdentityKey(plugin.identity) === migratedSelectedKey,
+    ) ?? null,
+    [migratedSelectedKey, visiblePlugins],
+  );
+
+  const updateFilters = useCallback((next: {
+    scope?: AgentPluginScope;
+    query?: string;
+    marketplace?: string;
+  }) => {
+    const nextScope = next.scope ?? scope;
+    const nextQuery = next.query ?? query;
+    const nextMarketplace = next.marketplace ?? marketplace;
+    if (readyProjection) {
+      const nextVisiblePlugins = getVisibleAgentPlugins({
+        projection: readyProjection,
+        scope: nextScope,
+        query: nextQuery,
+        marketplace: nextMarketplace,
+        language: i18n.resolvedLanguage ?? i18n.language,
+      });
+      setSelectedKey(getMigratedAgentPluginSelection(
+        nextVisiblePlugins,
+        migratedSelectedKey,
+      ));
+    }
+    if (next.scope !== undefined) setScope(next.scope);
+    if (next.query !== undefined) setQuery(next.query);
+    if (next.marketplace !== undefined) setMarketplace(next.marketplace);
+  }, [
+    i18n.language,
+    i18n.resolvedLanguage,
+    marketplace,
+    migratedSelectedKey,
+    query,
+    readyProjection,
+    scope,
+  ]);
+
+  const scopeTotal = counts[scope];
+  const emptyTitle = scopeTotal === 0
+    ? t(scope === "installed" ? "plugins.emptyTitle" : "plugins.emptyAvailableTitle")
+    : t("plugins.noMatchesTitle");
+  const emptyDescription = scopeTotal === 0
+    ? t("plugins.emptyDescription")
+    : t("plugins.noMatchesDescription");
+  const listLabel = t(
+    scope === "installed" ? "plugins.listLabel" : "plugins.availableListLabel",
   );
 
   return (
-    <div className="flex h-[calc(100vh-68px)] min-h-[560px] flex-col">
+    <div
+      className="flex h-[calc(100vh-68px)] min-h-[560px] flex-col"
+      aria-busy={loading}
+    >
       <header className="flex shrink-0 items-start justify-between gap-4">
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight text-primary">
@@ -172,17 +297,41 @@ export function Plugins() {
           </h1>
           <p className="mt-1 text-[13px] text-muted">{t("plugins.subtitle")}</p>
         </div>
-        <span className="app-badge mt-0.5">
-          <ShieldCheck className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
-          {t("plugins.readOnly")}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {loading && projection && (
+            <span
+              className="text-[12px] text-muted"
+              role="status"
+              aria-live="polite"
+            >
+              {t("plugins.refreshing")}
+            </span>
+          )}
+          <span className="app-badge">
+            <ShieldCheck className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+            {t("plugins.readOnly")}
+          </span>
+          <button
+            type="button"
+            onClick={loadProjection}
+            className="app-button-secondary gap-1.5"
+          >
+            <span className={cn(loading && "animate-spin")} aria-hidden="true">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </span>
+            {t("plugins.refresh")}
+          </button>
+        </div>
       </header>
 
       <div className="mt-4 grid min-h-0 flex-1 grid-cols-[minmax(360px,0.9fr)_minmax(420px,1.1fr)] overflow-hidden rounded-xl border border-border-subtle bg-surface">
         {!projection ? (
           <LoadingPanel />
         ) : projection.read_status === "error" ? (
-          <div className="col-span-2 flex min-h-[360px] items-center justify-center p-8 text-center">
+          <div
+            className="col-span-2 flex min-h-[360px] items-center justify-center p-8 text-center"
+            role="alert"
+          >
             <div className="max-w-md">
               <Puzzle className="mx-auto h-8 w-8 text-muted" aria-hidden="true" />
               <h2 className="mt-3 text-[15px] font-semibold text-primary">
@@ -196,75 +345,39 @@ export function Plugins() {
         ) : (
           <>
             <section className="flex min-h-0 flex-col border-r border-border-subtle">
-              <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3.5">
-                <h2 className="text-[13px] font-semibold text-secondary">
-                  {t("plugins.installed")}
-                </h2>
-                <span className="text-[11px] tabular-nums text-muted">
-                  {t("plugins.count", { count: installed.length })}
-                </span>
-              </div>
-              {installed.length === 0 ? (
-                <div className="flex min-h-0 flex-1 flex-col items-center justify-center p-8 text-center">
-                  <Puzzle className="h-8 w-8 text-faint" aria-hidden="true" />
-                  <p className="mt-3 text-[13px] font-medium text-tertiary">
-                    {t("plugins.emptyTitle")}
-                  </p>
-                  <p className="mt-1 text-[11px] text-muted">
-                    {t("plugins.emptyDescription")}
-                  </p>
-                </div>
-              ) : (
-                <div
-                  role="listbox"
-                  aria-label={t("plugins.listLabel")}
-                  className="min-h-0 flex-1 overflow-y-auto p-2 scrollbar-hide"
-                >
-                  {installed.map((plugin) => {
-                    const key = agentPluginIdentityKey(plugin.identity);
-                    const active = selected
-                      ? agentPluginIdentityKey(selected.identity) === key
-                      : false;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        role="option"
-                        aria-selected={active}
-                        aria-label={`${plugin.display_name} · ${plugin.identity.marketplace_name} · ${plugin.identity.plugin_id}`}
-                        onClick={() => setSelectedKey(key)}
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-accent/50",
-                          active ? "bg-surface-active" : "hover:bg-surface-hover",
-                        )}
-                      >
-                        <PluginMark name={plugin.display_name} />
-                        <span className="min-w-0 flex-1">
-                          <span className={cn(
-                            "block truncate text-[13px] font-medium",
-                            active ? "text-primary" : "text-secondary",
-                          )}>
-                            {plugin.display_name}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[11px] text-faint">
-                            {plugin.identity.marketplace_name} · {plugin.version ?? t("plugins.unknown")}
-                          </span>
-                        </span>
-                        <StatusBadge status={plugin.install_status} />
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <PluginCatalogControls
+                scope={scope}
+                installedCount={counts.installed}
+                availableCount={counts.available}
+                query={query}
+                marketplace={marketplace}
+                marketplaces={marketplaces}
+                onScopeChange={(nextScope) => updateFilters({ scope: nextScope })}
+                onQueryChange={(nextQuery) => updateFilters({ query: nextQuery })}
+                onMarketplaceChange={(nextMarketplace) => updateFilters({
+                  marketplace: nextMarketplace,
+                })}
+              />
+              <PluginList
+                plugins={visiblePlugins}
+                selectedKey={migratedSelectedKey}
+                listLabel={listLabel}
+                emptyTitle={emptyTitle}
+                emptyDescription={emptyDescription}
+                onSelect={setSelectedKey}
+              />
             </section>
             {selected ? (
               <PluginDetails plugin={selected} />
             ) : (
               <aside
                 aria-label={t("plugins.detailsLabel")}
-                className="flex min-h-0 items-center justify-center bg-background/40 p-8 text-[13px] text-muted"
+                className="flex min-h-0 flex-col bg-background/40"
               >
-                {t("plugins.noSelection")}
+                <PluginCatalogEmptyState
+                  title={emptyTitle}
+                  description={emptyDescription}
+                />
               </aside>
             )}
           </>
