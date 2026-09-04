@@ -8,6 +8,10 @@
 
 每个平台在隔离的运行器中生成临时 Updater 密钥，构建 CLI 和桌面包，完成平台回验后上传 Actions Artifact。临时密钥随运行器销毁，工作流不能访问 GitHub `release` Environment 或生产 Updater Secret。
 
+## 跨平台进程验证入口
+
+同一手工入口选择 `validation_only=true` 时，只在原生 Windows 与 Linux 运行器执行受控进程公共 fixture 和 `cargo check --all-targets`。该模式固定记录 `promotable: false`，并跳过平台选择、Tauri/CLI 打包、签名、Artifact 上传、tag、Draft 与 Release；它只为指定提交提供条件编译和进程生命周期证据，不改变普通 PR 仍只运行三项轻量检查的边界。
+
 ## 不可晋级标记
 
 每个平台的 Artifact 都包含 `TEST-PACKAGE.json`：

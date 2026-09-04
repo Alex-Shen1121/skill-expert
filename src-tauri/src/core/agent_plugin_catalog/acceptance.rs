@@ -6,20 +6,19 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize)]
-pub(super) struct IdentityEvidence {
-    pub(super) raw_installed: usize,
-    pub(super) raw_available: usize,
-    pub(super) projected_installed: usize,
-    pub(super) projected_available: usize,
-    pub(super) raw_identities_sha256: String,
-    pub(super) projected_identities_sha256: String,
-    pub(super) raw_installed_identities_sha256: String,
-    pub(super) projected_installed_identities_sha256: String,
-    pub(super) raw_available_identities_sha256: String,
-    pub(super) projected_available_identities_sha256: String,
-    pub(super) installed_identities_match: bool,
-    pub(super) available_identities_match: bool,
+pub(super) struct IdentityCollectionEvidence {
+    pub(super) raw_count: usize,
+    pub(super) projected_count: usize,
+    pub(super) raw_sha256: String,
+    pub(super) projected_sha256: String,
     pub(super) identities_match: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct IdentityEvidence {
+    pub(super) installed: IdentityCollectionEvidence,
+    pub(super) available: IdentityCollectionEvidence,
+    pub(super) all_collections_match: bool,
 }
 
 pub(super) fn build_identity_evidence(
@@ -32,34 +31,29 @@ pub(super) fn build_identity_evidence(
     let mut raw_available = raw_identities(&value, "available")?;
     raw_installed.sort();
     raw_available.sort();
-    let mut raw_all = raw_installed.clone();
-    raw_all.extend(raw_available.clone());
-    raw_all.sort();
-
     let mut projected_installed = projected_identities(installed);
     let mut projected_available = projected_identities(available);
     projected_installed.sort();
     projected_available.sort();
-    let mut projected_all = projected_installed.clone();
-    projected_all.extend(projected_available.clone());
-    projected_all.sort();
+    let installed = compare_identity_collection(&raw_installed, &projected_installed);
+    let available = compare_identity_collection(&raw_available, &projected_available);
+    let all_collections_match = installed.identities_match && available.identities_match;
 
     Ok(IdentityEvidence {
-        raw_installed: raw_installed.len(),
-        raw_available: raw_available.len(),
-        projected_installed: projected_installed.len(),
-        projected_available: projected_available.len(),
-        raw_identities_sha256: hash_rows(&raw_all),
-        projected_identities_sha256: hash_rows(&projected_all),
-        raw_installed_identities_sha256: hash_rows(&raw_installed),
-        projected_installed_identities_sha256: hash_rows(&projected_installed),
-        raw_available_identities_sha256: hash_rows(&raw_available),
-        projected_available_identities_sha256: hash_rows(&projected_available),
-        installed_identities_match: raw_installed == projected_installed,
-        available_identities_match: raw_available == projected_available,
-        identities_match: raw_installed == projected_installed
-            && raw_available == projected_available,
+        installed,
+        available,
+        all_collections_match,
     })
+}
+
+fn compare_identity_collection(raw: &[String], projected: &[String]) -> IdentityCollectionEvidence {
+    IdentityCollectionEvidence {
+        raw_count: raw.len(),
+        projected_count: projected.len(),
+        raw_sha256: hash_rows(raw),
+        projected_sha256: hash_rows(projected),
+        identities_match: raw == projected,
+    }
 }
 
 pub(super) fn record_identity_evidence(

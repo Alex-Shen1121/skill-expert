@@ -3,13 +3,12 @@ use super::codex_cli::CodexCliResolutionSource;
 use super::{
     catalog_error,
     codex_cli::{
-        allowed_environment, resolve_codex_cli, revalidate_resolved_codex_cli, CodexCliEnvironment,
-        CodexCliResolutionError, ResolvedCodexCli,
+        resolve_codex_cli, revalidate_resolved_codex_cli, run_codex_catalog_command,
+        CodexCliEnvironment, CodexCliResolutionError, ResolvedCodexCli,
     },
     AgentPluginCatalogError, AgentPluginCatalogErrorKind, CatalogAdapter, CatalogCommandOutput,
 };
-use crate::core::process_runner::{run_process, ProcessError, ProcessRequest};
-use std::ffi::OsString;
+use crate::core::process_runner::ProcessError;
 #[cfg(test)]
 use std::path::PathBuf;
 
@@ -53,15 +52,7 @@ impl CatalogAdapter for CodexCatalogAdapter {
             .map_err(|error| catalog_error(resolution_error_kind(*error), None))?;
         revalidate_resolved_codex_cli(resolved)
             .map_err(|error| catalog_error(resolution_error_kind(error), None))?;
-        let request = ProcessRequest::new(
-            &resolved.path,
-            ["plugin", "list", "--available", "--json"]
-                .into_iter()
-                .map(OsString::from)
-                .collect(),
-            allowed_environment(),
-        );
-        let output = run_process(&request, None).map_err(classify_process_error)?;
+        let output = run_codex_catalog_command(&resolved.path).map_err(classify_process_error)?;
         classify_completed_output(
             output.status.success(),
             output.status.code(),

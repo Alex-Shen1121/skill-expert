@@ -191,6 +191,118 @@ fn complete_manifest_supplements_details_without_overriding_cli_facts() {
 }
 
 #[test]
+fn namespaced_manifest_capabilities_explicitly_declare_browser_extensions_and_custom_ui() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{
+          "name":"explicit-components",
+          "interface":{
+            "capabilities":[
+              "Interactive",
+              "browser-extension: Chrome session bridge",
+              "custom-ui: Review dashboard"
+            ]
+          }
+        }"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"explicit-components",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("显式组件声明应保留就绪投影");
+    };
+    let details = &installed[0].details;
+
+    assert_eq!(details.browser_extensions, ["Chrome session bridge"]);
+    assert_eq!(details.custom_ui, ["Review dashboard"]);
+    assert_eq!(details.declared_capabilities, ["Interactive"]);
+    assert_eq!(
+        details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+}
+
+#[test]
+fn generic_labels_unknown_fields_and_unsafe_names_do_not_infer_plugin_components() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("plugin");
+    std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+    std::fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        r#"{
+          "name":"no-inference",
+          "browserExtensions":["guessed-from-unknown-field"],
+          "customUi":["guessed-from-unknown-field"],
+          "interface":{
+            "capabilities":[
+              "Interactive",
+              "Browser",
+              "Custom UI",
+              "browser-extension: ../private/extension",
+              "custom-ui: https://secret.example/widget"
+            ]
+          }
+        }"#,
+    )
+    .unwrap();
+    let stdout = serde_json::to_vec(&serde_json::json!({
+        "installed":[{
+            "pluginId":"browser-brand-does-not-count",
+            "marketplaceName":"market",
+            "installed":true,
+            "enabled":true,
+            "source":{"source":"local","path":root}
+        }],
+        "available":[]
+    }))
+    .unwrap();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &OwnedFixtureAdapter { stdout },
+    );
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("未知或不安全的声明应只降级当前详情");
+    };
+    let details = &installed[0].details;
+
+    assert!(details.browser_extensions.is_empty());
+    assert!(details.custom_ui.is_empty());
+    assert_eq!(
+        details.declared_capabilities,
+        ["Interactive", "Browser", "Custom UI"]
+    );
+    assert_eq!(
+        details.completeness,
+        AgentPluginDetailsCompleteness::Incomplete
+    );
+    assert!(details
+        .issues
+        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+    let serialized = serde_json::to_string(details).unwrap();
+    assert!(!serialized.contains("private/extension"));
+    assert!(!serialized.contains("secret.example"));
+    assert!(!serialized.contains("guessed-from-unknown-field"));
+}
+
+#[test]
 fn manifest_screenshots_are_returned_only_after_safe_image_validation() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("plugin");
@@ -1095,19 +1207,27 @@ fn debug_acceptance_summary_compares_raw_and_projected_identities_without_storin
 
     let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
 
-    assert_eq!((evidence.raw_installed, evidence.raw_available), (1, 1));
     assert_eq!(
-        (evidence.projected_installed, evidence.projected_available),
-        (1, 1)
+        (
+            evidence.installed.raw_count,
+            evidence.installed.projected_count,
+            evidence.available.raw_count,
+            evidence.available.projected_count,
+        ),
+        (1, 1, 1, 1)
     );
-    assert!(evidence.identities_match);
-    assert!(evidence.installed_identities_match);
-    assert!(evidence.available_identities_match);
+    assert!(evidence.installed.identities_match);
+    assert!(evidence.available.identities_match);
+    assert!(evidence.all_collections_match);
     assert_eq!(
-        evidence.raw_identities_sha256,
-        evidence.projected_identities_sha256
+        evidence.installed.raw_sha256,
+        evidence.installed.projected_sha256
     );
     let serialized = serde_json::to_string(&evidence).unwrap();
+    assert!(serialized.contains("\"installed\":{\"raw_count\":1,\"projected_count\":1"));
+    assert!(serialized.contains("\"available\":{\"raw_count\":1,\"projected_count\":1"));
+    assert!(serialized.contains("\"all_collections_match\":true"));
+    assert!(!serialized.contains("raw_installed"));
     assert!(!serialized.contains("market-a"));
     assert!(!serialized.contains("market-b"));
     assert!(!serialized.contains("\"one\""));
@@ -1128,7 +1248,7 @@ fn debug_acceptance_summary_rejects_identities_swapped_between_status_collection
 
     let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
 
-    assert!(!evidence.installed_identities_match);
-    assert!(!evidence.available_identities_match);
-    assert!(!evidence.identities_match);
+    assert!(!evidence.installed.identities_match);
+    assert!(!evidence.available.identities_match);
+    assert!(!evidence.all_collections_match);
 }

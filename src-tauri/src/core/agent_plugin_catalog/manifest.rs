@@ -18,6 +18,9 @@ const MAX_IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 4096;
 const MAX_COLLECTION_ITEMS: usize = 128;
 const MAX_SCREENSHOTS: usize = 4;
+const MAX_COMPONENT_LABEL_LENGTH: usize = 128;
+const BROWSER_EXTENSION_CAPABILITY_PREFIX: &str = "browser-extension:";
+const CUSTOM_UI_CAPABILITY_PREFIX: &str = "custom-ui:";
 
 pub(super) fn enrich_from_manifest(
     cli_entry: &Map<String, Value>,
@@ -120,7 +123,9 @@ pub(super) fn enrich_from_manifest(
         reader.details.default_prompts = reader.string_or_string_array(value);
     }
     if let Some(value) = interface.and_then(|value| value.get("capabilities")) {
-        reader.details.declared_capabilities = reader.string_array(value);
+        let capabilities = reader.string_array(value);
+        reader.details.declared_capabilities =
+            reader.read_explicit_component_capabilities(capabilities);
     }
     if let Some(value) = manifest.get("skills") {
         reader.read_skills(value);
@@ -238,6 +243,32 @@ impl<'a> ManifestReader<'a> {
             self.issue(AgentPluginDetailsIssue::ManifestIncompatible);
         }
         result
+    }
+
+    fn read_explicit_component_capabilities(&mut self, capabilities: Vec<String>) -> Vec<String> {
+        let mut general = Vec::with_capacity(capabilities.len());
+        for capability in capabilities {
+            if let Some(raw_label) = capability.strip_prefix(BROWSER_EXTENSION_CAPABILITY_PREFIX) {
+                if let Some(label) = explicit_component_label(raw_label) {
+                    if !self.details.browser_extensions.contains(&label) {
+                        self.details.browser_extensions.push(label);
+                    }
+                } else {
+                    self.issue(AgentPluginDetailsIssue::ResourceRejected);
+                }
+            } else if let Some(raw_label) = capability.strip_prefix(CUSTOM_UI_CAPABILITY_PREFIX) {
+                if let Some(label) = explicit_component_label(raw_label) {
+                    if !self.details.custom_ui.contains(&label) {
+                        self.details.custom_ui.push(label);
+                    }
+                } else {
+                    self.issue(AgentPluginDetailsIssue::ResourceRejected);
+                }
+            } else {
+                general.push(capability);
+            }
+        }
+        general
     }
 
     fn declared_path(&mut self, value: &Value) -> Option<PathBuf> {
@@ -480,6 +511,15 @@ impl<'a> ManifestReader<'a> {
             STANDARD.encode(sanitized)
         ))
     }
+}
+
+fn explicit_component_label(value: &str) -> Option<String> {
+    let label = value.trim();
+    (!label.is_empty()
+        && label.len() <= MAX_COMPONENT_LABEL_LENGTH
+        && !label.contains(['/', '\\'])
+        && label.chars().all(|character| !character.is_control()))
+    .then(|| label.to_owned())
 }
 
 #[derive(Clone, Copy)]

@@ -98,6 +98,28 @@ describe("PluginDetails 安全详情", () => {
     expect(within(groups[5]).getByText("未声明")).toBeTruthy();
   });
 
+  it("展示 manifest 显式声明的浏览器扩展与自定义 UI 名称", () => {
+    render(
+      <PluginDetails
+        plugin={{
+          ...completePlugin,
+          details: {
+            ...completePlugin.details,
+            browser_extensions: ["Chrome session bridge"],
+            custom_ui: ["Review dashboard"],
+          },
+        }}
+      />,
+    );
+
+    const browser = screen.getByRole("region", { name: "浏览器扩展" });
+    const customUi = screen.getByRole("region", { name: "自定义 UI" });
+    expect(within(browser).getByText("Chrome session bridge")).toBeTruthy();
+    expect(within(customUi).getByText("Review dashboard")).toBeTruthy();
+    expect(within(browser).queryByText("未声明")).toBeNull();
+    expect(within(customUi).queryByText("未声明")).toBeNull();
+  });
+
   it("详情不完整时使用稳定默认图标并保持技术详情默认折叠", async () => {
     const user = userEvent.setup();
     const plugin = {

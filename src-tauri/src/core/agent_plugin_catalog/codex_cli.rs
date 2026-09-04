@@ -1,5 +1,5 @@
 use super::{codex, validate_catalog_contract, AgentPluginCatalogErrorKind};
-use crate::core::process_runner::{run_process, ProcessError, ProcessRequest};
+use crate::core::process_runner::{run_process, ProcessError, ProcessOutput, ProcessRequest};
 use crate::core::skill_store::SkillStore;
 use anyhow::Result;
 use serde::Serialize;
@@ -66,17 +66,23 @@ pub(super) trait CodexCliProbe {
 
 struct ProcessCodexCliProbe;
 
+const CODEX_CATALOG_ARGUMENTS: [&str; 4] = ["plugin", "list", "--available", "--json"];
+
+pub(super) fn run_codex_catalog_command(executable: &Path) -> Result<ProcessOutput, ProcessError> {
+    let request = ProcessRequest::new(
+        executable,
+        CODEX_CATALOG_ARGUMENTS
+            .into_iter()
+            .map(OsString::from)
+            .collect(),
+        allowed_environment(),
+    );
+    run_process(&request, None)
+}
+
 impl CodexCliProbe for ProcessCodexCliProbe {
     fn run_catalog(&self, executable: &Path) -> Result<CodexCliProbeOutput, ProcessError> {
-        let request = ProcessRequest::new(
-            executable,
-            ["plugin", "list", "--available", "--json"]
-                .into_iter()
-                .map(OsString::from)
-                .collect(),
-            allowed_environment(),
-        );
-        let output = run_process(&request, None)?;
+        let output = run_codex_catalog_command(executable)?;
         Ok(CodexCliProbeOutput {
             success: output.status.success(),
             exit_code: output.status.code(),

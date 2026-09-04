@@ -99,6 +99,31 @@ fn make_executable(path: &std::path::Path) {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn catalog_command_uses_the_single_official_argument_contract() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let executable = temp.path().join("codex");
+    std::fs::write(
+        &executable,
+        format!(
+            "#!/bin/sh\n[ \"$#\" -eq 4 ] && [ \"$1\" = plugin ] && [ \"$2\" = list ] && [ \"$3\" = --available ] && [ \"$4\" = --json ] || exit 19\nprintf '%s' '{}'\n",
+            String::from_utf8_lossy(VALID_CATALOG)
+        ),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&executable, permissions).unwrap();
+
+    let output = run_codex_catalog_command(&executable).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, VALID_CATALOG);
+}
+
 #[test]
 fn explicit_path_has_priority_over_environment_resolution() {
     let temp = tempfile::tempdir().unwrap();
