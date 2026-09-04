@@ -2,7 +2,8 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import i18n, { i18nReady } from "../i18n";
 import type { ToolInfo } from "../lib/tauri";
 import { SettingsHierarchyPrototype } from "./SettingsHierarchyPrototype";
 
@@ -33,6 +34,14 @@ const tools: ToolInfo[] = [
   },
 ];
 
+beforeAll(async () => {
+  await i18nReady;
+});
+
+beforeEach(async () => {
+  await i18n.changeLanguage("zh");
+});
+
 afterEach(() => cleanup());
 
 describe("设置页信息分层原型开关", () => {
@@ -56,5 +65,29 @@ describe("设置页信息分层原型开关", () => {
     await user.click(disabledSwitch);
     expect(disabledSwitch.getAttribute("aria-checked")).toBe("true");
     expect(disabledSwitch.firstElementChild?.classList.contains("left-[16px]")).toBe(true);
+  });
+
+  it("A 方案在三种界面语言中保留同一设置分组结构", async () => {
+    const cases = [
+      { language: "zh", nav: "设置分组", common: /常用设置/, hide: "最小化到托盘", close: "退出应用" },
+      { language: "zh-TW", nav: "設定分組", common: /常用設定/, hide: "最小化到托盤", close: "結束應用" },
+      { language: "en", nav: "Settings groups", common: /General/, hide: "Minimize to tray", close: "Quit app" },
+    ];
+
+    for (const testCase of cases) {
+      await i18n.changeLanguage(testCase.language);
+      window.history.replaceState(null, "", "/settings?variant=A");
+      const view = render(<SettingsHierarchyPrototype tools={tools} />);
+
+      expect(screen.getByRole("navigation", { name: testCase.nav })).toBeTruthy();
+      expect(screen.getByRole("button", { name: testCase.common })).toBeTruthy();
+      expect(screen.getByRole("button", { name: testCase.hide })).toBeTruthy();
+      expect(screen.getByRole("button", { name: testCase.close })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: testCase.hide }).classList.contains("focus-visible:ring-2"),
+      ).toBe(true);
+
+      view.unmount();
+    }
   });
 });

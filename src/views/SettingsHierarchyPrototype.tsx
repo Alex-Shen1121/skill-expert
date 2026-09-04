@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   ArrowRight,
@@ -32,47 +33,198 @@ interface SettingsHierarchyPrototypeProps {
   tools: ToolInfo[];
 }
 
-const variantNames: Record<VariantKey, string> = {
-  A: "分组侧栏",
-  B: "概览后钻取",
-  C: "任务标签页",
-};
+const prototypeText = {
+  zh: {
+    subtitle: "比较 Agent 接入、Agent Skills 管理能力与普通全局偏好的信息分层。",
+    notice: "一次性原型 · 所有选择只在本窗口模拟，不会改动真实设置",
+    sectionGroups: "设置分组",
+    commonSettings: "常用设置",
+    commonDescription: "主题、语言、文字与窗口行为",
+    languageDescription: "切换原型与应用导航的界面语言。",
+    closeAction: "关闭行为",
+    closeActionDescription: "选择点击窗口关闭按钮后的应用行为。",
+    closeAsk: "每次询问",
+    closeHide: "最小化到托盘",
+    closeQuit: "退出应用",
+    agentAccess: "Agent 接入",
+    agentAccessDescription: "检测并启用可以接收 Skills 的 Agent",
+    managementDescription: "赋予指定 Agent 管理中央技能库的能力",
+    maintenance: "维护与高级",
+    maintenanceDescription: "自动更新、网络代理与备份高级项",
+    showingAgents: "当前展示最常用的 8 个",
+    updateAndNetwork: "更新与网络",
+    advanced: "高级",
+    gitAdvanced: "Git 备份高级配置",
+    gitAdvancedDescription: "远程仓库地址与实验性 Git 引擎。",
+    expand: "展开",
+    overviewEyebrow: "设置概览",
+    overviewTitle: "先看状态，再进入设置",
+    overviewDescription: "每类设置只显示当前结果和是否需要处理，详细选项在下一层。",
+    backToOverview: "返回设置概览",
+    needsConfirmation: "需确认",
+    healthySummary: "3 类设置正常，1 类有需要确认的高级选项",
+    currentTask: "当前任务",
+    taskBoundary: "任务边界",
+    dailyUse: "日常使用",
+    dailyUseHelper: "外观与窗口",
+    connectAgent: "接入 Agent",
+    connectAgentHelper: "发现与启用",
+    grantManagement: "赋予管理能力",
+    grantManagementHelper: "可信部署",
+    maintain: "维护",
+    maintainHelper: "更新与高级",
+    preferenceBoundary: "这里只放高频、低风险、立即生效的个人偏好。",
+    agentBoundary: "这里只决定哪些 Agent 能接收中央技能库中的 Skills。",
+    managementBoundary: "这里只决定哪些已启用 Agent 能直接管理中央技能库。",
+    maintenanceBoundary: "影响来源检查、网络与备份的低频配置集中在这里。",
+    actionBoundary: "不混淆的两个动作",
+    actionBoundaryDescription: "“启用 Agent”不会自动授予“管理 Skills”的能力。",
+    variantNames: { A: "分组侧栏", B: "概览后钻取", C: "任务标签页" },
+    previousVariant: "上一个方案",
+    nextVariant: "下一个方案",
+  },
+  "zh-TW": {
+    subtitle: "比較 Agent 接入、Agent Skills 管理能力與一般全域偏好的資訊分層。",
+    notice: "一次性原型 · 所有選擇只在本視窗模擬，不會變更實際設定",
+    sectionGroups: "設定分組",
+    commonSettings: "常用設定",
+    commonDescription: "主題、語言、文字與視窗行為",
+    languageDescription: "切換原型與應用導覽的介面語言。",
+    closeAction: "關閉行為",
+    closeActionDescription: "選擇點擊視窗關閉按鈕後的應用行為。",
+    closeAsk: "每次詢問",
+    closeHide: "最小化到托盤",
+    closeQuit: "結束應用",
+    agentAccess: "Agent 接入",
+    agentAccessDescription: "偵測並啟用可接收 Skills 的 Agent",
+    managementDescription: "賦予指定 Agent 管理中央技能庫的能力",
+    maintenance: "維護與進階",
+    maintenanceDescription: "自動更新、網路代理與備份進階項目",
+    showingAgents: "目前顯示最常用的 8 個",
+    updateAndNetwork: "更新與網路",
+    advanced: "進階",
+    gitAdvanced: "Git 備份進階設定",
+    gitAdvancedDescription: "遠端倉庫位址與實驗性 Git 引擎。",
+    expand: "展開",
+    overviewEyebrow: "設定概覽",
+    overviewTitle: "先看狀態，再進入設定",
+    overviewDescription: "每類設定只顯示目前結果及是否需要處理，詳細選項位於下一層。",
+    backToOverview: "返回設定概覽",
+    needsConfirmation: "需確認",
+    healthySummary: "3 類設定正常，1 類有需要確認的進階選項",
+    currentTask: "目前任務",
+    taskBoundary: "任務邊界",
+    dailyUse: "日常使用",
+    dailyUseHelper: "外觀與視窗",
+    connectAgent: "接入 Agent",
+    connectAgentHelper: "發現與啟用",
+    grantManagement: "賦予管理能力",
+    grantManagementHelper: "可信部署",
+    maintain: "維護",
+    maintainHelper: "更新與進階",
+    preferenceBoundary: "這裡只放高頻、低風險、立即生效的個人偏好。",
+    agentBoundary: "這裡只決定哪些 Agent 能接收中央技能庫中的 Skills。",
+    managementBoundary: "這裡只決定哪些已啟用 Agent 能直接管理中央技能庫。",
+    maintenanceBoundary: "影響來源檢查、網路與備份的低頻設定集中在這裡。",
+    actionBoundary: "不混淆的兩個動作",
+    actionBoundaryDescription: "「啟用 Agent」不會自動授予「管理 Skills」能力。",
+    variantNames: { A: "分組側欄", B: "概覽後下鑽", C: "任務分頁" },
+    previousVariant: "上一個方案",
+    nextVariant: "下一個方案",
+  },
+  en: {
+    subtitle: "Compare how Agent access, Agent Skills management, and global preferences are organized.",
+    notice: "Throwaway prototype · Choices are simulated in this window and never change real settings",
+    sectionGroups: "Settings groups",
+    commonSettings: "General",
+    commonDescription: "Theme, language, text, and window behavior",
+    languageDescription: "Change the interface language for the prototype and app navigation.",
+    closeAction: "Close behavior",
+    closeActionDescription: "Choose what happens when you click the window close button.",
+    closeAsk: "Ask each time",
+    closeHide: "Minimize to tray",
+    closeQuit: "Quit app",
+    agentAccess: "Agent access",
+    agentAccessDescription: "Detect and enable agents that can receive Skills",
+    managementDescription: "Let selected agents manage the central Skill Library",
+    maintenance: "Maintenance & advanced",
+    maintenanceDescription: "Auto-update, network proxy, and advanced backup options",
+    showingAgents: "Showing the 8 most commonly used agents",
+    updateAndNetwork: "Updates & network",
+    advanced: "Advanced",
+    gitAdvanced: "Advanced Git backup",
+    gitAdvancedDescription: "Remote repository URL and experimental Git engine.",
+    expand: "Expand",
+    overviewEyebrow: "Settings overview",
+    overviewTitle: "See status before opening settings",
+    overviewDescription: "Each category shows its current result and attention state before revealing details.",
+    backToOverview: "Back to settings overview",
+    needsConfirmation: "Review",
+    healthySummary: "3 settings groups are healthy; 1 advanced group needs review",
+    currentTask: "Current task",
+    taskBoundary: "Task boundary",
+    dailyUse: "Daily use",
+    dailyUseHelper: "Appearance & windows",
+    connectAgent: "Connect agents",
+    connectAgentHelper: "Detect & enable",
+    grantManagement: "Grant management",
+    grantManagementHelper: "Trusted deployment",
+    maintain: "Maintain",
+    maintainHelper: "Updates & advanced",
+    preferenceBoundary: "Only frequent, low-risk, immediately applied preferences live here.",
+    agentBoundary: "This only decides which agents can receive Skills from the central library.",
+    managementBoundary: "This only decides which enabled agents can manage the central library directly.",
+    maintenanceBoundary: "Low-frequency source checks, network, and backup options live here.",
+    actionBoundary: "Two distinct actions",
+    actionBoundaryDescription: "Enabling an agent does not automatically grant Skill management.",
+    variantNames: { A: "Grouped sidebar", B: "Overview & drill-down", C: "Task tabs" },
+    previousVariant: "Previous variant",
+    nextVariant: "Next variant",
+  },
+} as const;
 
-const sectionMeta: Record<
+function usePrototypeText() {
+  const { i18n } = useTranslation();
+  const language = i18n.language === "zh-TW" ? "zh-TW" : i18n.language.startsWith("en") ? "en" : "zh";
+  return prototypeText[language];
+}
+
+function useSectionMeta(): Record<
   SectionKey,
-  {
-    label: string;
-    description: string;
-    Icon: typeof Settings2;
-  }
-> = {
-  preferences: {
-    label: "常用设置",
-    description: "主题、语言、文字与窗口行为",
-    Icon: SlidersHorizontal,
-  },
-  agents: {
-    label: "Agent 接入",
-    description: "检测并启用可以接收 Skills 的 Agent",
-    Icon: MonitorCog,
-  },
-  management: {
-    label: "Agent 管理 Skills",
-    description: "赋予指定 Agent 管理中央技能库的能力",
-    Icon: ShieldCheck,
-  },
-  maintenance: {
-    label: "维护与高级",
-    description: "自动更新、网络代理与备份高级项",
-    Icon: Wrench,
-  },
-};
+  { label: string; description: string; Icon: typeof Settings2 }
+> {
+  const { t } = useTranslation();
+  const text = usePrototypeText();
+  return {
+    preferences: {
+      label: text.commonSettings,
+      description: text.commonDescription,
+      Icon: SlidersHorizontal,
+    },
+    agents: {
+      label: text.agentAccess,
+      description: text.agentAccessDescription,
+      Icon: MonitorCog,
+    },
+    management: {
+      label: t("agentManagement.title"),
+      description: text.managementDescription,
+      Icon: ShieldCheck,
+    },
+    maintenance: {
+      label: text.maintenance,
+      description: text.maintenanceDescription,
+      Icon: Wrench,
+    },
+  };
+}
 
 function PrototypeNotice() {
+  const text = usePrototypeText();
   return (
     <div className="mb-4 flex items-center gap-2 border-b border-dashed border-accent-border pb-3 text-[12px] text-muted">
       <Beaker className="h-3.5 w-3.5 text-accent" />
-      <span>一次性原型 · 所有选择只在本窗口模拟，不会改动真实设置</span>
+      <span>{text.notice}</span>
     </div>
   );
 }
@@ -99,7 +251,7 @@ function SegmentedControl({
   onChange,
 }: {
   label: string;
-  options: string[];
+  options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -107,16 +259,16 @@ function SegmentedControl({
     <div role="group" aria-label={label} className="app-segmented shrink-0 bg-background">
       {options.map((option) => (
         <button
-          key={option}
+          key={option.value}
           type="button"
-          aria-pressed={value === option}
-          onClick={() => onChange(option)}
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
           className={cn(
-            "app-segmented-button whitespace-nowrap px-3 py-1.5",
-            value === option && "app-segmented-button-active",
+            "app-segmented-button whitespace-nowrap px-3 py-1.5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent",
+            value === option.value && "app-segmented-button-active",
           )}
         >
-          {option}
+          {option.label}
         </button>
       ))}
     </div>
@@ -144,30 +296,71 @@ function SettingRow({
 }
 
 function PreferenceSettings() {
-  const [theme, setTheme] = useState("跟随系统");
-  const [language, setLanguage] = useState("简体中文");
-  const [textSize, setTextSize] = useState("默认");
-  const [closeAction, setCloseAction] = useState("每次询问");
+  const { t, i18n } = useTranslation();
+  const text = usePrototypeText();
+  const [theme, setTheme] = useState("system");
+  const [textSize, setTextSize] = useState("default");
+  const [closeAction, setCloseAction] = useState("ask");
+  const language = i18n.language === "zh-TW" ? "zh-TW" : i18n.language.startsWith("en") ? "en" : "zh";
 
   return (
     <div className="app-panel divide-y divide-border-faint overflow-hidden">
-      <SettingRow title="主题" description="选择应用的外观主题。">
-        <SegmentedControl label="主题" options={["浅色", "深色", "跟随系统"]} value={theme} onChange={setTheme} />
+      <SettingRow title={t("settings.theme")} description={t("settings.themeDesc")}>
+        <SegmentedControl
+          label={t("settings.theme")}
+          options={[
+            { value: "light", label: t("settings.themeLight") },
+            { value: "dark", label: t("settings.themeDark") },
+            { value: "system", label: t("settings.themeSystem") },
+          ]}
+          value={theme}
+          onChange={setTheme}
+        />
       </SettingRow>
-      <SettingRow title="语言" description="界面语言会立即切换。">
-        <SegmentedControl label="语言" options={["简体中文", "繁體中文", "English"]} value={language} onChange={setLanguage} />
+      <SettingRow title={t("settings.language")} description={text.languageDescription}>
+        <SegmentedControl
+          label={t("settings.language")}
+          options={[
+            { value: "zh", label: "简体中文" },
+            { value: "zh-TW", label: "繁體中文" },
+            { value: "en", label: "English" },
+          ]}
+          value={language}
+          onChange={(value) => void i18n.changeLanguage(value)}
+        />
       </SettingRow>
-      <SettingRow title="文字大小" description="调整应用的基础字号。">
-        <SegmentedControl label="文字大小" options={["小", "默认", "大", "特大"]} value={textSize} onChange={setTextSize} />
+      <SettingRow title={t("settings.textSize")} description={t("settings.textSizeDesc")}>
+        <SegmentedControl
+          label={t("settings.textSize")}
+          options={[
+            { value: "small", label: t("settings.textSizeSmall") },
+            { value: "default", label: t("settings.textSizeDefault") },
+            { value: "large", label: t("settings.textSizeLarge") },
+            { value: "xlarge", label: t("settings.textSizeXLarge") },
+          ]}
+          value={textSize}
+          onChange={setTextSize}
+        />
       </SettingRow>
-      <SettingRow title="关闭行为" description="选择点击窗口关闭按钮后的应用行为。">
-        <SegmentedControl label="关闭行为" options={["每次询问", "最小化到托盘", "退出应用"]} value={closeAction} onChange={setCloseAction} />
+      <SettingRow title={text.closeAction} description={text.closeActionDescription}>
+        <SegmentedControl
+          label={text.closeAction}
+          options={[
+            { value: "ask", label: text.closeAsk },
+            { value: "hide", label: text.closeHide },
+            { value: "close", label: text.closeQuit },
+          ]}
+          value={closeAction}
+          onChange={setCloseAction}
+        />
       </SettingRow>
     </div>
   );
 }
 
 function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
+  const { t } = useTranslation();
+  const text = usePrototypeText();
   const installed = useMemo(() => tools.filter((tool) => tool.installed).slice(0, 8), [tools]);
   const [enabledKeys, setEnabledKeys] = useState(
     () => new Set(installed.filter((tool) => tool.enabled).map((tool) => tool.key)),
@@ -186,10 +379,10 @@ function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-[12px] text-muted">
-          <StatusPill tone="good">已检测 {tools.filter((tool) => tool.installed).length}</StatusPill>
-          <span>当前展示最常用的 8 个</span>
+          <StatusPill tone="good">{t("settings.detectedAgents")} {tools.filter((tool) => tool.installed).length}</StatusPill>
+          <span>{text.showingAgents}</span>
         </div>
-        <button type="button" className="app-button-secondary px-3 py-2">重新检测</button>
+        <button type="button" className="app-button-secondary px-3 py-2">{t("settings.refresh")}</button>
       </div>
       <div className="app-panel divide-y divide-border-faint overflow-hidden">
         {installed.map((tool) => {
@@ -201,10 +394,12 @@ function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
                 <div className="text-[13px] font-semibold text-primary">{tool.display_name}</div>
                 <div className="truncate font-mono text-[11px] text-muted">{tool.skills_dir}</div>
               </div>
-              <span className="text-[12px] text-muted">{enabled ? "已启用" : "未启用"}</span>
+              <span className="text-[12px] text-muted">
+                {enabled ? t("settings.enabledState") : t("settings.disabledState")}
+              </span>
               <ToggleSwitch
                 checked={enabled}
-                title={`${enabled ? "关闭" : "开启"} ${tool.display_name}`}
+                title={`${t(enabled ? "settings.disableAgent" : "settings.enableAgent")} ${tool.display_name}`}
                 onChange={() => toggle(tool.key)}
               />
             </div>
@@ -216,6 +411,7 @@ function AgentAccessSettings({ tools }: SettingsHierarchyPrototypeProps) {
 }
 
 function AgentManagementSettings({ tools }: SettingsHierarchyPrototypeProps) {
+  const { t } = useTranslation();
   const candidates = useMemo(() => tools.filter((tool) => tool.installed && tool.enabled).slice(0, 5), [tools]);
   const [deployed, setDeployed] = useState(() => new Set(candidates.slice(0, 1).map((tool) => tool.key)));
 
@@ -233,31 +429,31 @@ function AgentManagementSettings({ tools }: SettingsHierarchyPrototypeProps) {
       <div className="app-panel p-5">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">管理 Skill</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{t("agentManagement.skillLabel")}</div>
             <h3 className="mt-1 text-[16px] font-semibold text-primary">manage-skills</h3>
           </div>
-          <StatusPill tone="good">来源可信</StatusPill>
+          <StatusPill tone="good">{t("agentManagement.trustedStatus")}</StatusPill>
         </div>
         <p className="text-[12px] leading-5 text-muted">
-          Agent 通过已验证固定来源的管理 Skill 调用 skill-expert-cli，管理中央技能库。
+          {t("agentManagement.trustedDescription")}
         </p>
         <div className="mt-5 grid grid-cols-2 divide-x divide-border-faint border-y border-border-faint py-3 text-center">
           <div>
             <div className="text-[18px] font-semibold tabular-nums text-primary">{deployed.size}</div>
-            <div className="text-[11px] text-muted">当前部署</div>
+            <div className="text-[11px] text-muted">{t("agentManagement.currentDeployments")}</div>
           </div>
           <div>
             <div className="text-[18px] font-semibold tabular-nums text-primary">0</div>
-            <div className="text-[11px] text-muted">待处理</div>
+            <div className="text-[11px] text-muted">{t("agentManagement.pendingChanges")}</div>
           </div>
         </div>
-        <button type="button" className="mt-4 text-[12px] font-medium text-accent hover:text-accent-light">在技能库中查看</button>
+        <button type="button" className="mt-4 text-[12px] font-medium text-accent hover:text-accent-light">{t("agentManagement.viewInLibrary")}</button>
       </div>
 
       <div className="app-panel overflow-hidden">
         <div className="border-b border-border-faint px-4 py-3">
-          <h3 className="text-[14px] font-semibold text-primary">部署目标</h3>
-          <p className="mt-0.5 text-[12px] text-muted">只显示已经启用、可以获得管理能力的 Agent。</p>
+          <h3 className="text-[14px] font-semibold text-primary">{t("agentManagement.targetsTitle")}</h3>
+          <p className="mt-0.5 text-[12px] text-muted">{t("agentManagement.targetsDescription")}</p>
         </div>
         {candidates.map((tool) => {
           const enabled = deployed.has(tool.key);
@@ -266,11 +462,15 @@ function AgentManagementSettings({ tools }: SettingsHierarchyPrototypeProps) {
               <AgentIcon agentKey={tool.key} displayName={tool.display_name} className="h-7 w-7 rounded-md" />
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-semibold text-primary">{tool.display_name}</div>
-                <div className="text-[11px] text-muted">{enabled ? "当前已启用管理能力" : "可启用"}</div>
+                <div className="text-[11px] text-muted">
+                  {enabled ? t("agentManagement.enabledStatus") : t("agentManagement.disabledStatus")}
+                </div>
               </div>
               <ToggleSwitch
                 checked={enabled}
-                title={`${enabled ? "关闭" : "开启"} ${tool.display_name} 的管理能力`}
+                title={t(enabled ? "agentManagement.disableAgentLabel" : "agentManagement.enableAgentLabel", {
+                  name: tool.display_name,
+                })}
                 onChange={() => toggle(tool.key)}
               />
             </div>
@@ -282,32 +482,52 @@ function AgentManagementSettings({ tools }: SettingsHierarchyPrototypeProps) {
 }
 
 function MaintenanceSettings() {
-  const [interval, setIntervalValue] = useState("每小时");
-  const [applyMode, setApplyMode] = useState("关闭（仅提示）");
+  const { t } = useTranslation();
+  const text = usePrototypeText();
+  const [interval, setIntervalValue] = useState("1h");
+  const [applyMode, setApplyMode] = useState("off");
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="app-section-title mb-2">更新与网络</h3>
+        <h3 className="app-section-title mb-2">{text.updateAndNetwork}</h3>
         <div className="app-panel divide-y divide-border-faint overflow-hidden">
-          <SettingRow title="检查频率" description="后台检查已安装 Skill 是否有来源更新。">
-            <SegmentedControl label="检查频率" options={["关闭", "每小时", "每 6 小时", "每天"]} value={interval} onChange={setIntervalValue} />
+          <SettingRow title={t("settings.autoUpdate.intervalLabel")} description={t("settings.autoUpdate.intervalDesc")}>
+            <SegmentedControl
+              label={t("settings.autoUpdate.intervalLabel")}
+              options={[
+                { value: "off", label: t("settings.autoUpdate.intervalOff") },
+                { value: "1h", label: t("settings.autoUpdate.interval1h") },
+                { value: "6h", label: t("settings.autoUpdate.interval6h") },
+                { value: "24h", label: t("settings.autoUpdate.interval24h") },
+              ]}
+              value={interval}
+              onChange={setIntervalValue}
+            />
           </SettingRow>
-          <SettingRow title="自动应用更新" description="覆盖中央技能库内容前仍保留清晰边界。">
-            <SegmentedControl label="自动应用更新" options={["关闭（仅提示）", "开启"]} value={applyMode} onChange={setApplyMode} />
+          <SettingRow title={t("settings.autoUpdate.applyLabel")} description={t("settings.autoUpdate.applyDesc")}>
+            <SegmentedControl
+              label={t("settings.autoUpdate.applyLabel")}
+              options={[
+                { value: "off", label: t("settings.autoUpdate.applyOff") },
+                { value: "on", label: t("settings.autoUpdate.applyOn") },
+              ]}
+              value={applyMode}
+              onChange={setApplyMode}
+            />
           </SettingRow>
-          <SettingRow title="网络代理" description="所有 Git 拉取和网络请求通过此代理出口。">
+          <SettingRow title={t("settings.proxyConfig")} description={t("settings.proxyUrlDesc")}>
             <code className="rounded-md border border-border-subtle bg-bg-secondary px-3 py-2 text-[12px] text-secondary">http://127.0.0.1:7890</code>
           </SettingRow>
         </div>
       </div>
       <div>
-        <h3 className="app-section-title mb-2">高级</h3>
+        <h3 className="app-section-title mb-2">{text.advanced}</h3>
         <div className="app-panel divide-y divide-border-faint overflow-hidden">
-          <SettingRow title="中央仓库路径" description="所有 Skills 和 Preset 配置的默认存储位置。">
+          <SettingRow title={t("settings.repoPath")} description={t("settings.repoPathDesc")}>
             <code className="text-[12px] text-secondary">~/.skill-expert</code>
           </SettingRow>
-          <SettingRow title="Git 备份高级配置" description="远程仓库地址与实验性 Git 引擎。">
-            <button type="button" className="app-button-secondary px-3 py-2">展开</button>
+          <SettingRow title={text.gitAdvanced} description={text.gitAdvancedDescription}>
+            <button type="button" className="app-button-secondary px-3 py-2">{text.expand}</button>
           </SettingRow>
         </div>
       </div>
@@ -323,6 +543,7 @@ function SectionContent({ section, tools }: { section: SectionKey; tools: ToolIn
 }
 
 function ContentHeader({ section, eyebrow }: { section: SectionKey; eyebrow?: string }) {
+  const sectionMeta = useSectionMeta();
   const { Icon, label, description } = sectionMeta[section];
   return (
     <div className="mb-4 flex items-start gap-3">
@@ -339,11 +560,13 @@ function ContentHeader({ section, eyebrow }: { section: SectionKey; eyebrow?: st
 }
 
 function VariantA({ tools }: SettingsHierarchyPrototypeProps) {
+  const text = usePrototypeText();
+  const sectionMeta = useSectionMeta();
   const [section, setSection] = useState<SectionKey>("preferences");
   return (
     <div className="grid min-h-[620px] overflow-hidden rounded-xl border border-border-subtle bg-surface lg:grid-cols-[220px_minmax(0,1fr)]">
-      <nav aria-label="设置分组" className="border-b border-border-subtle bg-bg-secondary/70 p-3 lg:border-b-0 lg:border-r">
-        <div className="px-2 pb-3 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">设置分组</div>
+      <nav aria-label={text.sectionGroups} className="border-b border-border-subtle bg-bg-secondary/70 p-3 lg:border-b-0 lg:border-r">
+        <div className="px-2 pb-3 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{text.sectionGroups}</div>
         <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
           {(Object.keys(sectionMeta) as SectionKey[]).map((key) => {
             const { Icon, label, description } = sectionMeta[key];
@@ -389,6 +612,8 @@ function OverviewRow({
   attention?: boolean;
   onClick: () => void;
 }) {
+  const sectionMeta = useSectionMeta();
+  const text = usePrototypeText();
   const { Icon, label, description } = sectionMeta[section];
   return (
     <button
@@ -402,7 +627,7 @@ function OverviewRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[14px] font-semibold text-primary">{label}</h3>
-          {attention && <StatusPill tone="attention">需确认</StatusPill>}
+          {attention && <StatusPill tone="attention">{text.needsConfirmation}</StatusPill>}
         </div>
         <p className="mt-0.5 text-[12px] text-muted">{description}</p>
       </div>
@@ -416,15 +641,17 @@ function OverviewRow({
 }
 
 function VariantB({ tools }: SettingsHierarchyPrototypeProps) {
+  const { t } = useTranslation();
+  const text = usePrototypeText();
   const [section, setSection] = useState<SectionKey | null>(null);
   if (section) {
     return (
       <div>
         <button type="button" onClick={() => setSection(null)} className="mb-4 inline-flex items-center gap-1.5 text-[12px] font-medium text-muted hover:text-secondary">
           <ChevronLeft className="h-3.5 w-3.5" />
-          返回设置概览
+          {text.backToOverview}
         </button>
-        <ContentHeader section={section} eyebrow="设置概览" />
+        <ContentHeader section={section} eyebrow={text.overviewEyebrow} />
         <SectionContent section={section} tools={tools} />
       </div>
     );
@@ -435,35 +662,35 @@ function VariantB({ tools }: SettingsHierarchyPrototypeProps) {
   return (
     <div>
       <div className="mb-5 max-w-[680px]">
-        <h2 className="text-[20px] font-semibold tracking-tight text-primary">先看状态，再进入设置</h2>
-        <p className="mt-1.5 text-[13px] leading-5 text-muted">每类设置只显示当前结果和是否需要处理，详细选项在下一层。</p>
+        <h2 className="text-[20px] font-semibold tracking-tight text-primary">{text.overviewTitle}</h2>
+        <p className="mt-1.5 text-[13px] leading-5 text-muted">{text.overviewDescription}</p>
       </div>
       <div className="app-panel divide-y divide-border-faint overflow-hidden">
-        <OverviewRow section="preferences" metric="跟随系统 · 简体中文" detail="默认字号" onClick={() => setSection("preferences")} />
-        <OverviewRow section="agents" metric={`已检测 ${installed} · 已启用 ${enabled}`} detail="5 个常用 Agent" onClick={() => setSection("agents")} />
-        <OverviewRow section="management" metric="1 个已部署" detail="来源可信 · 0 个待处理" onClick={() => setSection("management")} />
-        <OverviewRow section="maintenance" metric="每小时检查" detail="代理已配置 · 备份已连接" attention onClick={() => setSection("maintenance")} />
+        <OverviewRow section="preferences" metric={`${t("settings.themeSystem")} · ${t("settings.language")}`} detail={t("settings.textSizeDefault")} onClick={() => setSection("preferences")} />
+        <OverviewRow section="agents" metric={`${t("settings.detectedAgents")} ${installed} · ${t("settings.enabledAgents")} ${enabled}`} detail={`5 ${t("settings.supportedAgents")}`} onClick={() => setSection("agents")} />
+        <OverviewRow section="management" metric={t("agentManagement.deployedCount", { count: 1 })} detail={`${t("agentManagement.trustedStatus")} · ${t("agentManagement.pendingChanges")} 0`} onClick={() => setSection("management")} />
+        <OverviewRow section="maintenance" metric={t("settings.autoUpdate.interval1h")} detail={text.maintenanceDescription} attention onClick={() => setSection("maintenance")} />
       </div>
       <div className="mt-4 flex items-center gap-2 text-[12px] text-muted">
         <CircleCheck className="h-3.5 w-3.5 text-accent" />
-        3 类设置正常，1 类有需要确认的高级选项
+        {text.healthySummary}
       </div>
     </div>
   );
 }
 
-const taskTabs: Array<{ key: SectionKey; label: string; helper: string }> = [
-  { key: "preferences", label: "日常使用", helper: "外观与窗口" },
-  { key: "agents", label: "接入 Agent", helper: "发现与启用" },
-  { key: "management", label: "赋予管理能力", helper: "可信部署" },
-  { key: "maintenance", label: "维护", helper: "更新与高级" },
-];
-
 function VariantC({ tools }: SettingsHierarchyPrototypeProps) {
+  const text = usePrototypeText();
   const [section, setSection] = useState<SectionKey>("preferences");
+  const taskTabs: Array<{ key: SectionKey; label: string; helper: string }> = [
+    { key: "preferences", label: text.dailyUse, helper: text.dailyUseHelper },
+    { key: "agents", label: text.connectAgent, helper: text.connectAgentHelper },
+    { key: "management", label: text.grantManagement, helper: text.grantManagementHelper },
+    { key: "maintenance", label: text.maintain, helper: text.maintainHelper },
+  ];
   return (
     <div>
-      <div role="tablist" aria-label="设置任务" className="mb-6 grid overflow-hidden rounded-xl border border-border-subtle bg-surface sm:grid-cols-2 lg:grid-cols-4">
+      <div role="tablist" aria-label={text.currentTask} className="mb-6 grid overflow-hidden rounded-xl border border-border-subtle bg-surface sm:grid-cols-2 lg:grid-cols-4">
         {taskTabs.map(({ key, label, helper }) => {
           const active = section === key;
           return (
@@ -488,22 +715,22 @@ function VariantC({ tools }: SettingsHierarchyPrototypeProps) {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_220px]">
         <main className="min-w-0">
-          <ContentHeader section={section} eyebrow="当前任务" />
+          <ContentHeader section={section} eyebrow={text.currentTask} />
           <SectionContent section={section} tools={tools} />
         </main>
         <aside className="border-l border-border-faint pl-5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">任务边界</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">{text.taskBoundary}</div>
           <div className="mt-3 space-y-4 text-[12px] leading-5 text-muted">
-            {section === "preferences" && <p>这里只放高频、低风险、立即生效的个人偏好。</p>}
-            {section === "agents" && <p>这里只决定哪些 Agent 能接收中央技能库中的 Skills。</p>}
-            {section === "management" && <p>这里只决定哪些已启用 Agent 能直接管理中央技能库。</p>}
-            {section === "maintenance" && <p>影响来源检查、网络与备份的低频配置集中在这里。</p>}
+            {section === "preferences" && <p>{text.preferenceBoundary}</p>}
+            {section === "agents" && <p>{text.agentBoundary}</p>}
+            {section === "management" && <p>{text.managementBoundary}</p>}
+            {section === "maintenance" && <p>{text.maintenanceBoundary}</p>}
             <div className="border-t border-border-faint pt-3">
               <div className="flex items-center gap-2 text-secondary">
                 <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-                不混淆的两个动作
+                {text.actionBoundary}
               </div>
-              <p className="mt-1">“启用 Agent”不会自动授予“管理 Skills”的能力。</p>
+              <p className="mt-1">{text.actionBoundaryDescription}</p>
             </div>
           </div>
         </aside>
@@ -513,6 +740,7 @@ function VariantC({ tools }: SettingsHierarchyPrototypeProps) {
 }
 
 function PrototypeSwitcher({ variant, onChange }: { variant: VariantKey; onChange: (variant: VariantKey) => void }) {
+  const text = usePrototypeText();
   const variants: VariantKey[] = ["A", "B", "C"];
   const move = (offset: number) => {
     const index = variants.indexOf(variant);
@@ -533,13 +761,13 @@ function PrototypeSwitcher({ variant, onChange }: { variant: VariantKey; onChang
   if (!IS_PROTOTYPE_BUILD) return null;
   return (
     <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center rounded-full border border-zinc-700 bg-zinc-950 p-1 text-white shadow-2xl">
-      <button type="button" onClick={() => move(-1)} aria-label="上一个方案" className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-300 outline-none hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-emerald-400">
+      <button type="button" onClick={() => move(-1)} aria-label={text.previousVariant} className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-300 outline-none hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-emerald-400">
         <ArrowLeft className="h-4 w-4" />
       </button>
       <div aria-live="polite" className="min-w-[150px] px-3 text-center text-[12px] font-medium">
-        {variant} · {variantNames[variant]}
+        {variant} · {text.variantNames[variant]}
       </div>
-      <button type="button" onClick={() => move(1)} aria-label="下一个方案" className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-300 outline-none hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-emerald-400">
+      <button type="button" onClick={() => move(1)} aria-label={text.nextVariant} className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-300 outline-none hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-emerald-400">
         <ArrowRight className="h-4 w-4" />
       </button>
     </div>
@@ -547,6 +775,8 @@ function PrototypeSwitcher({ variant, onChange }: { variant: VariantKey; onChang
 }
 
 export function SettingsHierarchyPrototype({ tools }: SettingsHierarchyPrototypeProps) {
+  const { t } = useTranslation();
+  const text = usePrototypeText();
   const initial = new URLSearchParams(window.location.search).get("variant");
   const [variant, setVariant] = useState<VariantKey>(initial === "B" || initial === "C" ? initial : "A");
 
@@ -563,9 +793,9 @@ export function SettingsHierarchyPrototype({ tools }: SettingsHierarchyPrototype
       <div className="app-page-header">
         <h1 className="app-page-title flex items-center gap-2">
           <Settings2 className="h-4 w-4 text-accent" />
-          设置
+          {t("settings.title")}
         </h1>
-        <p className="app-page-subtitle">比较 Agent 接入、Agent Skills 管理能力与普通全局偏好的信息分层。</p>
+        <p className="app-page-subtitle">{text.subtitle}</p>
       </div>
       <PrototypeNotice />
       {variant === "A" && <VariantA tools={tools} />}
