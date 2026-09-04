@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { i18nReady } from "../i18n";
-import type { AgentPluginProjection } from "../lib/agentPlugins";
+import type { AgentPluginDetails, AgentPluginProjection } from "../lib/agentPlugins";
 import type { AgentPluginViewItem } from "../lib/agentPluginView";
 import { Plugins } from "./Plugins";
 
@@ -29,6 +29,36 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+const completeDetails: AgentPluginDetails = {
+  description: "manifest 提供的安全说明",
+  developer: "可信开发者",
+  category: "效率",
+  default_prompts: [],
+  declared_capabilities: [],
+  skills: [{ name: "safe-skill", description: "安全工作流" }],
+  mcp_servers: [],
+  hook_events: [],
+  connectors: [],
+  browser_extensions: [],
+  custom_ui: [],
+  icon_data_url: null,
+  screenshot_data_urls: [],
+  completeness: "complete",
+  issues: [],
+  technical: { source_type: "local", location: "~/…/first" },
+};
+
+const incompleteDetails: AgentPluginDetails = {
+  ...completeDetails,
+  description: null,
+  developer: null,
+  category: null,
+  skills: [],
+  completeness: "incomplete",
+  issues: ["manifest_missing"],
+  technical: { source_type: null, location: null },
+};
+
 vi.mock("../lib/agentPlugins", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/agentPlugins")>()),
   getAgentPluginProjection: apiMocks.getAgentPluginProjection,
@@ -50,7 +80,8 @@ const projection: ReadyProjectionWithViewItems = {
       install_status: "installed_enabled",
       update_available: false,
       install_policy: "AVAILABLE",
-      auth_policy: "ON_INSTALL",
+      auth_policy: "on_install",
+      details: completeDetails,
     },
     {
       identity: {
@@ -63,7 +94,8 @@ const projection: ReadyProjectionWithViewItems = {
       install_status: "installed_disabled",
       update_available: null,
       install_policy: null,
-      auth_policy: "ON_USE",
+      auth_policy: "on_use",
+      details: incompleteDetails,
     },
   ],
   available: [
@@ -79,9 +111,12 @@ const projection: ReadyProjectionWithViewItems = {
       update_available: null,
       install_policy: "AVAILABLE",
       auth_policy: null,
-      description: "检查页面可访问性",
-      developer: "星际工作室",
-    } satisfies AgentPluginViewItem,
+      details: {
+        ...incompleteDetails,
+        description: "检查页面可访问性",
+        developer: "星际工作室",
+      },
+    },
     {
       identity: {
         agent: "codex",
@@ -94,9 +129,12 @@ const projection: ReadyProjectionWithViewItems = {
       update_available: null,
       install_policy: "AVAILABLE",
       auth_policy: null,
-      description: "整理版本说明",
-      developer: "社区作者",
-    } satisfies AgentPluginViewItem,
+      details: {
+        ...incompleteDetails,
+        description: "整理版本说明",
+        developer: "社区作者",
+      },
+    },
   ],
 };
 
@@ -115,6 +153,16 @@ afterEach(() => {
 });
 
 describe("Plugins 可信基础快照", () => {
+  it("把 manifest 安全详情组合进方案 B 的固定右栏", async () => {
+    render(<Plugins />);
+
+    const details = await screen.findByRole("complementary", { name: "插件详情" });
+    expect(within(details).getByText("manifest 提供的安全说明")).toBeTruthy();
+    expect(within(details).getByText("可信开发者")).toBeTruthy();
+    expect(within(details).getByRole("region", { name: "Skills" })).toBeTruthy();
+    expect(within(details).getByText("safe-skill")).toBeTruthy();
+  });
+
   it("默认逐身份呈现已安装插件，并让右侧详情跟随键盘选择", async () => {
     const user = userEvent.setup();
     render(<Plugins />);

@@ -1,11 +1,10 @@
-import { Check, Download, Puzzle, Unplug } from "lucide-react";
+import { Puzzle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  agentPluginIdentityKey,
-  type AgentPluginInstallStatus,
-} from "../../lib/agentPlugins";
+import { agentPluginIdentityKey } from "../../lib/agentPlugins";
 import type { AgentPluginViewItem } from "../../lib/agentPluginView";
 import { cn } from "../../utils";
+import { PluginStatusBadge } from "./PluginDetails";
+import { PluginMark } from "./PluginMark";
 
 interface PluginListProps {
   plugins: AgentPluginViewItem[];
@@ -14,51 +13,6 @@ interface PluginListProps {
   emptyTitle: string;
   emptyDescription: string;
   onSelect: (key: string) => void;
-}
-
-function statusKey(status: AgentPluginInstallStatus): string {
-  return `plugins.status.${status}`;
-}
-
-function StatusBadge({ status }: { status: AgentPluginInstallStatus }) {
-  const { t } = useTranslation();
-  const appearance = status === "installed_enabled"
-    ? {
-        Icon: Check,
-        className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-      }
-    : status === "installed_disabled"
-      ? {
-          Icon: Unplug,
-          className: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        }
-      : {
-          Icon: Download,
-          className: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
-        };
-  const { Icon } = appearance;
-
-  return (
-    <span className={cn(
-      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-      appearance.className,
-    )}>
-      <Icon className="h-3 w-3" aria-hidden="true" />
-      {t(statusKey(status))}
-    </span>
-  );
-}
-
-function PluginMark({ name }: { name: string }) {
-  const text = name.trim().slice(0, 2).toLocaleUpperCase() || "P";
-  return (
-    <span
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-[12px] font-semibold text-accent"
-      aria-hidden="true"
-    >
-      {text}
-    </span>
-  );
 }
 
 export function PluginCatalogEmptyState({
@@ -124,7 +78,7 @@ export function PluginList({
               active ? "bg-surface-active" : "hover:bg-surface-hover",
             )}
           >
-            <PluginMark name={plugin.display_name} />
+            <PluginMark plugin={plugin} />
             <span className="min-w-0 flex-1">
               <span className={cn(
                 "block truncate text-[13px] font-medium",
@@ -136,7 +90,7 @@ export function PluginList({
                 {plugin.identity.marketplace_name} · {plugin.version ?? t("plugins.unknown")}
               </span>
             </span>
-            <StatusBadge status={plugin.install_status} />
+            <PluginStatusBadge status={plugin.install_status} />
           </button>
         );
       })}

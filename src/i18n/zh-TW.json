@@ -155,6 +155,13 @@
     "allMarketplaces": "全部 Marketplace",
     "detailsLabel": "外掛詳情",
     "basicDetails": "基礎詳情",
+    "detailsIncomplete": "詳情不完整：Codex 已確認外掛狀態，但部分 manifest 或資源無法安全讀取。",
+    "technicalDetails": "技術詳情",
+    "defaultPrompts": "預設提示詞",
+    "screenshots": "截圖",
+    "screenshotAlt": "外掛截圖 {{index}}",
+    "defaultIcon": "預設外掛圖示",
+    "pluginIcon": "{{name}} 圖示",
     "unknown": "未提供",
     "noSelection": "選擇一個外掛查看詳情",
     "emptyTitle": "沒有已安裝外掛",
@@ -169,10 +176,23 @@
     },
     "fields": {
       "agent": "支援 Agent",
+      "developer": "開發者",
+      "category": "類別",
       "marketplace": "Marketplace",
       "version": "版本",
       "status": "安裝狀態",
-      "auth": "認證策略"
+      "auth": "認證策略",
+      "sourceType": "來源類型",
+      "location": "收斂位置"
+    },
+    "capabilities": {
+      "skills": "Skills",
+      "mcp": "MCP",
+      "hooks": "Hooks",
+      "connectors": "連接器",
+      "browserExtensions": "瀏覽器擴充功能",
+      "customUi": "自訂 UI",
+      "undeclared": "未宣告"
     },
     "auth": {
       "onInstall": "安裝時可能需要認證",

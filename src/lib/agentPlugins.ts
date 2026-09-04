@@ -13,6 +13,45 @@ export type AgentPluginInstallStatus =
   | "installed_disabled"
   | "available";
 
+export type AgentPluginAuthPolicy = "on_install" | "on_use" | "none";
+
+export type AgentPluginDetailsCompleteness = "complete" | "incomplete";
+
+export type AgentPluginDetailsIssue =
+  | "plugin_root_unavailable"
+  | "manifest_missing"
+  | "manifest_invalid"
+  | "manifest_incompatible"
+  | "resource_rejected"
+  | "component_unreadable";
+
+export interface AgentPluginSkill {
+  name: string;
+  description: string | null;
+}
+
+export interface AgentPluginDetails {
+  description: string | null;
+  developer: string | null;
+  category: string | null;
+  default_prompts: string[];
+  declared_capabilities: string[];
+  skills: AgentPluginSkill[];
+  mcp_servers: string[];
+  hook_events: string[];
+  connectors: string[];
+  browser_extensions: string[];
+  custom_ui: string[];
+  icon_data_url: string | null;
+  screenshot_data_urls: string[];
+  completeness: AgentPluginDetailsCompleteness;
+  issues: AgentPluginDetailsIssue[];
+  technical: {
+    source_type: string | null;
+    location: string | null;
+  };
+}
+
 export interface AgentPluginSummary {
   identity: AgentPluginIdentity;
   display_name: string;
@@ -20,7 +59,8 @@ export interface AgentPluginSummary {
   install_status: AgentPluginInstallStatus;
   update_available: boolean | null;
   install_policy: string | null;
-  auth_policy: string | null;
+  auth_policy: AgentPluginAuthPolicy | null;
+  details: AgentPluginDetails;
 }
 
 export type AgentPluginCatalogErrorKind =

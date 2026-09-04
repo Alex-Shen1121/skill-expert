@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod codex;
+mod manifest;
 
 /// 首版支持读取插件目录的 Agent。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -31,6 +32,93 @@ pub enum AgentPluginInstallStatus {
     Available,
 }
 
+/// 插件认证策略只表达可能发生认证的阶段，不代表已经授权。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPluginAuthPolicy {
+    OnInstall,
+    OnUse,
+    None,
+}
+
+/// 插件内置 Skill 的安全展示摘要。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentPluginSkill {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// manifest 补充资料的可信读取程度。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPluginDetailsCompleteness {
+    Complete,
+    Incomplete,
+}
+
+/// 不包含底层路径、命令输出或秘密值的详情降级原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPluginDetailsIssue {
+    PluginRootUnavailable,
+    ManifestMissing,
+    ManifestInvalid,
+    ManifestIncompatible,
+    ResourceRejected,
+    ComponentUnreadable,
+}
+
+/// 默认折叠展示的收敛技术信息。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct AgentPluginTechnicalDetails {
+    pub source_type: Option<String>,
+    pub location: Option<String>,
+}
+
+/// manifest 只能补充的展示资料和明确声明的插件内置能力。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentPluginDetails {
+    pub description: Option<String>,
+    pub developer: Option<String>,
+    pub category: Option<String>,
+    pub default_prompts: Vec<String>,
+    pub declared_capabilities: Vec<String>,
+    pub skills: Vec<AgentPluginSkill>,
+    pub mcp_servers: Vec<String>,
+    pub hook_events: Vec<String>,
+    pub connectors: Vec<String>,
+    pub browser_extensions: Vec<String>,
+    pub custom_ui: Vec<String>,
+    pub icon_data_url: Option<String>,
+    pub screenshot_data_urls: Vec<String>,
+    pub completeness: AgentPluginDetailsCompleteness,
+    pub issues: Vec<AgentPluginDetailsIssue>,
+    pub technical: AgentPluginTechnicalDetails,
+}
+
+impl Default for AgentPluginDetails {
+    fn default() -> Self {
+        Self {
+            description: None,
+            developer: None,
+            category: None,
+            default_prompts: Vec::new(),
+            declared_capabilities: Vec::new(),
+            skills: Vec::new(),
+            mcp_servers: Vec::new(),
+            hook_events: Vec::new(),
+            connectors: Vec::new(),
+            browser_extensions: Vec::new(),
+            custom_ui: Vec::new(),
+            icon_data_url: None,
+            screenshot_data_urls: Vec::new(),
+            completeness: AgentPluginDetailsCompleteness::Incomplete,
+            issues: vec![AgentPluginDetailsIssue::PluginRootUnavailable],
+            technical: AgentPluginTechnicalDetails::default(),
+        }
+    }
+}
+
 /// CLI 能够直接确认的 Agent 插件基础资料。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentPluginSummary {
@@ -40,7 +128,8 @@ pub struct AgentPluginSummary {
     pub install_status: AgentPluginInstallStatus,
     pub update_available: Option<bool>,
     pub install_policy: Option<String>,
-    pub auth_policy: Option<String>,
+    pub auth_policy: Option<AgentPluginAuthPolicy>,
+    pub details: AgentPluginDetails,
 }
 
 /// 插件目录读取失败的稳定分类；不会包含未经清理的命令输出。
@@ -172,9 +261,10 @@ fn parse_collection(
             if !identities.insert(identity.clone()) {
                 return Err(contract_incompatible());
             }
-            let display_name = optional_string(object, "name")?
+            let cli_display_name = optional_string(object, "name")?
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or_else(|| identity.plugin_id.clone());
+            let (display_name, details) = manifest::enrich_from_manifest(object, cli_display_name);
             Ok(AgentPluginSummary {
                 identity,
                 display_name,
@@ -187,7 +277,8 @@ fn parse_collection(
                 },
                 update_available: optional_bool(object, "updateAvailable")?,
                 install_policy: optional_string(object, "installPolicy")?,
-                auth_policy: optional_string(object, "authPolicy")?,
+                auth_policy: parse_auth_policy(object),
+                details,
             })
         })
         .collect()
@@ -234,6 +325,15 @@ fn optional_bool(
         None | Some(Value::Null) => Ok(None),
         Some(Value::Bool(value)) => Ok(Some(*value)),
         Some(_) => Err(contract_incompatible()),
+    }
+}
+
+fn parse_auth_policy(object: &Map<String, Value>) -> Option<AgentPluginAuthPolicy> {
+    match object.get("authPolicy").and_then(Value::as_str) {
+        Some("ON_INSTALL") => Some(AgentPluginAuthPolicy::OnInstall),
+        Some("ON_USE") => Some(AgentPluginAuthPolicy::OnUse),
+        Some("NONE") => Some(AgentPluginAuthPolicy::None),
+        _ => None,
     }
 }
 
