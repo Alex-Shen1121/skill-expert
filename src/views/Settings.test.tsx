@@ -40,6 +40,22 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../lib/tauri", () => apiMocks);
 
+vi.mock("../lib/agentPlugins", () => ({
+  getCodexCliConfiguration: vi.fn().mockResolvedValue({
+    resolution_source: "environment",
+    configured_path: null,
+    facts: {
+      configuration_directory: "confirmed",
+      executable_resolution: "confirmed",
+      command_runtime: "unchecked",
+      plugin_json_contract: "unchecked",
+    },
+  }),
+  validateCodexCliPath: vi.fn(),
+  setCodexCliPath: vi.fn(),
+  resetCodexCliPath: vi.fn(),
+}));
+
 vi.mock("../context/AppContext", () => ({
   useApp: () => ({
     tools: [],
@@ -217,5 +233,11 @@ describe("Settings Agent Skills 管理配置", () => {
     expect(
       await screen.findByRole("heading", { name: "Agent 管理 Skills" }),
     ).toBeTruthy();
+  });
+
+  it("始终提供独立的 Codex CLI 路径恢复设置", async () => {
+    renderSettings();
+
+    expect(await screen.findByRole("heading", { name: "Codex CLI 路径" })).toBeTruthy();
   });
 });

@@ -199,9 +199,15 @@
       "onUse": "使用时可能需要认证",
       "none": "无需认证"
     },
+    "actions": {
+      "openCliSettings": "前往 Codex CLI 设置",
+      "retry": "重试读取"
+    },
     "errors": {
       "title": "无法读取插件状态",
       "cliUnavailable": "插件 CLI 不可用，请确认 Codex CLI 已安装并可从当前环境访问。",
+      "configuredPathInvalid": "配置的 Codex CLI 路径无效，请前往设置重新选择或恢复环境解析。",
+      "cliNotRunnable": "Codex CLI 无法执行，请检查文件权限或在设置中重新选择。",
       "commandUnsupported": "当前 Codex CLI 不支持插件目录命令，请先更新 Codex。",
       "timedOut": "读取插件状态超时，请稍后再试。",
       "commandFailed": "Codex CLI 返回失败，当前结果未被保留。",
@@ -771,6 +777,43 @@
   },
   "settings": {
     "title": "设置",
+    "codexCli": {
+      "title": "Codex CLI 路径",
+      "description": "为 Finder 等 PATH 不完整的启动方式指定 Codex CLI。选择文件不会自动读取插件；验证或保存时才会运行只读目录命令。",
+      "inputLabel": "Codex CLI 可执行文件",
+      "placeholder": "留空时从桌面进程环境解析",
+      "select": "选择可执行文件",
+      "validate": "验证路径",
+      "save": "保存路径",
+      "reset": "恢复环境解析",
+      "loading": "正在读取 Codex CLI 路径设置",
+      "environmentActive": "当前从桌面进程环境解析 Codex CLI。",
+      "explicitActive": "当前使用明确指定的 Codex CLI 路径。",
+      "validationSuccess": "已验证：命令可运行并支持插件 JSON 契约。",
+      "saved": "已保存明确路径。",
+      "facts": {
+        "configurationDirectory": "配置目录",
+        "executableResolution": "可执行文件解析",
+        "commandRuntime": "命令可运行",
+        "pluginJsonContract": "插件 JSON 契约"
+      },
+      "factStatus": {
+        "confirmed": "已确认",
+        "unavailable": "不可用",
+        "unchecked": "未检查"
+      },
+      "errors": {
+        "cliUnavailable": "当前桌面环境没有解析到 Codex CLI，可选择明确的可执行文件。",
+        "configuredPathInvalid": "所选路径不存在或不是普通文件，最后可用配置未被覆盖。",
+        "cliNotRunnable": "文件存在，但当前应用无法执行它，请检查执行权限或重新选择。",
+        "commandUnsupported": "该 Codex CLI 不支持插件目录命令，请更新后重试。",
+        "timedOut": "验证 Codex CLI 超时，请稍后重试。",
+        "commandFailed": "Codex CLI 已运行但返回失败，最后可用配置未被覆盖。",
+        "invalidJson": "Codex CLI 返回了无法解析的数据。",
+        "contractIncompatible": "该 Codex CLI 的插件 JSON 契约与当前版本不兼容。",
+        "internal": "读取或验证 Codex CLI 设置时发生内部错误。"
+      }
+    },
     "supportedAgents": "支持的 Agent",
     "agentsSummary": "已检测 {{detected}} 个，已启用 {{enabled}} 个，自定义 {{custom}} 个",
     "detectedAgents": "已检测",

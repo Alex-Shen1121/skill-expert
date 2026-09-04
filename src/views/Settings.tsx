@@ -58,6 +58,7 @@ import { useThemeContext } from "../context/ThemeContext";
 import { AgentIcon } from "../components/AgentIcon";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { AgentSkillsManagementSettings } from "../components/AgentSkillsManagementSettings";
+import { CodexCliPathSettings } from "../components/settings/CodexCliPathSettings";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage } from "../lib/error";
@@ -1308,6 +1309,8 @@ export function Settings() {
         </section>
 
         <AgentSkillsManagementSettings />
+
+        <CodexCliPathSettings />
 
         {/* Global config */}
         <section>

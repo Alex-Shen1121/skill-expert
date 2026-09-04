@@ -199,9 +199,15 @@
       "onUse": "使用時可能需要認證",
       "none": "無需認證"
     },
+    "actions": {
+      "openCliSettings": "前往 Codex CLI 設定",
+      "retry": "重試讀取"
+    },
     "errors": {
       "title": "無法讀取外掛狀態",
       "cliUnavailable": "外掛 CLI 不可用，請確認 Codex CLI 已安裝且可從目前環境存取。",
+      "configuredPathInvalid": "設定的 Codex CLI 路徑無效，請前往設定重新選擇或恢復環境解析。",
+      "cliNotRunnable": "Codex CLI 無法執行，請檢查檔案權限或在設定中重新選擇。",
       "commandUnsupported": "目前的 Codex CLI 不支援外掛目錄命令，請先更新 Codex。",
       "timedOut": "讀取外掛狀態逾時，請稍後再試。",
       "commandFailed": "Codex CLI 傳回失敗，目前結果未被保留。",
@@ -723,6 +729,43 @@
   },
   "settings": {
     "title": "設定",
+    "codexCli": {
+      "title": "Codex CLI 路徑",
+      "description": "為 Finder 等 PATH 不完整的啟動方式指定 Codex CLI。選擇檔案不會自動讀取外掛；驗證或儲存時才會執行唯讀目錄命令。",
+      "inputLabel": "Codex CLI 可執行檔",
+      "placeholder": "留空時從桌面程序環境解析",
+      "select": "選擇可執行檔",
+      "validate": "驗證路徑",
+      "save": "儲存路徑",
+      "reset": "恢復環境解析",
+      "loading": "正在讀取 Codex CLI 路徑設定",
+      "environmentActive": "目前從桌面程序環境解析 Codex CLI。",
+      "explicitActive": "目前使用明確指定的 Codex CLI 路徑。",
+      "validationSuccess": "已驗證：命令可執行並支援外掛 JSON 契約。",
+      "saved": "已儲存明確路徑。",
+      "facts": {
+        "configurationDirectory": "設定目錄",
+        "executableResolution": "可執行檔解析",
+        "commandRuntime": "命令可執行",
+        "pluginJsonContract": "外掛 JSON 契約"
+      },
+      "factStatus": {
+        "confirmed": "已確認",
+        "unavailable": "不可用",
+        "unchecked": "未檢查"
+      },
+      "errors": {
+        "cliUnavailable": "目前桌面環境沒有解析到 Codex CLI，可選擇明確的可執行檔。",
+        "configuredPathInvalid": "所選路徑不存在或不是一般檔案，最後可用設定未被覆蓋。",
+        "cliNotRunnable": "檔案存在，但目前應用程式無法執行，請檢查執行權限或重新選擇。",
+        "commandUnsupported": "該 Codex CLI 不支援外掛目錄命令，請更新後再試。",
+        "timedOut": "驗證 Codex CLI 逾時，請稍後再試。",
+        "commandFailed": "Codex CLI 已執行但傳回失敗，最後可用設定未被覆蓋。",
+        "invalidJson": "Codex CLI 傳回了無法解析的資料。",
+        "contractIncompatible": "該 Codex CLI 的外掛 JSON 契約與目前版本不相容。",
+        "internal": "讀取或驗證 Codex CLI 設定時發生內部錯誤。"
+      }
+    },
     "supportedAgents": "支援的 Agent",
     "agentsSummary": "已偵測 {{detected}} 個，已啟用 {{enabled}} 個，自訂 {{custom}} 個",
     "detectedAgents": "已偵測",

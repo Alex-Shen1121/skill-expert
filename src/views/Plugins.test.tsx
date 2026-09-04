@@ -194,6 +194,8 @@ describe("Plugins 可信基础快照", () => {
   it("逐类显示结构化错误，且不把失败呈现为空插件快照", async () => {
     const cases = [
       ["cli_unavailable", "插件 CLI 不可用"],
+      ["configured_path_invalid", "配置的 Codex CLI 路径无效"],
+      ["cli_not_runnable", "Codex CLI 无法执行"],
       ["command_unsupported", "当前 Codex CLI 不支持插件目录命令"],
       ["timed_out", "读取插件状态超时"],
       ["command_failed", "Codex CLI 返回失败"],
@@ -375,5 +377,55 @@ describe("Plugins 可信基础快照", () => {
     expect(within(error).getByText("读取插件状态超时，请稍后再试。")).toBeTruthy();
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.queryByText("same-name@first")).toBeNull();
+  });
+
+  it("CLI 不可用时提供设置跳转与重试，并在恢复后重新读取当前快照", async () => {
+    const user = userEvent.setup();
+    apiMocks.getAgentPluginProjection
+      .mockResolvedValueOnce({
+        read_status: "error",
+        agent: "codex",
+        refreshed_at_unix_ms: 1_788_537_600_000,
+        error: { kind: "configured_path_invalid" },
+      } satisfies AgentPluginProjection)
+      .mockResolvedValueOnce(projection);
+    render(<Plugins />);
+
+    expect(await screen.findByText("配置的 Codex CLI 路径无效，请前往设置重新选择或恢复环境解析。")).toBeTruthy();
+    const settingsLink = screen.getByRole("link", { name: "前往 Codex CLI 设置" });
+    expect(settingsLink.getAttribute("href")).toBe(
+      "/settings?section=codex-cli#codex-cli-settings",
+    );
+    expect(document.body.textContent).not.toContain("/Users/");
+
+    await user.click(screen.getByRole("button", { name: "重试读取" }));
+
+    expect(await screen.findByRole("listbox", { name: "已安装插件" })).toBeTruthy();
+    expect(apiMocks.getAgentPluginProjection).toHaveBeenCalledTimes(2);
+  });
+
+  it("三种界面语言都提供脱敏的 CLI 路径恢复操作", async () => {
+    const cases = [
+      ["zh", "配置的 Codex CLI 路径无效，请前往设置重新选择或恢复环境解析。", "前往 Codex CLI 设置", "重试读取"],
+      ["zh-TW", "設定的 Codex CLI 路徑無效，請前往設定重新選擇或恢復環境解析。", "前往 Codex CLI 設定", "重試讀取"],
+      ["en", "The configured Codex CLI path is invalid. Open settings to choose it again or restore environment resolution.", "Open Codex CLI settings", "Retry read"],
+    ] as const;
+
+    for (const [language, message, settings, retry] of cases) {
+      await i18n.changeLanguage(language);
+      apiMocks.getAgentPluginProjection.mockResolvedValueOnce({
+        read_status: "error",
+        agent: "codex",
+        refreshed_at_unix_ms: 1_788_537_600_000,
+        error: { kind: "configured_path_invalid" },
+      } satisfies AgentPluginProjection);
+      const view = render(<Plugins />);
+
+      expect(await screen.findByText(message)).toBeTruthy();
+      expect(screen.getByRole("link", { name: settings })).toBeTruthy();
+      expect(screen.getByRole("button", { name: retry })).toBeTruthy();
+      expect(document.body.textContent).not.toContain("/Users/");
+      view.unmount();
+    }
   });
 });
