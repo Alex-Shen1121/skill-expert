@@ -12,7 +12,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### User-facing
--
+- 修复从 Finder 等桌面入口启动时，因 PATH 缺少 `~/.local/bin` 而误报 Codex CLI 不可用、无法读取插件的问题；自动解析保留显式路径与 PATH 的优先级。
 
 ### Developer & Governance
 -
