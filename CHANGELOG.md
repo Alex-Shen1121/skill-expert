@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.15] - 2026-09-05
+
+### Release Overview
 - 修复 Skill 批量检查或更新点击停止后，在途网络任务卡住并导致进度窗口无法关闭的问题。
 - 新增 Codex 插件只读主从检查器，覆盖已安装与可安装插件。
 
