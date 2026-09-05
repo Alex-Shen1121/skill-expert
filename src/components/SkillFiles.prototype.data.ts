@@ -1,6 +1,6 @@
 // 一次性 UI 原型：只在专用开发命令中使用示例数据，所有写入均被拒绝。
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { ManagedSkill } from "../lib/tauri";
+import type { ManagedSkill, SkillSourceDiffEntry } from "../lib/tauri";
 
 export const prototypeEnabled = import.meta.env.DEV && import.meta.env.VITE_SKILL_FILES_PROTOTYPE === "1";
 
@@ -79,6 +79,7 @@ if __name__ == "__main__":
   { path: "scripts/utils/normalize.py", kind: "text", size: "126 B", body: `"""统一换行符。"""\n\ndef normalize(text: str) -> str:\n    return text.replace("\\r\\n", "\\n").rstrip() + "\\n"\n` },
   { path: "references", kind: "directory" },
   { path: "references/writing-guide.md", kind: "text", size: "892 B", body: `# 写作指南\n\n一篇文章只回答一个核心问题。\n\n## 组织内容\n\n1. 开头直接写出主要结论。\n2. 每个段落围绕一个观点展开。\n3. 使用具体例子解释抽象概念。\n\n## 检查清单\n\n- [ ] 标题准确表达内容\n- [ ] 区分事实与推断\n- [ ] 保留引用来源\n\n返回 [技能说明](../SKILL.md)。\n` },
+  { path: "references/legacy-notes.md", kind: "text", size: "132 B", body: "# 旧版写作备注\n\n当前安装版本保留的旧说明。来源版本已将其替换为交付检查清单。\n" },
   { path: "references/很长的参考文档文件名：跨团队技术内容写作与来源核验规范.md", kind: "text", size: "328 B", body: "# 跨团队写作规范\n\n文件名很长时，目录保持紧凑，预览标题仍能读到完整名称。\n\n使用统一术语，并标记来源及核验日期。" },
   { path: "templates", kind: "directory" },
   { path: "templates/article.md", kind: "text", size: "230 B", body: "# 文章标题\n\n一句话写出核心结论。\n\n## 背景\n\n说明需要解决的问题。\n\n## 方案与实例\n\n用具体例子说明方法。\n\n## 参考资料\n\n补充可追溯的来源。" },
@@ -96,14 +97,38 @@ if __name__ == "__main__":
   { path: "shared-assets", kind: "symlink", note: "指向技能目录外的符号链接；展示链接信息，不读取外部内容。", size: "—" },
   { path: "restricted.txt", kind: "unreadable", note: "没有读取权限。目录项仍然保留。", size: "—" },
 ];
+for (const entry of exampleEntries) {
+  if (entry.kind === "text") entry.size = `${new TextEncoder().encode(entry.body ?? "").length} B`;
+}
+
+// 来源与差异使用同一份示例内容，避免两个模块呈现不一致的版本。
+export const exampleSourceBody = exampleEntries[0].body!
+  .replace("version: 1.2.0", "version: 1.3.0")
+  .replace("### 3. 完成初稿", "### 3. 核验引用来源\n\n逐条核对引用是否支持结论，并使用 references/checklist.md 完成交付检查。\n\n### 4. 完成初稿");
+const exampleScript = exampleEntries.find(entry => entry.path === "scripts/export_markdown.py")!.body!;
+export const exampleDiff: SkillSourceDiffEntry[] = [
+  { relative_path: "SKILL.md", status: "modified", content_kind: "text", original_text: exampleEntries[0].body!, updated_text: exampleSourceBody, executable_before: false, executable_after: false },
+  { relative_path: "scripts/export_markdown.py", status: "modified", content_kind: "text", original_text: exampleScript, updated_text: exampleScript.replace('content.strip() + "\\n"', 'content.replace("\\r\\n", "\\n").strip() + "\\n"'), executable_before: true, executable_after: true },
+  { relative_path: "references/checklist.md", status: "added", content_kind: "text", original_text: null, updated_text: "# 交付检查\n\n- [ ] 核对标题与核心结论\n- [ ] 核验引用来源\n- [ ] 清除待补充标记\n", executable_before: false, executable_after: false },
+  { relative_path: "references/legacy-notes.md", status: "removed", content_kind: "text", original_text: exampleEntries.find(entry => entry.path === "references/legacy-notes.md")!.body!, updated_text: null, executable_before: false, executable_after: false },
+];
+
+const sourceChanges = new Map(exampleDiff.map(change => [change.relative_path, change]));
+export const exampleSourceEntries: ExampleEntry[] = [
+  ...exampleEntries.filter(entry => sourceChanges.get(entry.path)?.status !== "removed").map(entry => {
+    const body = sourceChanges.get(entry.path)?.updated_text;
+    return body == null ? entry : { ...entry, body, size: `${new TextEncoder().encode(body).length} B` };
+  }),
+  ...exampleDiff.filter(change => change.status === "added").map(change => ({ path: change.relative_path, kind: "text" as const, body: change.updated_text ?? "", size: `${new TextEncoder().encode(change.updated_text ?? "").length} B` })),
+];
 
 export const prototypeSkills: ManagedSkill[] = ["document-workflow", "research", "code-review", "grill-with-docs", "prototype", "domain-modeling"].map((name, i) => ({
   id: `prototype-${i}`, name, description: i === 0 ? "从资料收集到结构化文档，完成一篇清晰、可追溯的文章。" : "整理知识与协作流程中的常用技能。",
-  source_type: "local", source_ref: null, source_ref_resolved: null, source_subpath: null, source_branch: null,
+  source_type: "local", source_ref: i === 0 ? "/示例来源/document-workflow" : null, source_ref_resolved: null, source_subpath: null, source_branch: null,
   source_revision: null, remote_revision: null, update_status: "up_to_date", last_checked_at: null, last_check_error: null,
   central_path: `/示例技能库/skills/${name}`, enabled: true, created_at: 1788624000000, updated_at: 1788624000000,
   status: "synced", targets: ["codex", "claude"].map(tool => ({ id: `${name}-${tool}`, skill_id: `prototype-${i}`, tool, target_path: `/示例部署/${tool}/${name}`, mode: "symlink", status: "synced", synced_at: null })),
-  preset_ids: ["writing"], tags: ["内容创作"], can_check_update: false,
+  preset_ids: ["writing"], tags: ["内容创作"], can_check_update: i === 0,
 }));
 
 if (prototypeEnabled) {
