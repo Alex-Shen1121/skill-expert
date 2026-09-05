@@ -35,6 +35,8 @@ import { useMultiSelect } from "../hooks/useMultiSelect";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TagRenameDialog } from "../components/TagRenameDialog";
 import { SkillDetailPanel } from "../components/SkillDetailPanel";
+import { SkillFilesPrototype } from "../components/SkillFiles.prototype";
+import { prototypeEnabled } from "../components/SkillFiles.prototype.data";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { BatchTagDialog } from "../components/BatchTagDialog";
 import { SyncDots } from "../components/SyncDots";
@@ -2111,7 +2113,7 @@ export function MySkills() {
         </DndContext>
       )}
 
-      <SkillDetailPanel
+      {prototypeEnabled && skills[0] ? <SkillFilesPrototype skill={skills[0]} /> : <SkillDetailPanel
         key={selectedSkill?.id ?? "skill-detail-empty"}
         skill={selectedSkill}
         onClose={closeSkillDetail}
@@ -2121,7 +2123,7 @@ export function MySkills() {
         onToggleTool={handleToggleSkillTool}
         projects={projects}
         onProjectsChanged={refreshProjects}
-      />
+      />}
 
       <SkillUpdateProgressDialog
         {...skillUpdateBatch.dialogProps}

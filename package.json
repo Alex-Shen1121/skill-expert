@@ -14,6 +14,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prototype:skill-files": "VITE_SKILL_FILES_PROTOTYPE=1 vite --host 127.0.0.1 --port 1467 --strictPort --open /my-skills?variant=B",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
