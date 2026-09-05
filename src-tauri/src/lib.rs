@@ -31,7 +31,7 @@ const TRAY_OPEN_FOLDER_ID: &str = "tray-open-folder";
 const TRAY_CHECK_UPDATES_ID: &str = "tray-check-updates";
 const TRAY_OPEN_UPDATES_EVENT: &str = "tray-open-updates";
 
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, target_os = "macos"))]
 const ACCEPTANCE_DATA_STORE_IDENTIFIER: [u8; 16] = [
     19, 50, 81, 112, 143, 174, 205, 236, 12, 43, 74, 105, 136, 167, 198, 229,
 ];
