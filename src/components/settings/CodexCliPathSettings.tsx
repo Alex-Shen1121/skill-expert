@@ -41,7 +41,9 @@ function FactRow({
   );
 }
 
-export function CodexCliPathSettings() {
+export function CodexCliPathSettings({
+  focusRequested = false,
+}: { focusRequested?: boolean }) {
   const { t } = useTranslation();
   const sectionRef = useRef<HTMLElement>(null);
   const [configuration, setConfiguration] = useState<CodexCliConfiguration | null>(null);
@@ -85,13 +87,11 @@ export function CodexCliPathSettings() {
   }, []);
 
   useEffect(() => {
-    const targeted = new URLSearchParams(window.location.search).get("section") === "codex-cli"
-      || window.location.hash === "#codex-cli-settings";
-    if (targeted) {
+    if (focusRequested) {
       sectionRef.current?.scrollIntoView({ block: "center" });
       sectionRef.current?.focus();
     }
-  }, []);
+  }, [focusRequested]);
 
   const runAction = async (
     action: Exclude<PendingAction, "loading" | null>,
@@ -263,7 +263,7 @@ export function CodexCliPathSettings() {
             >
               {message}
             </p>
-            <div className="grid gap-2 rounded-lg border border-border-subtle bg-background p-3 sm:grid-cols-2">
+            <div className="settings-codex-facts grid gap-2 rounded-lg border border-border-subtle bg-background p-3 sm:grid-cols-2">
               <FactRow
                 label={t("settings.codexCli.facts.configurationDirectory")}
                 status={configuration.facts.configuration_directory}

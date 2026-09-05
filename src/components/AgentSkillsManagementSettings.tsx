@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronDown,
   ExternalLink,
   Loader2,
   RotateCcw,
@@ -30,7 +31,7 @@ interface ManagementTarget {
   selected: boolean;
 }
 
-type TargetFilter = "all" | "deployed" | "available" | "attention";
+type TargetFilter = "all" | "selected" | "available" | "attention";
 
 interface TargetOperation {
   key: string;
@@ -42,17 +43,17 @@ type ManagementSourceState = "conflict" | "trusted" | "notInstalled";
 
 const SOURCE_STATE_VIEW = {
   conflict: {
-    className: "border-amber-500/25 bg-amber-500/10 text-amber-700",
+    className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     statusKey: "agentManagement.conflictStatus",
     descriptionKey: "agentManagement.conflictDescription",
   },
   trusted: {
-    className: "border-emerald-500/20 bg-white/75 text-emerald-700",
+    className: "border-emerald-500/20 bg-surface text-emerald-700 dark:text-emerald-300",
     statusKey: "agentManagement.trustedStatus",
     descriptionKey: "agentManagement.trustedDescription",
   },
   notInstalled: {
-    className: "border-border-subtle bg-white/75 text-muted",
+    className: "border-border-subtle bg-surface text-muted",
     statusKey: "agentManagement.notInstalledStatus",
     descriptionKey: "agentManagement.notInstalledDescription",
   },
@@ -159,7 +160,7 @@ export function AgentSkillsManagementSettings() {
     if (!target.displayName.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) {
       return false;
     }
-    if (targetFilter === "deployed") return target.selected;
+    if (targetFilter === "selected") return target.selected;
     if (targetFilter === "available") return target.active && !target.selected;
     if (targetFilter === "attention") {
       return !target.active && targetKeys.has(target.key);
@@ -252,7 +253,7 @@ export function AgentSkillsManagementSettings() {
   };
 
   return (
-    <section>
+    <section className="settings-management">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h2 className="app-section-title">{t("agentManagement.title")}</h2>
@@ -263,21 +264,23 @@ export function AgentSkillsManagementSettings() {
         </span>
       </div>
 
-      <div className="grid grid-cols-[0.86fr_1.4fr] gap-3">
-        <div className="relative overflow-hidden rounded-2xl border border-accent-border bg-[linear-gradient(145deg,#f0fdf7_0%,#ffffff_56%,#ecfdf5_100%)] p-4 shadow-[0_12px_30px_rgba(5,150,105,0.08)]">
-          <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-emerald-300/25 blur-2xl" />
+      <div className="space-y-4">
+        <div className="settings-management-source rounded-xl border border-border-subtle bg-bg-secondary p-[18px]">
           <div className="relative">
             <div className="flex items-center justify-between gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-xl border border-accent-border bg-white/80 text-accent shadow-sm">
+              <span className="grid h-9 w-9 place-items-center rounded-xl border border-accent-border bg-surface text-accent shadow-sm">
                 <Sparkles className="h-4 w-4" />
               </span>
               <span
-                className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${sourceView.className}`}
+                className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${sourceView.className}`}
               >
                 {t(sourceView.statusKey)}
               </span>
             </div>
-            <p className="mt-8 text-[11px] uppercase tracking-[0.12em] text-emerald-700/60">
+            <details className="settings-management-details">
+              <summary>{t("agentManagement.sourceDetails")}<ChevronDown size={12} aria-hidden="true" /></summary>
+              <div className="pt-4">
+            <p className="text-[11px] text-muted">
               {t("agentManagement.skillLabel")}
             </p>
             <h3 className="mt-1 text-[17px] font-semibold tracking-tight text-primary">
@@ -286,15 +289,15 @@ export function AgentSkillsManagementSettings() {
             <p className="mt-2 text-[11px] leading-5 text-muted">
               {t(sourceView.descriptionKey)}
             </p>
-            <div className="mt-5 grid grid-cols-2 gap-2">
+            <div className="mt-5 grid max-w-xs grid-cols-2 gap-4 divide-x divide-border-subtle">
               <div
                 aria-label={t("agentManagement.metricLabel", {
                   label: t("agentManagement.currentDeployments"),
                   count: targetKeys.size,
                 })}
-                className="rounded-xl border border-emerald-500/15 bg-white/70 p-3 shadow-sm shadow-emerald-900/[0.03]"
+                className="px-3"
               >
-                <p className="text-[10px] text-muted">
+                <p className="text-[11px] text-muted">
                   {t("agentManagement.currentDeployments")}
                 </p>
                 <p className="mt-1 text-xl font-semibold tabular-nums text-primary">
@@ -306,9 +309,9 @@ export function AgentSkillsManagementSettings() {
                   label: t("agentManagement.pendingChanges"),
                   count: pendingChangeCount,
                 })}
-                className="rounded-xl border border-emerald-500/15 bg-white/70 p-3 shadow-sm shadow-emerald-900/[0.03]"
+                className="px-3"
               >
-                <p className="text-[10px] text-muted">
+                <p className="text-[11px] text-muted">
                   {t("agentManagement.pendingChanges")}
                 </p>
                 <p className="mt-1 text-xl font-semibold tabular-nums text-primary">
@@ -329,15 +332,17 @@ export function AgentSkillsManagementSettings() {
                 <ExternalLink className="h-3 w-3" />
               </button>
             )}
+              </div>
+            </details>
           </div>
         </div>
 
-        <div className="app-panel flex h-[410px] min-h-0 flex-col overflow-hidden">
+        <div className="app-panel flex min-h-0 flex-col overflow-hidden">
           <div className="border-b border-border-faint px-4 pb-2.5 pt-3">
             <h3 className="text-[13px] font-semibold text-primary">
               {t("agentManagement.targetsTitle")}
             </h3>
-            <p className="mt-0.5 text-[10px] text-muted">
+            <p className="mt-0.5 text-[11px] text-muted">
               {t("agentManagement.targetsDescription")}
             </p>
             <label className="mt-2.5 flex h-8 items-center gap-2 rounded-lg border border-border-subtle bg-bg-secondary px-2.5 focus-within:border-border">
@@ -365,8 +370,8 @@ export function AgentSkillsManagementSettings() {
               {([
                 ["all", t("agentManagement.filterAll", { count: targets.length })],
                 [
-                  "deployed",
-                  t("agentManagement.filterDeployed", { count: draftTargetKeys.size }),
+                  "selected",
+                  t("agentManagement.filterSelected", { count: draftTargetKeys.size }),
                 ],
                 [
                   "available",
@@ -381,10 +386,10 @@ export function AgentSkillsManagementSettings() {
                   type="button"
                   key={key}
                   onClick={() => setTargetFilter(key)}
-                  className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+                  className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
                     targetFilter === key
                       ? key === "attention" && attentionCount > 0
-                        ? "bg-amber-500/10 text-amber-700"
+                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
                         : "bg-surface-active text-secondary"
                       : "text-muted hover:bg-surface-hover hover:text-secondary"
                   }`}
@@ -394,7 +399,7 @@ export function AgentSkillsManagementSettings() {
               ))}
             </div>
           </div>
-          <div className="min-h-0 flex-1 divide-y divide-border-faint overflow-y-auto overscroll-contain scrollbar-hide">
+          <div className="max-h-[370px] min-h-0 flex-1 divide-y divide-border-faint overflow-y-auto overscroll-contain scrollbar-hide">
             {filteredTargets.map((target) => (
               <div key={target.key} className="flex items-center gap-3 px-4 py-2.5">
                 <AgentIcon
@@ -406,9 +411,11 @@ export function AgentSkillsManagementSettings() {
                   <p className="truncate text-[12px] font-semibold text-secondary">
                     {target.displayName}
                   </p>
-                  <p className="mt-0.5 truncate text-[10px] text-muted">
+                  <p className="mt-0.5 truncate text-[11px] text-muted">
                     {failedTargetKeys.has(target.key)
                       ? t("agentManagement.failedStatus")
+                      : target.selected !== targetKeys.has(target.key)
+                        ? t(target.selected ? "agentManagement.pendingEnableStatus" : "agentManagement.pendingDisableStatus")
                       : target.active
                         ? target.selected
                           ? t("agentManagement.enabledStatus")
@@ -416,10 +423,9 @@ export function AgentSkillsManagementSettings() {
                         : t("agentManagement.orphanStatus")}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={target.selected}
+                <input
+                  type="checkbox"
+                  checked={target.selected}
                   aria-label={t(
                     target.selected
                       ? "agentManagement.disableAgentLabel"
@@ -427,19 +433,9 @@ export function AgentSkillsManagementSettings() {
                     { name: target.displayName },
                   )}
                   disabled={hasSourceConflict}
-                  onClick={() => toggleTarget(target.key)}
-                  className={`relative h-6 w-10 rounded-full border transition-colors ${
-                    target.selected
-                      ? "border-accent bg-accent"
-                      : "border-border bg-surface-active"
-                  }`}
-                >
-                  <span
-                    className={`absolute left-0 top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform ${
-                      target.selected ? "translate-x-[18px]" : "translate-x-0.5"
-                    }`}
-                  />
-                </button>
+                  onChange={() => toggleTarget(target.key)}
+                  className="h-4 w-4 shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+                />
               </div>
             ))}
             {filteredTargets.length === 0 && (
@@ -450,10 +446,10 @@ export function AgentSkillsManagementSettings() {
               </div>
             )}
           </div>
-          <div className="shrink-0 border-t border-border-faint bg-bg-secondary p-3 shadow-[0_-8px_18px_rgba(24,24,27,0.03)]">
+          <div className="shrink-0 border-t border-border-faint bg-bg-secondary p-3">
             {failedOperations.length > 0 && (
               <div className="mb-2.5 flex h-8 items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.07] px-2.5">
-                <p className="min-w-0 flex-1 truncate text-[10px] font-medium text-amber-700">
+                <p className="min-w-0 flex-1 truncate text-[11px] font-medium text-amber-700 dark:text-amber-300">
                   {t("agentManagement.failureSummary", {
                     names: failedOperations
                       .map((operation) => operation.displayName)
@@ -464,7 +460,7 @@ export function AgentSkillsManagementSettings() {
                   type="button"
                   disabled={busy}
                   onClick={() => void retryFailedOperations()}
-                  className="shrink-0 text-[10px] font-semibold text-amber-700 hover:text-amber-800 disabled:opacity-50"
+                  className="shrink-0 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:text-amber-800 disabled:opacity-50"
                 >
                   {t("agentManagement.retryFailed")}
                 </button>
@@ -479,8 +475,8 @@ export function AgentSkillsManagementSettings() {
                   key={`${operation.enable ? "add" : "remove"}-${operation.key}`}
                   className={`shrink-0 rounded-full border px-2 py-0.5 font-medium ${
                     operation.enable
-                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
-                      : "border-amber-500/20 bg-amber-500/10 text-amber-700"
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"
                   }`}
                 >
                   {operation.enable ? "+" : "−"} {operation.displayName}

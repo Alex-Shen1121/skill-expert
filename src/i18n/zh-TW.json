@@ -96,7 +96,7 @@
   },
   "agentManagement": {
     "title": "Agent 管理 Skills",
-    "subtitle": "把管理 Skill 與部署目標分開查看。",
+    "subtitle": "選擇哪些 Agent 可以幫你管理中央技能庫。",
     "deployedCount": "{{count}} 個已部署",
     "skillLabel": "管理 Skill",
     "trustedStatus": "來源可信",
@@ -109,12 +109,11 @@
     "currentDeployments": "目前部署",
     "pendingChanges": "待處理",
     "metricLabel": "{{label}} {{count}}",
-    "targetsTitle": "部署目標",
-    "targetsDescription": "選擇可以直接管理 Skills 的 Agent",
+    "targetsTitle": "選擇 Agent",
+    "targetsDescription": "勾選只會形成草稿，點擊「套用變更」後生效。",
     "searchPlaceholder": "搜尋 {{count}} 個 Agent",
     "clearSearch": "清除 Agent 搜尋",
     "filterAll": "全部 {{count}}",
-    "filterDeployed": "已部署 {{count}}",
     "filterAvailable": "可啟用 {{count}}",
     "filterAttention": "需處理 {{count}}",
     "noResults": "沒有符合目前搜尋與篩選條件的 Agent",
@@ -134,7 +133,11 @@
     "failureSummary": "{{names}} 設定失敗，可重試。",
     "retryFailed": "重試失敗項目",
     "retrySuccess": "失敗項目已重試完成。",
-    "errorNotFound": "管理 Skill 安裝完成後仍未在技能庫中找到。"
+    "errorNotFound": "管理 Skill 安裝完成後仍未在技能庫中找到。",
+    "filterSelected": "已選擇 {{count}}",
+    "pendingEnableStatus": "待啟用 · 套用後生效",
+    "pendingDisableStatus": "待撤銷 · 套用後生效",
+    "sourceDetails": "查看管理 Skill 詳情"
   },
   "plugins": {
     "title": "Codex 外掛檢查器",
@@ -974,7 +977,28 @@
     "gitErrorRejected": "遠端有新的更新，需要先合併後再同步。",
     "gitErrorUnrelatedHistories": "本機倉庫與遠端倉庫歷史不一致。請打開「修復同步設定」選擇處理方式。",
     "gitErrorNoUpstream": "尚未建立遠端追蹤關係。請打開「修復同步設定」處理。",
-    "gitErrorGeneric": "Git 操作失敗，請檢查設定中的遠端倉庫位址後重試。"
+    "gitErrorGeneric": "Git 操作失敗，請檢查設定中的遠端倉庫位址後重試。",
+    "tabs": {
+      "label": "設定分類",
+      "general": "一般",
+      "agents": "Agent",
+      "connections": "連線與同步",
+      "about": "更新與關於"
+    },
+    "agentPurpose": {
+      "label": "Agent 設定用途",
+      "sync": "同步技能到 Agent",
+      "syncDescription": "選擇哪些 Agent 接收和使用你的技能",
+      "managementDescription": "讓 Agent 幫你管理中央技能庫",
+      "immediate": "開關立即生效",
+      "immediateDescription": "開啟後同步目前 Preset 的技能；關閉會撤下該 Agent 已同步的技能，中央技能庫中的內容保留。",
+      "apply": "選擇後，點擊「套用變更」",
+      "applyDescription": "為選中的 Agent 部署 manage-skills，讓它幫你安裝、更新和部署技能。切換本頁入口不會遺失待套用的選擇。",
+      "paths": "目錄設定",
+      "pathsLabel": "{{name}} 的目錄設定",
+      "globalPathLabel": "{{name}} 的全域技能目錄",
+      "projectPathLabel": "{{name}} 的專案技能目錄"
+    }
   },
   "common": {
     "loading": "載入中...",

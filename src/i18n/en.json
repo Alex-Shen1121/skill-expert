@@ -96,7 +96,7 @@
   },
   "agentManagement": {
     "title": "Manage Skills with Agents",
-    "subtitle": "View the management Skill and its deployment targets separately.",
+    "subtitle": "Choose which Agents can manage your central skill library.",
     "deployedCount": "Deployed to {{count}}",
     "skillLabel": "Management Skill",
     "trustedStatus": "Trusted source",
@@ -109,12 +109,11 @@
     "currentDeployments": "Current deployments",
     "pendingChanges": "Pending changes",
     "metricLabel": "{{label}} {{count}}",
-    "targetsTitle": "Deployment targets",
-    "targetsDescription": "Choose agents that can manage Skills directly",
+    "targetsTitle": "Choose Agents",
+    "targetsDescription": "Selections are drafts until you apply changes.",
     "searchPlaceholder": "Search {{count}} agents",
     "clearSearch": "Clear agent search",
     "filterAll": "All {{count}}",
-    "filterDeployed": "Deployed {{count}}",
     "filterAvailable": "Available {{count}}",
     "filterAttention": "Needs attention {{count}}",
     "noResults": "No agents match the current search and filter",
@@ -134,7 +133,11 @@
     "failureSummary": "Configuration failed for {{names}}. You can retry.",
     "retryFailed": "Retry failed items",
     "retrySuccess": "Failed items were retried successfully.",
-    "errorNotFound": "The management Skill was still missing from the library after installation."
+    "errorNotFound": "The management Skill was still missing from the library after installation.",
+    "filterSelected": "Selected {{count}}",
+    "pendingEnableStatus": "Pending enable · apply to take effect",
+    "pendingDisableStatus": "Pending revoke · apply to take effect",
+    "sourceDetails": "View management Skill details"
   },
   "plugins": {
     "title": "Codex Plugin Inspector",
@@ -1039,7 +1042,28 @@
     "trayIconDesc": "Show an icon in the system tray for quick Show and Quit actions.",
     "trayIcon_on": "Show",
     "trayIcon_off": "Hide",
-    "trayIconOffHint": "Tray icon is hidden, so closing the window will quit the app."
+    "trayIconOffHint": "Tray icon is hidden, so closing the window will quit the app.",
+    "tabs": {
+      "label": "Settings categories",
+      "general": "General",
+      "agents": "Agent",
+      "connections": "Connections & sync",
+      "about": "Updates & about"
+    },
+    "agentPurpose": {
+      "label": "Agent settings purpose",
+      "sync": "Sync skills to Agent",
+      "syncDescription": "Choose which Agents receive and use your skills",
+      "managementDescription": "Let Agents manage your central skill library",
+      "immediate": "Switches take effect immediately",
+      "immediateDescription": "Enabling syncs the current Preset. Disabling removes this Agent’s synced skills while keeping the central library.",
+      "apply": "Select, then apply changes",
+      "applyDescription": "Deploy manage-skills to selected Agents so they can install, update, and deploy skills. Switching views keeps your pending selections.",
+      "paths": "Directories",
+      "pathsLabel": "Directories for {{name}}",
+      "globalPathLabel": "Global skills directory for {{name}}",
+      "projectPathLabel": "Project skills directory for {{name}}"
+    }
   },
   "closeAction": {
     "title": "Close behavior",

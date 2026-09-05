@@ -172,19 +172,13 @@ describe("Codex CLI 路径设置", () => {
     }
   });
 
-  it("从插件错误入口跳转时聚焦并滚动到路径设置", async () => {
+  it("收到定位请求时聚焦并滚动到路径设置", async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: scrollIntoView,
     });
-    window.history.replaceState(
-      {},
-      "",
-      "/settings?section=codex-cli#codex-cli-settings",
-    );
-
-    render(<CodexCliPathSettings />);
+    render(<CodexCliPathSettings focusRequested />);
     const heading = await screen.findByRole("heading", { name: "Codex CLI 路径" });
     const section = heading.closest("section");
 
