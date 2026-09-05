@@ -60,6 +60,40 @@ export interface SkillToolToggle {
   enabled: boolean;
 }
 
+export interface SkillBrowserEntry {
+  path: string;
+  kind: "file" | "directory" | "symlink" | "special" | "unreadable";
+  size: number;
+  error: string | null;
+  link_target: string | null;
+}
+
+export interface SkillBrowserIndex {
+  skill_id: string;
+  session_id: string;
+  entry_path: string | null;
+  entries: SkillBrowserEntry[];
+  file_count: number;
+  directory_count: number;
+  complete: boolean;
+  issues: string[];
+}
+
+export interface SkillFilePreview {
+  path: string;
+  kind: "text" | "binary" | "too_large" | "unsupported_encoding" | "file" | "directory" | "symlink" | "special" | "unreadable";
+  size: number;
+  text: string | null;
+  message: string | null;
+}
+
+export const openSkillBrowser = (skillId: string) =>
+  invoke<SkillBrowserIndex>("open_skill_browser", { skillId });
+export const readSkillBrowserFile = (skillId: string, sessionId: string, relativePath: string) =>
+  invoke<SkillFilePreview>("read_skill_browser_file", { skillId, sessionId, relativePath });
+export const closeSkillBrowser = (skillId: string, sessionId: string) =>
+  invoke<void>("close_skill_browser", { skillId, sessionId });
+
 export interface SkillDocument {
   skill_id: string;
   filename: string;

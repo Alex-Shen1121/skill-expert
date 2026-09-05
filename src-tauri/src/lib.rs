@@ -925,6 +925,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .manage(store)
         .manage(cancel_registry)
+        .manage(Arc::new(core::skill_browser::SkillBrowser::default()))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             restore_main_window(app);
         }))
@@ -1122,6 +1123,9 @@ pub fn run() {
             commands::skills::get_managed_skills,
             commands::skills::get_skills_for_preset,
             commands::skills::get_skill_document,
+            commands::skills::open_skill_browser,
+            commands::skills::read_skill_browser_file,
+            commands::skills::close_skill_browser,
             commands::skills::get_source_skill_document,
             commands::skills::get_skill_source_diff,
             commands::skills::delete_managed_skill,

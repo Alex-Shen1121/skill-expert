@@ -59,12 +59,13 @@ notify = "6.1.1"
 clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.27.1", features = ["fs", "process", "signal"] }
+nix = { version = "0.27.1", features = ["fs", "dir", "process", "signal"] }
 
 [target.'cfg(windows)'.dependencies]
 junction = "2"
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
+  "Win32_Storage_FileSystem",
   "Win32_Security",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",

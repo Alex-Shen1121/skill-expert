@@ -1,29 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Folder,
-  ChevronDown,
-  ChevronUp,
-  Github,
-  HardDrive,
-  Globe,
-} from "lucide-react";
+import { BookOpen, ChevronDown, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../utils";
 import {
-  getSkillDocument,
-  getSourceSkillDocument,
-  getSkillSourceDiff,
-  type ManagedSkill,
-  type Project,
-  type SkillDocument,
-  type SourceSkillDocument,
-  type SkillSourceDiff,
-  type SkillToolToggle,
-  type ToolInfo,
+  openSkillBrowser, readSkillBrowserFile, closeSkillBrowser,
+  getSourceSkillDocument, getSkillSourceDiff,
+  type ManagedSkill, type Project, type SourceSkillDocument, type SkillSourceDiff,
+  type SkillToolToggle, type ToolInfo, type SkillBrowserIndex, type SkillFilePreview,
 } from "../lib/tauri";
+import { getErrorMessage } from "../lib/error";
 import { SkillSourceDiffViewer } from "./SkillSourceDiffViewer";
 import { DetailSheet } from "./DetailSheet";
 import { SkillMarkdown } from "./SkillMarkdown";
+import { SkillFileBrowser } from "./SkillFileBrowser";
 import { AgentToggleSection, type AgentToggleItem } from "./AgentToggleSection";
 import { SkillProjectsSection } from "./SkillProjectsSection";
 import { SyncDots } from "./SyncDots";
@@ -39,350 +28,125 @@ interface Props {
   onProjectsChanged?: () => void;
 }
 
-export function SkillDetailPanel({
-  skill,
-  onClose,
-  tools,
-  toolToggles,
-  togglingTool,
-  onToggleTool,
-  projects,
-  onProjectsChanged,
-}: Props) {
+export function SkillDetailPanel(props: Props) {
+  const { skill } = props;
   if (!skill) return null;
-
-  const panelKey = [
-    skill.id,
-    skill.updated_at,
-    skill.source_type,
-    skill.source_ref ?? "",
-    skill.source_revision ?? "",
-    skill.remote_revision ?? "",
-  ].join(":");
-
-  return (
-    <SkillDetailPanelContent
-      key={panelKey}
-      skill={skill}
-      onClose={onClose}
-      tools={tools}
-      toolToggles={toolToggles}
-      togglingTool={togglingTool}
-      onToggleTool={onToggleTool}
-      projects={projects}
-      onProjectsChanged={onProjectsChanged}
-    />
-  );
+  const panelKey = [skill.id, skill.updated_at, skill.source_type, skill.source_ref, skill.source_ref_resolved, skill.source_revision, skill.remote_revision].join(":");
+  return <SkillDetailPanelContent key={panelKey} {...props} skill={skill} />;
 }
 
-function SkillDetailPanelContent({
-  skill,
-  onClose,
-  tools,
-  toolToggles,
-  togglingTool,
-  onToggleTool,
-  projects,
-  onProjectsChanged,
-}: {
-  skill: ManagedSkill;
-  onClose: () => void;
-  tools?: ToolInfo[];
-  toolToggles?: SkillToolToggle[] | null;
-  togglingTool?: string | null;
-  onToggleTool?: (tool: string, enabled: boolean) => void;
-  projects?: Project[];
-  onProjectsChanged?: () => void;
-}) {
+function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingTool, onToggleTool, projects, onProjectsChanged }: Props & { skill: ManagedSkill }) {
   const { t } = useTranslation();
-  const [doc, setDoc] = useState<SkillDocument | null>(null);
+  const [index, setIndex] = useState<SkillBrowserIndex | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [preview, setPreview] = useState<SkillFilePreview | null>(null);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [infoExpanded, setInfoExpanded] = useState(false);
+  const [reload, setReload] = useState(0);
   const [sourceDoc, setSourceDoc] = useState<SourceSkillDocument | null>(null);
   const [sourceDiff, setSourceDiff] = useState<SkillSourceDiff | null>(null);
-  const [sourceDiffFailed, setSourceDiffFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [isMetadataExpanded, setIsMetadataExpanded] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
   const [contentTab, setContentTab] = useState<"local" | "diff" | "source">("local");
-  const localRequestIdRef = useRef(0);
-  const sourceRequestIdRef = useRef(0);
-  const diffRequestedRef = useRef(false);
+  const sourceRequested = useRef(false);
+  const diffRequested = useRef(false);
+  const mounted = useRef(true);
   const skillId = skill.id;
-  const supportsSourceDiff =
-    skill.source_type === "git"
-    || skill.source_type === "skillssh"
-    || ((skill.source_type === "local" || skill.source_type === "import") && !!skill.source_ref);
-  const [sourceLoading, setSourceLoading] = useState(supportsSourceDiff);
-  const localDocVersion = `${skill.id}:${skill.updated_at}`;
-  const sourceDocVersion = [
-    skill.id,
-    skill.source_type,
-    skill.source_ref ?? "",
-    skill.source_ref_resolved ?? "",
-    skill.source_revision ?? "",
-    skill.remote_revision ?? "",
-  ].join(":");
+  const supportsSource = ["git", "skillssh"].includes(skill.source_type) || (["local", "import"].includes(skill.source_type) && !!skill.source_ref);
 
   useEffect(() => {
-    localRequestIdRef.current += 1;
-    const requestId = localRequestIdRef.current;
-
-    getSkillDocument(skillId)
-      .then((nextDoc) => {
-        if (requestId === localRequestIdRef.current) {
-          setDoc(nextDoc);
-        }
-      })
-      .catch(() => {
-        if (requestId === localRequestIdRef.current) {
-          setDoc(null);
-        }
-      })
-      .finally(() => {
-        if (requestId === localRequestIdRef.current) {
-          setLoading(false);
-        }
-      });
-  }, [skillId, localDocVersion]);
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
-    if (!supportsSourceDiff) {
-      return;
+    let cancelled = false;
+    let sessionId: string | undefined;
+    openSkillBrowser(skillId).then(next => {
+      sessionId = next.session_id;
+      if (cancelled) { void closeSkillBrowser(skillId, next.session_id).catch(() => {}); return; }
+      setIndex(next);
+      setSelected(current => current && next.entries.some(entry => entry.path === current) ? current : next.entry_path);
+    }).catch(error => {
+      if (!cancelled) setBrowseError(getErrorMessage(error, t("skillBrowser.loadFailed")));
+    });
+    return () => {
+      cancelled = true;
+      if (sessionId) void closeSkillBrowser(skillId, sessionId).catch(() => {});
+    };
+  }, [skillId, reload, t]);
+
+  useEffect(() => {
+    if (!index || !selected) return;
+    let cancelled = false;
+    readSkillBrowserFile(skillId, index.session_id, selected).then(next => {
+      if (!cancelled) setPreview(next);
+    }).catch(error => {
+      if (!cancelled) setPreviewError(getErrorMessage(error, t("skillBrowser.readFailed")));
+    });
+    return () => { cancelled = true; };
+  }, [skillId, index, selected, t]);
+
+  // 来源和旧差异在首次访问时才准备；本地目录始终可以离线浏览。
+  useEffect(() => {
+    if (!supportsSource) return;
+    if (contentTab === "source" && !sourceRequested.current) {
+      sourceRequested.current = true;
+      getSourceSkillDocument(skillId).then(next => { if (mounted.current) setSourceDoc(next); })
+        .catch(error => { if (mounted.current) setSourceError(getErrorMessage(error, t("mySkills.sourceDiffUnavailable"))); });
     }
-
-    sourceRequestIdRef.current += 1;
-    const requestId = sourceRequestIdRef.current;
-
-    getSourceSkillDocument(skillId)
-      .then((nextDoc) => {
-        if (requestId === sourceRequestIdRef.current) {
-          setSourceDoc(nextDoc);
-        }
-      })
-      .catch(() => {
-        if (requestId === sourceRequestIdRef.current) {
-          setSourceDoc(null);
-        }
-      })
-      .finally(() => {
-        if (requestId === sourceRequestIdRef.current) {
-          setSourceLoading(false);
-        }
-      });
-  }, [skillId, supportsSourceDiff, sourceDocVersion]);
-
-  // Lazily load the whole-directory diff only when the user opens the Diff
-  // tab. For git/skills.sh skills this clones the repo, so we avoid paying
-  // that cost (and a second clone alongside the source doc) up front.
-  useEffect(() => {
-    if (contentTab !== "diff" || !supportsSourceDiff) return;
-    if (diffRequestedRef.current) return;
-    diffRequestedRef.current = true;
-
-    getSkillSourceDiff(skillId)
-      .then((diff) => setSourceDiff(diff))
-      .catch(() => setSourceDiffFailed(true));
-  }, [contentTab, supportsSourceDiff, skillId]);
-
-  const sourceIcon = (type: string) => {
-    switch (type) {
-      case "git":
-      case "skillssh":
-        return <Github className="h-3.5 w-3.5" />;
-      case "local":
-      case "import":
-        return <HardDrive className="h-3.5 w-3.5" />;
-      default:
-        return <Globe className="h-3.5 w-3.5" />;
+    if (contentTab === "diff" && !diffRequested.current) {
+      diffRequested.current = true;
+      getSkillSourceDiff(skillId).then(next => { if (mounted.current) setSourceDiff(next); })
+        .catch(error => { if (mounted.current) setDiffError(getErrorMessage(error, t("mySkills.sourceDiffUnavailable"))); });
     }
-  };
+  }, [contentTab, supportsSource, skillId, t]);
 
-  const sourceTypeLabel = (type: string) => (type === "skillssh" ? "skills.sh" : type);
-
+  const chooseFile = (path: string) => { setSelected(path); setPreview(null); setPreviewError(null); };
+  const retry = () => { setIndex(null); setPreview(null); setBrowseError(null); setPreviewError(null); setReload(current => current + 1); };
+  const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map(toggle => ({
+    key: toggle.tool, displayName: toggle.display_name, enabled: toggle.enabled,
+    isAvailable: toggle.installed && toggle.globally_enabled, disabled: !toggle.installed || !toggle.globally_enabled,
+    badgeLabel: !toggle.installed ? t("mySkills.agentToggleNotInstalled") : !toggle.globally_enabled ? t("mySkills.agentToggleDisabledGlobally") : null,
+  }));
   const metadataItems = [
-    { label: t("mySkills.sourceType"), value: sourceTypeLabel(skill.source_type) },
+    { label: t("mySkills.sourceType"), value: skill.source_type === "skillssh" ? "skills.sh" : skill.source_type },
     { label: t("mySkills.sourceRef"), value: skill.source_ref },
     { label: t("mySkills.sourceResolved"), value: skill.source_ref_resolved },
     { label: t("mySkills.sourceBranch"), value: skill.source_branch },
     { label: t("mySkills.sourceSubpath"), value: skill.source_subpath },
     { label: t("mySkills.sourceRevision"), value: skill.source_revision },
-  ].filter((item) => Boolean(item.value));
+  ].filter(item => item.value);
+  const meta = infoExpanded ? <div id="skill-detail-info" className="max-h-[40vh] overflow-y-auto text-secondary">
+    <div className="skill-info-groups">
+      <section><h3>{t("skillBrowser.installLocation")}</h3><p className="font-medium">{t("skillBrowser.centralLibrary")}</p><p className="mt-2 font-mono">{skill.central_path}</p></section>
+      <section><h3>{t("skillBrowser.sourceLocation")}</h3><dl>{metadataItems.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></section>
+      <section><h3>{t("skillBrowser.deployments")}</h3>{tools && <SyncDots skill={skill} tools={tools} size="sm" includeOrphan />}
+        {skill.targets.length ? skill.targets.map(target => <p key={target.id} className="mt-2">{tools?.find(tool => tool.key === target.tool)?.display_name ?? target.tool} · {target.status}<span className="mt-1 block font-mono text-[11px] text-muted">{target.target_path}</span></p>) : <p>{t("skillBrowser.noDeployments")}</p>}
+      </section>
+      <section><h3>{t("skillBrowser.directoryContents")}</h3><p>{index ? t(index.complete ? "skillBrowser.counts" : "skillBrowser.partialCounts", { files: index.file_count, directories: index.directory_count }) : t("common.loading")}</p><p className="mt-2 text-muted">{t("skillBrowser.includesHidden")}</p>{skill.tags.length > 0 && <p className="mt-2">{skill.tags.join(" · ")}</p>}</section>
+    </div>
+    {toolToggles && onToggleTool && <AgentToggleSection items={toggleItems} togglingKey={togglingTool} onToggle={onToggleTool} className="mt-3" />}
+    {projects && projects.length > 0 && <SkillProjectsSection skill={skill} projects={projects} onChanged={onProjectsChanged} />}
+  </div> : undefined;
 
-  const activeDoc = doc?.skill_id === skill.id ? doc : null;
-  const activeSourceDoc = sourceDoc?.skill_id === skill.id ? sourceDoc : null;
-  const activeSourceDiff = sourceDiff?.skill_id === skill.id ? sourceDiff : null;
-  const sourceDiffLoading =
-    contentTab === "diff" && supportsSourceDiff && !activeSourceDiff && !sourceDiffFailed;
-  const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map((toggle) => ({
-    key: toggle.tool,
-    displayName: toggle.display_name,
-    enabled: toggle.enabled,
-    isAvailable: toggle.installed && toggle.globally_enabled,
-    disabled: !toggle.installed || !toggle.globally_enabled,
-    badgeLabel: !toggle.installed
-      ? t("mySkills.agentToggleNotInstalled")
-      : !toggle.globally_enabled
-        ? t("mySkills.agentToggleDisabledGlobally")
-        : null,
-  }));
-
-  const meta = (
-    <>
-      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
-        {tools && <SyncDots skill={skill} tools={tools} size="sm" includeOrphan />}
-        {skill.tags.length > 0 && (
-          <>
-            {tools && <span className="mx-0.5 h-3 w-px bg-border-subtle" />}
-            {skill.tags.map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex items-center rounded-full bg-surface-hover px-2 py-0.5 text-[11px] font-medium text-secondary"
-              >
-                {tag}
-              </span>
-            ))}
-          </>
-        )}
-      </div>
-      <div className="mt-3 flex min-w-0 items-center gap-2 text-[13px] text-muted">
-        <Folder className="h-3.5 w-3.5 shrink-0" />
-        <span className="font-mono truncate" title={skill.central_path}>
-          {skill.central_path}
-        </span>
-      </div>
-      {metadataItems.length > 0 && (
-        <div className="mt-4 rounded-xl border border-border-subtle bg-surface/70">
-          <button
-            type="button"
-            onClick={() => setIsMetadataExpanded((prev) => !prev)}
-            aria-expanded={isMetadataExpanded}
-            aria-controls="skill-source-metadata"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border-subtle bg-bg-secondary px-2 py-1 text-[12px] text-muted">
-                {sourceIcon(skill.source_type)}
-                {sourceTypeLabel(skill.source_type)}
-              </span>
-              <span className="truncate text-[13px] font-medium text-secondary">
-                {t("mySkills.sourceType")}
-              </span>
-            </span>
-            <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-muted">
-              <span>
-                {isMetadataExpanded
-                  ? t("mySkills.collapseAgentToggles")
-                  : t("mySkills.expandAgentToggles")}
-              </span>
-              {isMetadataExpanded ? (
-                <ChevronUp className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
-              )}
-            </span>
-          </button>
-          {isMetadataExpanded && (
-            <div id="skill-source-metadata" className="border-t border-border-subtle px-4 py-3">
-              <div className="grid gap-2 md:grid-cols-2">
-                {metadataItems.map((item) => (
-                  <div key={item.label} className="min-w-0">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-faint">
-                      {item.label}
-                    </div>
-                    <div
-                      className="mt-0.5 truncate font-mono text-[12.5px] text-secondary"
-                      title={item.value ?? undefined}
-                    >
-                      {item.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </>
-  );
-
-  return (
-    <DetailSheet
-      open={true}
-      title={skill.name}
-      description={skill.description ? <p className="line-clamp-3">{skill.description}</p> : undefined}
-      meta={meta}
-      onClose={onClose}
-    >
-      {toolToggles && onToggleTool && (
-        <AgentToggleSection
-          items={toggleItems}
-          togglingKey={togglingTool}
-          onToggle={onToggleTool}
-          className="mb-4"
-        />
-      )}
-
-      {projects && projects.length > 0 && (
-        <SkillProjectsSection
-          skill={skill}
-          projects={projects}
-          onChanged={onProjectsChanged}
-        />
-      )}
-
-      {supportsSourceDiff && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {(["local", "diff", "source"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setContentTab(tab)}
-              className={cn(
-                "rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
-                contentTab === tab
-                  ? "bg-accent text-white"
-                  : "bg-surface-hover text-muted hover:text-secondary"
-              )}
-              disabled={tab === "source" && sourceLoading}
-            >
-              {tab === "local"
-                ? t("mySkills.docTabs.local")
-                : tab === "diff"
-                  ? t("mySkills.docTabs.diff")
-                  : t("mySkills.docTabs.source")}
-            </button>
-          ))}
-          {activeSourceDoc && (
-            <span className="rounded-full border border-border-subtle bg-surface px-2 py-1 text-[12px] text-muted">
-              {activeSourceDoc.source_label} · {activeSourceDoc.revision.slice(0, 7)}
-            </span>
-          )}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
-      ) : contentTab === "diff" ? (
-        sourceDiffLoading ? (
-          <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
-        ) : activeSourceDiff ? (
-          <SkillSourceDiffViewer entries={activeSourceDiff.entries} />
-        ) : sourceDiffFailed ? (
-          <div className="mt-12 text-center text-[13px] text-muted">{t("mySkills.sourceDiffUnavailable")}</div>
-        ) : (
-          <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
-        )
-      ) : contentTab === "source" ? (
-        sourceLoading ? (
-          <div className="mt-12 text-center text-[13px] text-muted">{t("common.loading")}</div>
-        ) : activeSourceDoc ? (
-          <SkillMarkdown content={activeSourceDoc.content} />
-        ) : (
-          <div className="mt-12 text-center text-[13px] text-muted">{t("mySkills.sourceDiffUnavailable")}</div>
-        )
-      ) : activeDoc ? (
-        <SkillMarkdown content={activeDoc.content} />
-      ) : (
-        <div className="mt-12 text-center text-[13px] text-muted">{t("common.documentMissing")}</div>
-      )}
-    </DetailSheet>
-  );
+  return <DetailSheet open title={<span className="flex min-w-0 items-center gap-3"><BookOpen className="shrink-0 text-accent" size={25} /><span className="truncate" title={skill.name}>{skill.name}</span><button type="button" aria-expanded={infoExpanded} aria-controls="skill-detail-info" onClick={() => setInfoExpanded(value => !value)} className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[12px] font-normal text-muted focus-visible:outline-accent"><Info size={14} />{t("skillBrowser.skillInfo")}<ChevronDown size={12} /></button></span>}
+    description={skill.description ? <p className="line-clamp-1 text-[12px] text-muted">{skill.description}</p> : undefined} meta={meta} onClose={onClose} workbench>
+    <nav className="flex shrink-0 items-center gap-1 px-6 pb-2" aria-label={t("skillBrowser.modules")}>
+      {(["local", "diff", "source"] as const).map(tab => <button key={tab} type="button" aria-pressed={contentTab === tab} onClick={() => setContentTab(tab)}
+        className={cn("rounded-md px-3 py-2 text-[12px] font-medium focus-visible:outline-accent", contentTab === tab ? "bg-accent-bg text-accent" : "text-muted hover:bg-surface-hover")}>
+        {tab === "local" ? t("skillBrowser.localFiles") : t(`mySkills.docTabs.${tab}`)}
+      </button>)}
+    </nav>
+    <div className={contentTab === "local" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+      {index ? <SkillFileBrowser index={index} selected={selected} onSelect={chooseFile} preview={preview?.path === selected ? preview : null} loading={!!selected && !preview && !previewError} error={previewError} onRetry={retry} />
+        : <div className="skill-file-message" role={browseError ? "alert" : "status"}>{browseError ?? t("common.loading")}{browseError && <button onClick={retry}>{t("skillBrowser.reload")}</button>}</div>}
+    </div>
+    {contentTab !== "local" && <div className="min-h-0 flex-1 overflow-auto border-t border-border-subtle p-6">
+      {!supportsSource ? <p className="skill-file-message">{t("mySkills.sourceDiffUnavailable")}</p>
+        : contentTab === "source" ? sourceDoc ? <><p className="mb-5 text-[12px] text-muted">{sourceDoc.source_label} · {sourceDoc.revision.slice(0, 7)}</p><SkillMarkdown content={sourceDoc.content} /></> : <p className="skill-file-message">{sourceError ?? t("common.loading")}</p>
+        : sourceDiff ? <SkillSourceDiffViewer entries={sourceDiff.entries} /> : <p className="skill-file-message">{diffError ?? t("common.loading")}</p>}
+    </div>}
+  </DetailSheet>;
 }

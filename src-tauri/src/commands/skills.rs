@@ -372,6 +372,40 @@ pub async fn get_skills_for_preset(
 }
 
 #[tauri::command]
+pub async fn open_skill_browser(
+    skill_id: String,
+    store: State<'_, Arc<SkillStore>>,
+    browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
+) -> Result<crate::core::skill_browser::BrowserIndex, AppError> {
+    let store = store.inner().clone();
+    let browser = browser.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || browser.open(&store, &skill_id)).await?
+}
+
+#[tauri::command]
+pub async fn read_skill_browser_file(
+    skill_id: String,
+    session_id: String,
+    relative_path: String,
+    browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
+) -> Result<crate::core::skill_browser::FilePreview, AppError> {
+    let browser = browser.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        browser.read(&skill_id, &session_id, &relative_path)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn close_skill_browser(
+    skill_id: String,
+    session_id: String,
+    browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
+) -> Result<(), AppError> {
+    browser.close(&skill_id, &session_id)
+}
+
+#[tauri::command]
 pub async fn get_skill_document(
     skill_id: String,
     store: State<'_, Arc<SkillStore>>,
@@ -3482,6 +3516,231 @@ mod tests {
             last_checked_at: None,
             last_check_error: None,
         }
+    }
+
+    #[test]
+    fn skill_browser_lists_the_complete_installed_directory_and_reads_on_demand() {
+        use crate::core::skill_browser::SkillBrowser;
+        let repo = test_repo();
+        let dir = write_skill_dir("complete");
+        fs::create_dir_all(dir.join("a/b/c/d/e/empty")).unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::create_dir_all(dir.join("__pycache__")).unwrap();
+        fs::write(dir.join(".gitignore"), "cache").unwrap();
+        fs::write(dir.join("a/b/c/d/e/code.py"), "print('只读')\n").unwrap();
+        fs::write(dir.join("empty.txt"), "").unwrap();
+        repo.store
+            .insert_skill(&sample_skill("complete", "complete", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, "complete").unwrap();
+        assert!(index.complete);
+        assert_eq!(index.entry_path.as_deref(), Some("SKILL.md"));
+        assert_eq!(index.file_count, 4);
+        assert_eq!(index.directory_count, 8);
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.path == "a/b/c/d/e/empty" && entry.kind == "directory"));
+        let preview = browser
+            .read("complete", &index.session_id, "a/b/c/d/e/code.py")
+            .unwrap();
+        assert_eq!(preview.kind, "text");
+        assert_eq!(preview.text.as_deref(), Some("print('只读')\n"));
+        assert_eq!(
+            browser
+                .read("complete", &index.session_id, "empty.txt")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("")
+        );
+        browser.close("complete", &index.session_id).unwrap();
+        assert!(browser
+            .read("complete", &index.session_id, "SKILL.md")
+            .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_rejects_escape_but_reads_legal_unix_names_without_following_links() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let repo = test_repo();
+        let dir = write_skill_dir("boundary");
+        fs::write(dir.join("合法:文件\\名.txt"), "合法名称").unwrap();
+        let outside = repo._tmp.path().join("outside.txt");
+        fs::write(&outside, "不能泄露").unwrap();
+        symlink(&outside, dir.join("outside-link")).unwrap();
+        let _socket = UnixListener::bind(dir.join("socket")).unwrap();
+        repo.store
+            .insert_skill(&sample_skill("boundary", "boundary", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, "boundary").unwrap();
+        assert!(index.complete);
+        assert_eq!(
+            index
+                .entries
+                .iter()
+                .find(|entry| entry.path == "socket")
+                .unwrap()
+                .kind,
+            "special"
+        );
+        assert_eq!(
+            browser
+                .read("boundary", &index.session_id, "合法:文件\\名.txt")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("合法名称")
+        );
+        let link = browser
+            .read("boundary", &index.session_id, "outside-link")
+            .unwrap();
+        assert_eq!(link.kind, "symlink");
+        assert!(link.text.is_none());
+        for path in [
+            "/etc/passwd",
+            "../outside.txt",
+            "SKILL.md/../outside.txt",
+            "./SKILL.md",
+            "outside-link/child",
+            "",
+        ] {
+            assert!(
+                browser.read("boundary", &index.session_id, path).is_err(),
+                "错误放行：{path}"
+            );
+        }
+        assert!(browser
+            .read("other-skill", &index.session_id, "SKILL.md")
+            .is_err());
+        assert!(browser.open(&repo.store, "not-installed").is_err());
+    }
+
+    #[test]
+    fn skill_browser_invalidates_changed_files_even_when_size_and_mtime_are_restored() {
+        use crate::core::{error::ErrorKind, skill_browser::SkillBrowser};
+        let repo = test_repo();
+        let dir = write_skill_dir("changed");
+        let file = dir.join("SKILL.md");
+        let before = fs::metadata(&file).unwrap();
+        repo.store
+            .insert_skill(&sample_skill("changed", "changed", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, "changed").unwrap();
+        fs::write(&file, vec![b'x'; before.len() as usize]).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(before.modified().unwrap()))
+            .unwrap();
+        let error = browser
+            .read("changed", &index.session_id, "SKILL.md")
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::StaleSnapshot);
+        let fresh = browser.open(&repo.store, "changed").unwrap();
+        assert_eq!(
+            browser
+                .read("changed", &fresh.session_id, "SKILL.md")
+                .unwrap()
+                .text
+                .unwrap()
+                .len(),
+            before.len() as usize
+        );
+        fs::remove_file(file).unwrap();
+        assert_eq!(
+            browser
+                .read("changed", &fresh.session_id, "SKILL.md")
+                .unwrap_err()
+                .kind,
+            ErrorKind::StaleSnapshot
+        );
+    }
+
+    #[test]
+    fn skill_browser_bounds_preview_and_preserves_nontext_files() {
+        use crate::core::skill_browser::SkillBrowser;
+        let repo = test_repo();
+        let dir = write_skill_dir("bounded");
+        fs::write(dir.join("limit.txt"), vec![b'a'; 256 * 1024]).unwrap();
+        fs::write(dir.join("over.txt"), vec![b'a'; 256 * 1024 + 1]).unwrap();
+        fs::write(dir.join("binary"), [0, 1, 2]).unwrap();
+        fs::write(dir.join("encoding"), [0xff, 0xfe]).unwrap();
+        fs::File::create(dir.join("large.bin"))
+            .unwrap()
+            .set_len(128 * 1024 * 1024)
+            .unwrap();
+        repo.store
+            .insert_skill(&sample_skill("bounded", "bounded", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, "bounded").unwrap();
+        assert_eq!(
+            browser
+                .read("bounded", &index.session_id, "limit.txt")
+                .unwrap()
+                .text
+                .unwrap()
+                .len(),
+            256 * 1024
+        );
+        for (name, expected) in [
+            ("over.txt", "too_large"),
+            ("large.bin", "too_large"),
+            ("binary", "binary"),
+            ("encoding", "unsupported_encoding"),
+        ] {
+            let preview = browser.read("bounded", &index.session_id, name).unwrap();
+            assert_eq!(preview.kind, expected);
+            assert!(preview.text.is_none());
+        }
+        assert_eq!(fs::read(dir.join("binary")).unwrap(), [0, 1, 2]);
+        assert_eq!(
+            fs::metadata(dir.join("large.bin")).unwrap().len(),
+            128 * 1024 * 1024
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_reports_unreadable_subtrees_and_files_instead_of_empty_content() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::os::unix::fs::PermissionsExt;
+        let repo = test_repo();
+        let dir = write_skill_dir("unreadable");
+        fs::create_dir(dir.join("restricted")).unwrap();
+        fs::write(dir.join("restricted/secret.txt"), "目录内不可读").unwrap();
+        fs::write(dir.join("restricted.txt"), "文件不可读").unwrap();
+        fs::set_permissions(dir.join("restricted"), fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(dir.join("restricted.txt"), fs::Permissions::from_mode(0)).unwrap();
+        repo.store
+            .insert_skill(&sample_skill("unreadable", "unreadable", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, "unreadable").unwrap();
+        let read = browser.read("unreadable", &index.session_id, "restricted.txt");
+        let permissions_enforced = fs::read(dir.join("restricted.txt")).is_err();
+        fs::set_permissions(dir.join("restricted"), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            dir.join("restricted.txt"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        if !permissions_enforced {
+            return;
+        }
+        assert!(!index.complete);
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.path == "restricted" && entry.error.is_some()));
+        assert!(read.is_err());
     }
 
     #[test]

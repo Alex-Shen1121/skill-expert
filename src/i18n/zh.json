@@ -1093,7 +1093,8 @@
     "search": "搜索",
     "goToSettings": "设置",
     "expandAll": "展开全部",
-    "collapse": "收起"
+    "collapse": "收起",
+    "close": "关闭"
   },
   "addFromLibrary": {
     "title": "从技能库添加",
@@ -1373,6 +1374,45 @@
         "centerNewer": "中心有变更",
         "diverged": "冲突"
       }
+    }
+  },
+  "skillBrowser": {
+    "localTree": "本地完整文件目录",
+    "allFiles": "全部文件",
+    "entry": "入口",
+    "link": "链接",
+    "emptyDirectory": "空目录",
+    "counts": "{{files}} 个文件 · {{directories}} 个目录",
+    "partialCounts": "已读取 {{files}} 个文件 · {{directories}} 个目录",
+    "includesHidden": "包含隐藏项与缓存",
+    "incomplete": "目录未完整读取",
+    "reload": "重新加载目录",
+    "localPreview": "本地文件只读预览",
+    "hideTree": "收起目录树",
+    "showTree": "展开目录树",
+    "chooseFile": "请选择文件",
+    "readOnly": "只读",
+    "rawContent": "文件原文",
+    "loadFailed": "无法读取技能目录",
+    "readFailed": "无法读取文件",
+    "skillInfo": "技能信息",
+    "installLocation": "安装位置",
+    "centralLibrary": "中央技能库",
+    "sourceLocation": "来源位置",
+    "deployments": "部署状态",
+    "noDeployments": "尚未部署",
+    "directoryContents": "目录内容",
+    "modules": "技能详情内容模块",
+    "localFiles": "本地文件",
+    "previewKind": {
+      "binary": "二进制文件，无法作为文本预览",
+      "too_large": "文件超过 256 KiB 预览上限",
+      "unsupported_encoding": "文件不是 UTF-8 编码，无法预览",
+      "symlink": "符号链接，仅展示信息，不读取目标",
+      "special": "此文件类型不支持预览",
+      "unreadable": "文件无法读取",
+      "directory": "目录，请选择文件",
+      "file": "无法预览文件"
     }
   }
 }
