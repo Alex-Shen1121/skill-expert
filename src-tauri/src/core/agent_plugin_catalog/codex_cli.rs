@@ -328,6 +328,7 @@ pub(super) fn resolve_codex_cli(
         .as_ref()
         .into_iter()
         .flat_map(|path| std::env::split_paths(path))
+        .chain(user_installation_directory(environment))
         .flat_map(|directory| {
             executable_candidates(directory, environment.path_extensions.as_ref())
         })
@@ -337,6 +338,24 @@ pub(super) fn resolve_codex_cli(
         path: executable,
         source: CodexCliResolutionSource::Environment,
     })
+}
+
+fn user_installation_directory(environment: &CodexCliEnvironment) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        // Finder 启动的桌面进程可能没有用户安装目录，仍优先保留 PATH 的选择。
+        environment
+            .home
+            .as_ref()
+            .map(PathBuf::from)
+            .filter(|home| home.is_absolute())
+            .map(|home| home.join(".local/bin"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = environment;
+        None
+    }
 }
 
 fn validate_explicit_path(path: &Path) -> Result<(), CodexCliResolutionError> {

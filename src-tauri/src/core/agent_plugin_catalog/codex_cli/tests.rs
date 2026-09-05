@@ -156,6 +156,140 @@ fn explicit_path_has_priority_over_environment_resolution() {
 
 #[cfg(unix)]
 #[test]
+fn desktop_without_user_bin_in_path_resolves_installed_codex() {
+    let temp = tempfile::tempdir().unwrap();
+    let user_bin = temp.path().join(".local/bin");
+    std::fs::create_dir_all(&user_bin).unwrap();
+    let executable = user_bin.join("codex");
+    make_executable(&executable);
+    let environment = CodexCliEnvironment {
+        path: Some(temp.path().join("system-bin").into_os_string()),
+        home: Some(temp.path().as_os_str().to_owned()),
+        ..CodexCliEnvironment::empty()
+    };
+
+    let configuration = inspect_codex_cli_configuration(None, &environment);
+
+    assert_eq!(configuration.error, None);
+    assert_eq!(
+        configuration.facts.executable_resolution,
+        CodexCliFactStatus::Confirmed,
+    );
+    assert_eq!(
+        resolve_codex_cli(None, &environment).unwrap().path,
+        executable,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn desktop_without_path_reads_catalog_through_the_user_installation_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("installed-codex");
+    make_executable(&target);
+    std::fs::write(
+        &target,
+        format!(
+            "#!/bin/sh\nprintf '%s' '{}'\n",
+            String::from_utf8_lossy(VALID_CATALOG)
+        ),
+    )
+    .unwrap();
+    let user_bin = temp.path().join(".local/bin");
+    std::fs::create_dir_all(&user_bin).unwrap();
+    let executable = user_bin.join("codex");
+    symlink(&target, &executable).unwrap();
+    let environment = CodexCliEnvironment {
+        home: Some(temp.path().as_os_str().to_owned()),
+        ..CodexCliEnvironment::empty()
+    };
+
+    let resolved = resolve_codex_cli(None, &environment).unwrap();
+    let output = run_codex_catalog_command(&resolved.path).unwrap();
+
+    assert_eq!(resolved.path, executable);
+    assert_eq!(resolved.source, CodexCliResolutionSource::Environment);
+    assert!(output.status.success());
+    assert!(validate_catalog_contract(&output.stdout).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn user_installation_fallback_preserves_path_order_and_explicit_path_failures() {
+    let temp = tempfile::tempdir().unwrap();
+    let user_bin = temp.path().join(".local/bin");
+    let path_bin = temp.path().join("path-bin");
+    for directory in [&user_bin, &path_bin] {
+        std::fs::create_dir_all(directory).unwrap();
+        make_executable(&directory.join("codex"));
+    }
+    let environment = CodexCliEnvironment {
+        path: Some(path_bin.as_os_str().to_owned()),
+        home: Some(temp.path().as_os_str().to_owned()),
+        ..CodexCliEnvironment::empty()
+    };
+
+    assert_eq!(
+        resolve_codex_cli(None, &environment).unwrap().path,
+        path_bin.join("codex")
+    );
+    assert_eq!(
+        resolve_codex_cli(
+            Some(temp.path().join("missing").to_str().unwrap()),
+            &environment
+        ),
+        Err(CodexCliResolutionError::ConfiguredPathInvalid),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn user_installation_fallback_rejects_unusable_files_and_relative_home() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let temp = tempfile::tempdir().unwrap();
+    let user_bin = temp.path().join(".local/bin");
+    std::fs::create_dir_all(&user_bin).unwrap();
+    let executable = user_bin.join("codex");
+    let environment = CodexCliEnvironment {
+        home: Some(temp.path().as_os_str().to_owned()),
+        ..CodexCliEnvironment::empty()
+    };
+    assert_eq!(
+        resolve_codex_cli(None, &environment),
+        Err(CodexCliResolutionError::Unavailable)
+    );
+    std::fs::create_dir(&executable).unwrap();
+    assert_eq!(
+        resolve_codex_cli(None, &environment),
+        Err(CodexCliResolutionError::Unavailable)
+    );
+    std::fs::remove_dir(&executable).unwrap();
+    make_executable(&executable);
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        resolve_codex_cli(None, &environment),
+        Err(CodexCliResolutionError::Unavailable)
+    );
+    std::fs::remove_file(&executable).unwrap();
+    symlink(temp.path().join("missing"), &executable).unwrap();
+    assert_eq!(
+        resolve_codex_cli(None, &environment),
+        Err(CodexCliResolutionError::Unavailable)
+    );
+    assert_eq!(
+        user_installation_directory(&CodexCliEnvironment {
+            home: Some(OsString::from("relative-home")),
+            ..CodexCliEnvironment::empty()
+        }),
+        None,
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn explicit_executable_symlink_is_accepted_by_following_its_target() {
     use std::os::unix::fs::symlink;
 

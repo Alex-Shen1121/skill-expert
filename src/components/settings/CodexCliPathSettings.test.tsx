@@ -103,7 +103,7 @@ describe("Codex CLI 路径设置", () => {
       expect(apiMocks.resetCodexCliPath).toHaveBeenCalledTimes(1);
     });
     expect((input as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("当前从桌面进程环境解析 Codex CLI。")).toBeTruthy();
+    expect(screen.getByText("当前自动从 PATH 和用户安装目录查找 Codex CLI。")).toBeTruthy();
     expect(apiMocks.getAgentPluginProjection).not.toHaveBeenCalled();
   });
 
@@ -146,7 +146,7 @@ describe("Codex CLI 路径设置", () => {
 
     await user.type(input, "-candidate");
 
-    expect(screen.getByText("当前从桌面进程环境解析 Codex CLI。")).toBeTruthy();
+    expect(screen.getByText("当前自动从 PATH 和用户安装目录查找 Codex CLI。")).toBeTruthy();
     expect(screen.queryByText("当前使用明确指定的 Codex CLI 路径。")).toBeNull();
   });
 
