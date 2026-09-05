@@ -3744,6 +3744,40 @@ mod tests {
     }
 
     #[test]
+    fn skill_browser_uses_known_entry_names_and_keeps_other_markdown_browsable() {
+        use crate::core::skill_browser::SkillBrowser;
+        let repo = test_repo();
+        let dir = write_skill_dir("entry");
+        fs::remove_file(dir.join("SKILL.md")).unwrap();
+        fs::write(dir.join("a-notes.md"), "# 普通笔记").unwrap();
+        fs::create_dir(dir.join("docs")).unwrap();
+        fs::write(dir.join("docs/SKILL.md"), "# 技能入口").unwrap();
+        repo.store
+            .insert_skill(&sample_skill("entry", "entry", &dir))
+            .unwrap();
+        let browser = SkillBrowser::default();
+        assert_eq!(
+            browser
+                .open(&repo.store, "entry")
+                .unwrap()
+                .entry_path
+                .as_deref(),
+            Some("docs/SKILL.md")
+        );
+        fs::remove_file(dir.join("docs/SKILL.md")).unwrap();
+        let index = browser.open(&repo.store, "entry").unwrap();
+        assert!(index.entry_path.is_none());
+        assert_eq!(
+            browser
+                .read("entry", &index.session_id, "a-notes.md")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("# 普通笔记")
+        );
+    }
+
+    #[test]
     fn batch_delete_removes_skills_targets_and_stale_metadata_once() {
         let repo = test_repo();
         let skill_one_dir = write_skill_dir("skill-one");

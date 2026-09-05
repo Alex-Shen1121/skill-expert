@@ -123,3 +123,12 @@ it("详情关闭后才完成的索引会话也会被释放", async () => {
   await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith("close_skill_browser", { skillId: "demo", sessionId: "session-demo" }));
   expect(vi.mocked(invoke).mock.calls.some(([name]) => name === "read_skill_browser_file")).toBe(false);
 });
+
+
+it("重复选择当前文件保持已读正文", async () => {
+  const user = userEvent.setup();
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByRole("heading", { name: "阅读入口" });
+  await user.click(screen.getByRole("button", { name: "SKILL.md" }));
+  expect(screen.getByRole("heading", { name: "阅读入口" })).toBeTruthy();
+});

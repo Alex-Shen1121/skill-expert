@@ -12,7 +12,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### User-facing
--
+- 技能详情采用紧凑工作台，支持浏览当前安装目录的全部文件、隐藏项与空目录，并按需只读预览文本；来源与差异在访问时加载，目录或文件变化会提示重新读取。
 
 ### Developer & Governance
 -

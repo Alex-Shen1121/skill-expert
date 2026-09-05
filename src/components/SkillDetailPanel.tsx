@@ -103,7 +103,7 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
     }
   }, [contentTab, supportsSource, skillId, t]);
 
-  const chooseFile = (path: string) => { setSelected(path); setPreview(null); setPreviewError(null); };
+  const chooseFile = (path: string) => { if (path === selected) return; setSelected(path); setPreview(null); setPreviewError(null); };
   const retry = () => { setIndex(null); setPreview(null); setBrowseError(null); setPreviewError(null); setReload(current => current + 1); };
   const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map(toggle => ({
     key: toggle.tool, displayName: toggle.display_name, enabled: toggle.enabled,

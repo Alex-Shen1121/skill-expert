@@ -47,7 +47,7 @@ pub struct SkillBrowser {
 
 struct LocalSnapshot {
     skill_id: String,
-    root: Directory,
+    root: PathBuf,
     stamps: HashMap<String, String>,
     index: BrowserIndex,
 }
@@ -84,7 +84,12 @@ impl SkillBrowser {
                 entries
                     .iter()
                     .find(|entry| {
-                        entry.kind == "file" && entry.path.to_lowercase().ends_with(".md")
+                        entry.kind == "file"
+                            && entry
+                                .path
+                                .rsplit('/')
+                                .next()
+                                .is_some_and(|name| candidates.contains(&name))
                     })
                     .map(|entry| entry.path.clone())
             });
@@ -106,7 +111,7 @@ impl SkillBrowser {
         };
         let snapshot = LocalSnapshot {
             skill_id: skill_id.into(),
-            root,
+            root: root.path.clone(),
             stamps,
             index: index.clone(),
         };
@@ -165,7 +170,7 @@ impl SkillBrowser {
         }
         let changed = AppError::stale_snapshot;
         // 重新核验安装路径的身份，避免已被替换的根目录继续提供旧版本正文。
-        let current_root = Directory::open(&session.root.path).map_err(|_| changed())?;
+        let current_root = Directory::open(&session.root).map_err(|_| changed())?;
         if current_root.stamp().map_err(|_| changed())? != session.stamps[""] {
             return Err(changed());
         }
@@ -241,7 +246,7 @@ impl SkillBrowser {
                 return Err(changed());
             }
         }
-        if Directory::open(&session.root.path)
+        if Directory::open(&session.root)
             .and_then(|directory| directory.stamp())
             .map_err(|_| changed())?
             != session.stamps[""]
@@ -473,18 +478,24 @@ mod platform {
             io::AsRawHandle,
         },
     };
+    use windows_sys::Win32::Foundation::GENERIC_READ;
     use windows_sys::Win32::Storage::FileSystem::{
         FileBasicInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
-        BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
-    const REPARSE: u32 = 0x400;
     fn open_path(path: &Path, read: bool) -> io::Result<File> {
         // 不共享删除权限，将已打开的目录链固定到此次操作结束。
         OpenOptions::new()
             .read(true)
-            .access_mode(if read { 0x80000000 } else { 0 })
-            .share_mode(3)
-            .custom_flags(0x02200000)
+            .access_mode(if read {
+                GENERIC_READ
+            } else {
+                FILE_READ_ATTRIBUTES
+            })
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)
     }
     impl Directory {
@@ -502,7 +513,7 @@ mod platform {
             {
                 let file = open_path(ancestor, false)?;
                 let meta = file.metadata()?;
-                if !meta.is_dir() || meta.file_attributes() & REPARSE != 0 {
+                if !meta.is_dir() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
                     return Err(io::Error::other("不能跟随链接目录"));
                 }
                 ancestors.push(file);
@@ -538,7 +549,7 @@ mod platform {
             let path = self.path.join(name);
             let file = open_path(&path, false)?;
             let meta = file.metadata()?;
-            let kind = if meta.file_attributes() & REPARSE != 0 {
+            let kind = if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
                 "symlink"
             } else if meta.is_dir() {
                 "directory"
@@ -562,7 +573,9 @@ mod platform {
         }
         pub(super) fn open_file(&self, name: &str) -> io::Result<File> {
             let file = open_path(&self.path.join(name), true)?;
-            if !file.metadata()?.is_file() || file.metadata()?.file_attributes() & REPARSE != 0 {
+            if !file.metadata()?.is_file()
+                || file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
                 return Err(io::Error::other("不能读取链接或特殊文件"));
             }
             Ok(file)

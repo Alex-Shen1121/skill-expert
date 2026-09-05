@@ -48,13 +48,13 @@ export function DetailSheet({
         </button>
         <div className={cn("min-h-0 flex-1 scrollbar-hide", workbench ? "flex flex-col" : "overflow-y-auto px-6 pt-5 pb-6")}>
           <div className={workbench ? "shrink-0 px-6 pt-5 pb-3" : undefined}>
-          <h2 className={cn("min-w-0 pr-10 font-semibold leading-tight tracking-tight text-primary", workbench ? "mb-2 text-[22px]" : "mb-3 text-[28px]")}>
-            <span className="block">{title}</span>
-          </h2>
-          {description ? (
-            <div className="text-[15px] leading-7 text-secondary">{description}</div>
-          ) : null}
-          {meta ? <div className="mt-4">{meta}</div> : null}
+            <h2 className={cn("min-w-0 pr-10 font-semibold leading-tight tracking-tight text-primary", workbench ? "mb-2 text-[22px]" : "mb-3 text-[28px]")}>
+              <span className="block">{title}</span>
+            </h2>
+            {description ? (
+              <div className="text-[15px] leading-7 text-secondary">{description}</div>
+            ) : null}
+            {meta ? <div className="mt-4">{meta}</div> : null}
           </div>
           <div className={workbench ? "flex min-h-0 flex-1 flex-col" : "mt-5"}>{children}</div>
         </div>
