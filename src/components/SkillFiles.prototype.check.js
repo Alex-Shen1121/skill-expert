@@ -6,7 +6,10 @@
   const click = async element => { assert(element, "缺少预期控件"); element.click(); await settle(); };
   const button = label => [...document.querySelectorAll(".sf-prototype button")].find(element => element.textContent.trim() === label);
   const module = async label => {
-    await click([...document.querySelectorAll(".sf-content-tabs button")].find(element => element.textContent.startsWith(label)));
+    const tab = [...document.querySelectorAll(".sf-content-tabs button")].find(element => element.textContent.startsWith(label));
+    await click(tab);
+    for (let attempt = 0; tab.getAttribute("aria-pressed") !== "true" && attempt < 30; attempt++) await settle();
+    assert(tab.getAttribute("aria-pressed") === "true", "内容模块未完成切换");
     while (document.querySelector('.sf-file-row[aria-expanded="false"]')) await click(document.querySelector('.sf-file-row[aria-expanded="false"]'));
   };
   const paths = () => [...document.querySelectorAll(".sf-file-row")].map(element => element.getAttribute("aria-label"));
@@ -54,5 +57,24 @@
   assert(text(".sf-reader").includes("content.replace"), "差异片段未呈现修改");
   await click(button("完整内容"));
   cases.push("差异 17 个文件并集、完整双栏、变化片段及特殊文件状态");
+  await click(document.querySelector('[aria-label="折叠所有目录"]'));
+  await click(document.querySelector('[aria-label="只看变化文件"]'));
+  const changed = paths();
+  assert(changed.length === 6 && ["SKILL.md", "scripts", "scripts/export_markdown.py", "references", "references/checklist.md", "references/legacy-notes.md"].every(path => changed.includes(path)), "变化筛选未保留全部变化文件及父目录");
+  assert(document.querySelector('[aria-label="只看变化文件"]').getAttribute("aria-pressed") === "true" && text(".sf-tree-footer").includes("4 个文件 · 2 个目录"), "变化筛选状态或数量错误");
+  const search = document.querySelector('[aria-label="查找文件"]');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(search, "config");
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  assert(paths().length === 0 && text(".sf-tree").includes("没有匹配的文件"), "搜索未与变化筛选取交集");
+  await click(document.querySelector('[aria-label="清除文件查找"]'));
+  await module("来源");
+  assert(paths().length === 24 && !document.querySelector('[aria-label="只看变化文件"]'), "变化筛选影响了来源目录");
+  await module("差异");
+  assert(paths().length === 6, "返回差异时筛选状态丢失");
+  await click(document.querySelector('[aria-label="只看变化文件"]'));
+  await module("差异");
+  assert(paths().length === 25, "关闭变化筛选没有恢复完整目录");
+  cases.push("变化文件快速筛选、父目录展开、跨模块隔离和关闭恢复");
   return { 结果: "通过", 检查项: cases };
 })()

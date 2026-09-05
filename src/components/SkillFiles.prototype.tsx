@@ -68,17 +68,19 @@ export function SkillFilesPrototype({ skill }: { skill: ManagedSkill }) {
   const contentTab = variant !== "B" ? "local" : params.get("view") === "diff" ? "diff" : params.get("view") === "source" ? "source" : "local";
   const setContentTab = (view: "local" | "diff" | "source") => setParams(previous => { previous.set("view", view); return previous; }, { replace: true });
   const [diffOnly, setDiffOnly] = useState(false);
+  const [changesOnly, setChangesOnly] = useState(false);
   const [dark, setDark] = useState(document.documentElement.classList.contains("dark"));
   const entries = contentTab === "local" ? exampleEntries : contentTab === "source" ? exampleSourceEntries : allEntries;
+  const filteredEntries = contentTab === "diff" && changesOnly ? entries.filter(item => diffFiles.has(item.path) || (item.kind === "directory" && exampleDiff.some(change => change.relative_path.startsWith(`${item.path}/`)))) : entries;
   const entry = (contentTab === "source" ? sourceFiles : localFiles).get(selected);
   const selectedIconEntry = localFiles.get(selected) ?? sourceFiles.get(selected)!;
   const isMarkdown = selected.endsWith(".md");
-  const matches = entries.filter(item => item.path.toLowerCase().includes(query.toLowerCase()));
-  const activeFileCount = entries.filter(item => item.kind !== "directory").length;
+  const matches = filteredEntries.filter(item => item.path.toLowerCase().includes(query.toLowerCase()));
+  const activeFileCount = filteredEntries.filter(item => item.kind !== "directory").length;
   const selectedChange = diffFiles.get(selected);
   const status = comparisonStatus(selected);
-  const state = { "方案": variant, "已选基线": "B", "内容模块": contentTab, "技能信息展开": metadataOpen, "选中文件": selected, "比较状态": status, "差异只看变化片段": diffOnly, "展开目录": expanded, "目录可见": treeVisible, "过滤词": query, "预览模式": raw ? "原文" : "正文", "条目类型": entry?.kind ?? "此版本缺失", "文件总数": activeFileCount, "弹层打开": open };
-  useEffect(() => { console.info("技能文件原型状态", { variant, selected, expanded, treeVisible, query, raw, open, contentTab, metadataOpen, diffOnly }); }, [variant, selected, expanded, treeVisible, query, raw, open, contentTab, metadataOpen, diffOnly]);
+  const state = { "方案": variant, "已选基线": "B", "内容模块": contentTab, "技能信息展开": metadataOpen, "选中文件": selected, "比较状态": status, "差异只看变化片段": diffOnly, "目录只看变化文件": changesOnly, "展开目录": expanded, "目录可见": treeVisible, "过滤词": query, "预览模式": raw ? "原文" : "正文", "条目类型": entry?.kind ?? "此版本缺失", "可见文件数": activeFileCount, "弹层打开": open };
+  useEffect(() => { console.info("技能文件原型状态", { variant, selected, expanded, treeVisible, query, raw, open, contentTab, metadataOpen, diffOnly, changesOnly }); }, [variant, selected, expanded, treeVisible, query, raw, open, contentTab, metadataOpen, diffOnly, changesOnly]);
 
   const choose = (path: string) => { setSelected(path); setRaw(false); };
   const toggleDirectory = (path: string) => {
@@ -88,7 +90,7 @@ export function SkillFilesPrototype({ skill }: { skill: ManagedSkill }) {
       setQuery("");
     } else setExpanded(current => current.includes(path) ? current.filter(item => item !== path) : [...current, path]);
   };
-  const childrenOf = (parent: string) => entries.filter(item => item.path.split("/").slice(0, -1).join("/") === parent);
+  const childrenOf = (parent: string) => filteredEntries.filter(item => item.path.split("/").slice(0, -1).join("/") === parent);
   const renderEntries = (items: ExampleEntry[], depth = 0): ReactNode => <ul>
     {items.map(item => <li key={item.path}>
       <button className={`sf-file-row ${selected === item.path ? "sf-file-selected" : ""}`} style={{ paddingLeft: 12 + depth * 15 }}
@@ -103,11 +105,15 @@ export function SkillFilesPrototype({ skill }: { skill: ManagedSkill }) {
     </li>)}
   </ul>;
 
-  const tree = treeVisible && <nav className="sf-tree" aria-label={`${contentTab === "local" ? "本地" : contentTab === "source" ? "来源" : "差异"}完整文件目录`}>
-    <div className="sf-tree-heading"><span><FolderOpen size={15} />{contentTab === "source" ? "来源文件" : contentTab === "diff" ? "两边全部文件" : "全部文件"}</span><button title="折叠所有目录" aria-label="折叠所有目录" onClick={() => setExpanded([])}><ChevronsDownUp size={15} /></button></div>
+  const tree = treeVisible && <nav className="sf-tree" aria-label={contentTab === "diff" && changesOnly ? "差异变化文件目录" : `${contentTab === "local" ? "本地" : contentTab === "source" ? "来源" : "差异"}完整文件目录`}>
+    <div className="sf-tree-heading"><span><FolderOpen size={15} />{contentTab === "source" ? "来源文件" : contentTab === "diff" ? changesOnly ? "变化文件" : "两边全部文件" : "全部文件"}</span><button title="折叠所有目录" aria-label="折叠所有目录" onClick={() => setExpanded([])}><ChevronsDownUp size={15} /></button></div>
     <label className="sf-search"><Search size={14} /><input aria-label="查找文件" placeholder="查找文件…" value={query} onChange={event => setQuery(event.target.value)} />{query && <button aria-label="清除文件查找" onClick={() => setQuery("")}>×</button>}</label>
+    {contentTab === "diff" && <div className="sf-tree-filter"><button aria-label="只看变化文件" aria-pressed={changesOnly} title="仅展示新增、删除和修改的文件" onClick={() => {
+      setChangesOnly(!changesOnly);
+      if (!changesOnly) setExpanded(current => [...new Set([...current, ...allEntries.filter(item => item.kind === "directory" && exampleDiff.some(change => change.relative_path.startsWith(`${item.path}/`))).map(item => item.path)])]);
+    }}><GitCompareArrows size={13} />只看变化<span>{exampleDiff.length}</span></button>{changesOnly && <small>已筛选</small>}</div>}
     <div className="sf-file-list">{renderEntries(query ? matches : childrenOf(""))}{query && matches.length === 0 && <p className="sf-empty-folder">没有匹配的文件</p>}</div>
-    <div className="sf-tree-footer">{query ? `${matches.length} 个匹配项` : `${activeFileCount} 个文件 · ${entries.length - activeFileCount} 个目录`}<span>{contentTab === "diff" ? `${exampleDiff.length} 个变化文件 · 其余条目仍可查看` : "包含隐藏项与缓存"}</span></div>
+    <div className="sf-tree-footer">{query ? `${matches.length} 个匹配项` : `${activeFileCount} 个文件 · ${filteredEntries.length - activeFileCount} 个目录`}<span>{contentTab === "diff" ? changesOnly ? "仅显示变化文件 · 关闭筛选查看全部" : `${exampleDiff.length} 个变化文件 · 其余条目仍可查看` : "包含隐藏项与缓存"}</span></div>
   </nav>;
 
   const treeToggle = <button className="sf-icon-button" aria-label={treeVisible ? "收起目录树" : "展开目录树"} title={treeVisible ? "收起目录树" : "展开目录树"} onClick={() => setTreeVisible(!treeVisible)}>{treeVisible ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}</button>;

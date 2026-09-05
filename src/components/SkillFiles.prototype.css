@@ -115,6 +115,12 @@
 .sf-search { display:flex; align-items:center; gap:7px; margin:0 12px 13px; padding:7px 9px; border:1px solid var(--color-border-subtle); background:var(--color-bg); border-radius:6px; color:var(--color-text-muted); }
 .sf-search input { min-width:0; width:100%; font-size:11px; background:transparent; outline:none; color:var(--color-text-secondary); }
 .sf-search:focus-within { border-color:var(--color-accent); }
+.sf-tree-filter { display:flex; align-items:center; gap:8px; margin:-3px 12px 12px; }
+.sf-tree-filter button { padding:5px 8px; border:1px solid var(--color-border-subtle); font-size:11px; color:var(--color-text-muted); }
+.sf-tree-filter button>span { font-size:10px; opacity:.8; }
+.sf-tree-filter button[aria-pressed="true"] { background:var(--color-accent-bg); border-color:var(--color-accent-border); color:var(--color-accent-dark); }
+.dark .sf-tree-filter button[aria-pressed="true"] { color:var(--color-accent-light); }
+.sf-tree-filter small { color:var(--color-text-muted); font-size:10px; }
 .sf-file-list { overflow:auto; flex:1; min-height:0; padding:0 5px 12px; }
 .sf-file-row { width:100%; min-height:33px; padding:7px 9px; font-size:12px; text-align:left; justify-content:flex-start!important; gap:7px!important; }
 .sf-file-row>svg { flex-shrink:0; color:var(--color-text-muted); }
