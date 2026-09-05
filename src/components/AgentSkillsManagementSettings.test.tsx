@@ -132,31 +132,30 @@ describe("Agent Skills 管理配置", () => {
     expect(screen.getByText("2 个已部署")).toBeTruthy();
     expect(screen.getByLabelText("当前部署 2")).toBeTruthy();
     expect(screen.getByLabelText("待处理 0")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "关闭 Codex 的管理能力" })).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "开启 Warp 的管理能力" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "关闭 Codex 的管理能力" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "开启 Warp 的管理能力" })).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "关闭 WorkBuddy 的管理能力" }),
+      screen.getByRole("checkbox", { name: "关闭 WorkBuddy 的管理能力" }),
     ).toBeTruthy();
     expect(screen.getByText("Agent 已停用或卸载，仍保留部署记录")).toBeTruthy();
   });
 
-  it("未部署时滑块位于左侧，已部署时滑块移到右侧", () => {
+  it("复选框只形成草稿并明确待应用状态，放弃后恢复真实部署", async () => {
+    const user = userEvent.setup();
     renderModule();
-
-    const enabledSwitch = screen.getByRole("switch", {
-      name: "关闭 Codex 的管理能力",
-    });
-    const disabledSwitch = screen.getByRole("switch", {
-      name: "开启 Warp 的管理能力",
-    });
-    const enabledKnob = enabledSwitch.firstElementChild;
-    const disabledKnob = disabledSwitch.firstElementChild;
-
-    expect(enabledKnob?.classList.contains("left-0")).toBe(true);
-    expect(enabledKnob?.classList.contains("translate-x-[18px]")).toBe(true);
-    expect(disabledKnob?.classList.contains("left-0")).toBe(true);
-    expect(disabledKnob?.classList.contains("translate-x-0.5")).toBe(true);
-    expect(disabledKnob?.classList.contains("translate-x-[18px]")).toBe(false);
+    const available = screen.getByRole("checkbox", { name: "开启 Warp 的管理能力" });
+    expect((available as HTMLInputElement).checked).toBe(false);
+    await user.click(available);
+    expect(screen.getByText("待启用 · 应用后生效")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "已选择 3" })).toBeTruthy();
+    expect(apiMocks.syncSkillToTool).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("checkbox", { name: "关闭 Codex 的管理能力" }));
+    expect(screen.getByText("待撤销 · 应用后生效")).toBeTruthy();
+    expect(apiMocks.unsyncSkillFromTool).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "放弃更改" }));
+    expect((screen.getByRole("checkbox", { name: "关闭 Codex 的管理能力" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "开启 Warp 的管理能力" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: "应用更改" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("同名异源时显示冲突、阻断 Agent 选择并提供处理入口", async () => {
@@ -174,8 +173,9 @@ describe("Agent Skills 管理配置", () => {
       screen.getByText("当前 manage-skills 不是来自固定可信来源，部署操作已暂停。"),
     ).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "开启 Codex 的管理能力" }),
+      screen.getByRole("checkbox", { name: "开启 Codex 的管理能力" }),
     ).toHaveProperty("disabled", true);
+    await user.click(screen.getByText("查看管理 Skill 详情"));
     await user.click(screen.getByRole("button", { name: "在技能库中查看" }));
     expect(appState.openSkillDetailById).toHaveBeenCalledWith("manage-skills-id");
   });
@@ -203,7 +203,7 @@ describe("Agent Skills 管理配置", () => {
 
     expect(screen.getByText("发现同名异源 Skill")).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "开启 Codex 的管理能力" }),
+      screen.getByRole("checkbox", { name: "开启 Codex 的管理能力" }),
     ).toHaveProperty("disabled", true);
   });
 
@@ -211,9 +211,9 @@ describe("Agent Skills 管理配置", () => {
     const user = userEvent.setup();
     renderModule();
 
-    await user.click(screen.getByRole("switch", { name: "开启 Warp 的管理能力" }));
+    await user.click(screen.getByRole("checkbox", { name: "开启 Warp 的管理能力" }));
     await user.click(
-      screen.getByRole("switch", { name: "关闭 WorkBuddy 的管理能力" }),
+      screen.getByRole("checkbox", { name: "关闭 WorkBuddy 的管理能力" }),
     );
 
     expect(apiMocks.syncSkillToTool).not.toHaveBeenCalled();
@@ -239,7 +239,7 @@ describe("Agent Skills 管理配置", () => {
     renderModule();
 
     expect(screen.getByText(/管理 Skill 尚未安装/)).toBeTruthy();
-    await user.click(screen.getByRole("switch", { name: "开启 Codex 的管理能力" }));
+    await user.click(screen.getByRole("checkbox", { name: "开启 Codex 的管理能力" }));
     await user.click(screen.getByRole("button", { name: "应用更改" }));
 
     await waitFor(() => {
@@ -272,11 +272,11 @@ describe("Agent Skills 管理配置", () => {
     expect(screen.queryByText("Agent 1")).toBeNull();
 
     await user.clear(search);
-    await user.click(screen.getByRole("button", { name: "已部署 2" }));
-    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "已选择 2" }));
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "需处理 1" }));
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
     expect(screen.getByText("WorkBuddy")).toBeTruthy();
   });
 
@@ -288,7 +288,7 @@ describe("Agent Skills 管理配置", () => {
     appState.managedSkills = [managementSkill()];
     renderModule();
 
-    for (const targetSwitch of screen.getAllByRole("switch")) {
+    for (const targetSwitch of screen.getAllByRole("checkbox")) {
       await user.click(targetSwitch);
     }
 
@@ -310,8 +310,8 @@ describe("Agent Skills 管理配置", () => {
     );
     renderModule();
 
-    await user.click(screen.getByRole("switch", { name: "开启 Codex 的管理能力" }));
-    await user.click(screen.getByRole("switch", { name: "开启 Warp 的管理能力" }));
+    await user.click(screen.getByRole("checkbox", { name: "开启 Codex 的管理能力" }));
+    await user.click(screen.getByRole("checkbox", { name: "开启 Warp 的管理能力" }));
     await user.click(screen.getByRole("button", { name: "应用更改" }));
 
     await waitFor(() => {
@@ -334,6 +334,7 @@ describe("Agent Skills 管理配置", () => {
     const user = userEvent.setup();
     renderModule();
 
+    await user.click(screen.getByText("查看管理 Skill 详情"));
     await user.click(screen.getByRole("button", { name: "在技能库中查看" }));
 
     expect(appState.openSkillDetailById).toHaveBeenCalledWith("manage-skills-id");
@@ -345,19 +346,19 @@ describe("Agent Skills 管理配置", () => {
         language: "zh",
         title: "Agent 管理 Skills",
         search: "搜索 3 个 Agent",
-        deployed: "已部署 2",
+        deployed: "已选择 2",
       },
       {
         language: "zh-TW",
         title: "Agent 管理 Skills",
         search: "搜尋 3 個 Agent",
-        deployed: "已部署 2",
+        deployed: "已選擇 2",
       },
       {
         language: "en",
         title: "Manage Skills with Agents",
         search: "Search 3 agents",
-        deployed: "Deployed 2",
+        deployed: "Selected 2",
       },
     ];
 
@@ -371,4 +372,15 @@ describe("Agent Skills 管理配置", () => {
     }
     await i18n.changeLanguage("zh");
   });
+});
+
+
+it("管理 Skill 来源状态常驻，详情按需展开后仍能进入技能库", async () => {
+  const user = userEvent.setup();
+  renderModule();
+  expect(screen.getByText("来源可信")).toBeTruthy();
+  expect(screen.getByText("查看管理 Skill 详情").closest("details")?.open).toBe(false);
+  await user.click(screen.getByText("查看管理 Skill 详情"));
+  await user.click(screen.getByRole("button", { name: "在技能库中查看" }));
+  expect(appState.openSkillDetailById).toHaveBeenCalledWith("manage-skills-id");
 });

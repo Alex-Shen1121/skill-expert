@@ -57,8 +57,7 @@ import { useApp } from "../context/AppContext";
 import { useThemeContext } from "../context/ThemeContext";
 import { AgentIcon } from "../components/AgentIcon";
 import { ToggleSwitch } from "../components/ToggleSwitch";
-import { AgentSkillsManagementSettings } from "../components/AgentSkillsManagementSettings";
-import { CodexCliPathSettings } from "../components/settings/CodexCliPathSettings";
+import { SettingsPage } from "../components/settings/SettingsPage";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage } from "../lib/error";
@@ -204,7 +203,7 @@ function AgentGroupDnd({ items, sensors, dragLabel, onDragEnd, renderAgentCard }
       onDragEnd={(e) => onDragEnd(e, groupKeys)}
     >
       <SortableContext items={groupKeys} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="settings-agent-grid">
           {items.map((agent) => (
             <SortableAgentCard key={agent.key} agentKey={agent.key} dragLabel={dragLabel}>
               {(handle) => renderAgentCard(agent, handle)}
@@ -912,7 +911,7 @@ export function Settings() {
   const renderAgentCard = (agent: typeof tools[number], dragHandle?: React.ReactNode) => (
     <div
       className={cn(
-        "group relative flex h-full flex-col gap-1.5 rounded-xl border px-3.5 py-3 transition-colors",
+        "settings-agent-card group relative flex flex-col",
         agent.installed && agent.enabled
           ? "border-border bg-surface"
           : agent.installed
@@ -991,12 +990,17 @@ export function Settings() {
         />
       </div>
 
-      <div className="space-y-1">
-        {/* Global skills path */}
+      <details className="settings-agent-paths">
+        <summary aria-label={t("settings.agentPurpose.pathsLabel", { name: agent.display_name })}>
+          <FolderOpen size={12} aria-hidden="true" /><span>{t("settings.agentPurpose.paths")}</span><ChevronDown size={12} aria-hidden="true" />
+        </summary>
+        <div className="settings-agent-path-body space-y-2">
+        {/* 全局技能目录 */}
         {editingPathKey === agent.key ? (
           <div className="flex items-center gap-1">
             <input
               type="text"
+              aria-label={t("settings.agentPurpose.globalPathLabel", { name: agent.display_name })}
               value={editingPathValue}
               onChange={(e) => setEditingPathValue(e.target.value)}
               className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
@@ -1014,12 +1018,14 @@ export function Settings() {
               <FolderOpen className="h-3 w-3" />
             </button>
             <button
+              aria-label={t("common.save")}
               onClick={handleSavePath}
               className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
             >
               <Check className="h-3 w-3" />
             </button>
             <button
+              aria-label={t("common.cancel")}
               onClick={() => setEditingPathKey(null)}
               className="shrink-0 p-1 text-muted hover:text-secondary outline-none"
             >
@@ -1037,7 +1043,7 @@ export function Settings() {
             <button
               type="button"
               onClick={() => startEditPath(agent.key, agent.skills_dir)}
-              className="shrink-0 p-0.5 text-muted hover:text-accent outline-none opacity-0 transition-opacity group-hover:opacity-100"
+              className="shrink-0 p-0.5 text-muted hover:text-accent outline-none"
               title={t("settings.editPath")}
             >
               <Pencil className="h-3 w-3" />
@@ -1046,7 +1052,7 @@ export function Settings() {
               <button
                 type="button"
                 onClick={() => handleResetPath(agent.key)}
-                className="shrink-0 p-0.5 text-muted hover:text-amber-500 outline-none opacity-0 transition-opacity group-hover:opacity-100"
+                className="shrink-0 p-0.5 text-muted hover:text-amber-500 outline-none"
                 title={t("settings.resetPath")}
               >
                 <RotateCcw className="h-3 w-3" />
@@ -1055,12 +1061,12 @@ export function Settings() {
           </div>
         )}
 
-        {/* Project-relative skills path — always rendered so every card is the
-            same height, installed or not. */}
+        {/* 项目相对目录，沿用原编辑与恢复操作。 */}
         {editingProjectPathKey === agent.key ? (
             <div className="flex items-center gap-1">
               <input
                 type="text"
+                aria-label={t("settings.agentPurpose.projectPathLabel", { name: agent.display_name })}
                 value={editingProjectPathValue}
                 onChange={(e) => setEditingProjectPathValue(e.target.value)}
                 placeholder={t("settings.projectSkillsPathPlaceholder")}
@@ -1072,12 +1078,14 @@ export function Settings() {
                 }}
               />
               <button
+                aria-label={t("common.save")}
                 onClick={handleSaveProjectPath}
                 className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
               >
                 <Check className="h-3 w-3" />
               </button>
               <button
+                aria-label={t("common.cancel")}
                 onClick={() => setEditingProjectPathKey(null)}
                 className="shrink-0 p-1 text-muted hover:text-secondary outline-none"
               >
@@ -1105,7 +1113,7 @@ export function Settings() {
                 onClick={() =>
                   startEditProjectPath(agent.key, agent.project_relative_skills_dir)
                 }
-                className="shrink-0 p-0.5 text-muted hover:text-accent outline-none opacity-0 transition-opacity group-hover:opacity-100"
+                className="shrink-0 p-0.5 text-muted hover:text-accent outline-none"
                 title={t("settings.editPath")}
               >
                 <Pencil className="h-3 w-3" />
@@ -1114,7 +1122,7 @@ export function Settings() {
                 <button
                   type="button"
                   onClick={() => handleResetProjectPath(agent.key)}
-                  className="shrink-0 p-0.5 text-muted hover:text-amber-500 outline-none opacity-0 transition-opacity group-hover:opacity-100"
+                  className="shrink-0 p-0.5 text-muted hover:text-amber-500 outline-none"
                   title={t("settings.resetPath")}
                 >
                   <RotateCcw className="h-3 w-3" />
@@ -1122,354 +1130,344 @@ export function Settings() {
               )}
             </div>
           )}
-      </div>
+        </div>
+      </details>
     </div>
   );
 
-  return (
-    <div className="app-page app-page-narrow">
-      <div className="app-page-header">
-        <h1 className="app-page-title flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-accent" />
-          {t("settings.title")}
-        </h1>
+  const agentsSection = (
+    <section className="settings-agents">
+      <div className="settings-agent-toolbar mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="sr-only">
+          <h2 className="app-section-title">
+            {t("settings.supportedAgents")} ({installedTools.length}/{tools.length})
+          </h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setShowAddCustom(true)}
+            className="flex items-center gap-1 text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            {t("settings.addCustomAgent")}
+          </button>
+          <button
+            onClick={() => handleToggleAllTools(true)}
+            className="text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
+          >
+            {t("settings.enableAll")}
+          </button>
+          <button
+            onClick={() => handleToggleAllTools(false)}
+            className="text-[13px] text-muted hover:text-secondary transition-colors font-medium outline-none"
+          >
+            {t("settings.disableAll")}
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
+          >
+            {refreshing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            {t("settings.refresh")}
+          </button>
+        </div>
       </div>
 
-      <div className="space-y-6">
-        {/* Agent status */}
-        <section>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="app-section-title">
-                {t("settings.supportedAgents")} ({installedTools.length}/{tools.length})
-              </h2>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
+      <div className="mb-3 flex flex-wrap items-center gap-3 text-[13px] text-muted">
+        <span>{t("settings.detectedAgents")} <span className="font-medium text-secondary">{installedTools.length}</span></span>
+        <span>{t("settings.enabledAgents")} <span className="font-medium text-secondary">{enabledTools.length}</span></span>
+        <span>{t("settings.customAgents")} <span className="font-medium text-secondary">{customTools.length}</span></span>
+      </div>
+
+      {/* Add custom agent form */}
+      {showAddCustom && (
+        <div className="app-panel p-4 mb-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[13px] font-medium text-secondary">{t("settings.addCustomAgent")}</h3>
+            <button onClick={() => setShowAddCustom(false)} className="text-muted hover:text-secondary outline-none">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div>
+            <label className="text-[12px] text-muted mb-1 block">{t("settings.agentName")}</label>
+            <input
+              type="text"
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder={t("settings.agentNamePlaceholder")}
+              className={`${fieldClass} w-full`}
+            />
+          </div>
+          <div>
+            <label className="text-[12px] text-muted mb-1 block">{t("settings.skillsPath")}</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={customPath}
+                onChange={(e) => setCustomPath(e.target.value)}
+                placeholder={t("settings.skillsPathPlaceholder")}
+                className={`${fieldClass} min-w-0 flex-1 font-mono`}
+              />
               <button
-                onClick={() => setShowAddCustom(true)}
-                className="flex items-center gap-1 text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
+                onClick={() => handleBrowsePath(setCustomPath)}
+                className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
               >
-                <Plus className="w-3.5 h-3.5" />
-                {t("settings.addCustomAgent")}
-              </button>
-              <button
-                onClick={() => handleToggleAllTools(true)}
-                className="text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
-              >
-                {t("settings.enableAll")}
-              </button>
-              <button
-                onClick={() => handleToggleAllTools(false)}
-                className="text-[13px] text-muted hover:text-secondary transition-colors font-medium outline-none"
-              >
-                {t("settings.disableAll")}
-              </button>
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex items-center gap-1.5 text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
-              >
-                {refreshing ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3.5 h-3.5" />
-                )}
-                {t("settings.refresh")}
+                <FolderOpen className="w-3 h-3" />
+                {t("settings.selectFolder")}
               </button>
             </div>
           </div>
-
-          <div className="mb-3 flex flex-wrap items-center gap-3 text-[13px] text-muted">
-            <span>{t("settings.detectedAgents")} <span className="font-medium text-secondary">{installedTools.length}</span></span>
-            <span>{t("settings.enabledAgents")} <span className="font-medium text-secondary">{enabledTools.length}</span></span>
-            <span>{t("settings.customAgents")} <span className="font-medium text-secondary">{customTools.length}</span></span>
+          <div>
+            <label className="text-[12px] text-muted mb-1 block">
+              {t("settings.projectSkillsPath")}
+            </label>
+            <input
+              type="text"
+              value={customProjectPath}
+              onChange={(e) => setCustomProjectPath(e.target.value)}
+              placeholder={t("settings.projectSkillsPathPlaceholder")}
+              className={`${fieldClass} w-full font-mono`}
+            />
+            <p className="mt-1 text-[12px] text-muted">
+              {t("settings.projectSkillsPathDesc")}
+            </p>
           </div>
+          <div className="flex justify-end">
+            <button
+              onClick={handleAddCustomAgent}
+              disabled={addingCustom || !customName.trim() || !customPath.trim()}
+              className={`${actionButtonClass} bg-accent text-white border-accent hover:opacity-90 disabled:opacity-50`}
+            >
+              {addingCustom ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              {t("settings.addAgent")}
+            </button>
+          </div>
+        </div>
+      )}
 
-          {/* Add custom agent form */}
-          {showAddCustom && (
-            <div className="app-panel p-4 mb-3 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[13px] font-medium text-secondary">{t("settings.addCustomAgent")}</h3>
-                <button onClick={() => setShowAddCustom(false)} className="text-muted hover:text-secondary outline-none">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div>
-                <label className="text-[12px] text-muted mb-1 block">{t("settings.agentName")}</label>
+      <div className="space-y-4">
+        {detectedTools.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-[13px] font-medium text-secondary">{t("settings.detectedAgentsSection")}</h3>
+              <span className="text-[12px] text-muted tabular-nums">{detectedTools.length}</span>
+            </div>
+            <AgentGroupDnd
+              items={detectedTools}
+              sensors={dragSensors}
+              dragLabel={t("settings.dragToReorder")}
+              onDragEnd={handleAgentDragEnd}
+              renderAgentCard={renderAgentCard}
+            />
+          </div>
+        )}
+
+        {undetectedTools.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowMoreAgents((value) => !value)}
+              className="mb-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-secondary outline-none"
+            >
+              {showMoreAgents ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              {t("settings.otherAgentsSection", { count: undetectedTools.length })}
+            </button>
+            {showMoreAgents && (
+              <AgentGroupDnd
+                items={undetectedTools}
+                sensors={dragSensors}
+                dragLabel={t("settings.dragToReorder")}
+                onDragEnd={handleAgentDragEnd}
+                renderAgentCard={renderAgentCard}
+              />
+            )}
+          </div>
+        )}
+
+        {customTools.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-[13px] font-medium text-secondary">{t("settings.customAgentsSection")}</h3>
+              <span className="text-[12px] text-muted">{customTools.length}</span>
+            </div>
+            <AgentGroupDnd
+              items={customTools}
+              sensors={dragSensors}
+              dragLabel={t("settings.dragToReorder")}
+              onDragEnd={handleAgentDragEnd}
+              renderAgentCard={renderAgentCard}
+            />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  const generalSection = (
+    <section className="settings-general">
+      <h2 className="app-section-title mb-3">
+        {t("settings.globalConfig")}
+      </h2>
+      <div className="app-panel overflow-hidden divide-y divide-border-faint">
+        {/* Repo path */}
+        <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[14px] font-semibold text-primary">{t("settings.repoPath")}</h3>
+            <p className="mt-0.5 text-[12px] text-muted">{t("settings.repoPathDesc")}</p>
+          </div>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            {editingCentralRepoPath ? (
+              <div className="flex min-w-[320px] max-w-full items-center gap-1">
                 <input
                   type="text"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder={t("settings.agentNamePlaceholder")}
-                  className={`${fieldClass} w-full`}
+                  value={centralRepoPathInput}
+                  onChange={(e) => setCentralRepoPathInput(e.target.value)}
+                  className={`${fieldClass} min-w-0 flex-1 font-mono`}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleSaveCentralRepoPath();
+                    if (e.key === "Escape") {
+                      setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
+                      setEditingCentralRepoPath(false);
+                    }
+                  }}
                 />
-              </div>
-              <div>
-                <label className="text-[12px] text-muted mb-1 block">{t("settings.skillsPath")}</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    value={customPath}
-                    onChange={(e) => setCustomPath(e.target.value)}
-                    placeholder={t("settings.skillsPathPlaceholder")}
-                    className={`${fieldClass} min-w-0 flex-1 font-mono`}
-                  />
-                  <button
-                    onClick={() => handleBrowsePath(setCustomPath)}
-                    className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
-                  >
-                    <FolderOpen className="w-3 h-3" />
-                    {t("settings.selectFolder")}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="text-[12px] text-muted mb-1 block">
-                  {t("settings.projectSkillsPath")}
-                </label>
-                <input
-                  type="text"
-                  value={customProjectPath}
-                  onChange={(e) => setCustomProjectPath(e.target.value)}
-                  placeholder={t("settings.projectSkillsPathPlaceholder")}
-                  className={`${fieldClass} w-full font-mono`}
-                />
-                <p className="mt-1 text-[12px] text-muted">
-                  {t("settings.projectSkillsPathDesc")}
-                </p>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  onClick={handleAddCustomAgent}
-                  disabled={addingCustom || !customName.trim() || !customPath.trim()}
-                  className={`${actionButtonClass} bg-accent text-white border-accent hover:opacity-90 disabled:opacity-50`}
-                >
-                  {addingCustom ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                  {t("settings.addAgent")}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {detectedTools.length > 0 && (
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h3 className="text-[13px] font-medium text-secondary">{t("settings.detectedAgentsSection")}</h3>
-                  <span className="text-[12px] text-muted tabular-nums">{detectedTools.length}</span>
-                </div>
-                <AgentGroupDnd
-                  items={detectedTools}
-                  sensors={dragSensors}
-                  dragLabel={t("settings.dragToReorder")}
-                  onDragEnd={handleAgentDragEnd}
-                  renderAgentCard={renderAgentCard}
-                />
-              </div>
-            )}
-
-            {undetectedTools.length > 0 && (
-              <div>
                 <button
                   type="button"
-                  onClick={() => setShowMoreAgents((value) => !value)}
-                  className="mb-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-secondary outline-none"
+                  onClick={() => handleBrowsePath(setCentralRepoPathInput)}
+                  disabled={savingCentralRepoPath}
+                  className={`${actionButtonClass} text-muted hover:text-secondary`}
                 >
-                  {showMoreAgents ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  {t("settings.otherAgentsSection", { count: undetectedTools.length })}
+                  <FolderOpen className="w-3 h-3" />
+                  {t("settings.selectFolder")}
                 </button>
-                {showMoreAgents && (
-                  <AgentGroupDnd
-                    items={undetectedTools}
-                    sensors={dragSensors}
-                    dragLabel={t("settings.dragToReorder")}
-                    onDragEnd={handleAgentDragEnd}
-                    renderAgentCard={renderAgentCard}
-                  />
-                )}
-              </div>
-            )}
-
-            {customTools.length > 0 && (
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h3 className="text-[13px] font-medium text-secondary">{t("settings.customAgentsSection")}</h3>
-                  <span className="text-[12px] text-muted">{customTools.length}</span>
-                </div>
-                <AgentGroupDnd
-                  items={customTools}
-                  sensors={dragSensors}
-                  dragLabel={t("settings.dragToReorder")}
-                  onDragEnd={handleAgentDragEnd}
-                  renderAgentCard={renderAgentCard}
-                />
-              </div>
-            )}
-          </div>
-        </section>
-
-        <AgentSkillsManagementSettings />
-
-        <CodexCliPathSettings />
-
-        {/* Global config */}
-        <section>
-          <h2 className="app-section-title mb-3">
-            {t("settings.globalConfig")}
-          </h2>
-          <div className="app-panel overflow-hidden divide-y divide-border-faint">
-            {/* Repo path */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[14px] font-semibold text-primary">{t("settings.repoPath")}</h3>
-                <p className="mt-0.5 text-[12px] text-muted">{t("settings.repoPathDesc")}</p>
-              </div>
-              <div className="flex max-w-full flex-wrap items-center gap-2">
-                {editingCentralRepoPath ? (
-                  <div className="flex min-w-[320px] max-w-full items-center gap-1">
-                    <input
-                      type="text"
-                      value={centralRepoPathInput}
-                      onChange={(e) => setCentralRepoPathInput(e.target.value)}
-                      className={`${fieldClass} min-w-0 flex-1 font-mono`}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void handleSaveCentralRepoPath();
-                        if (e.key === "Escape") {
-                          setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
-                          setEditingCentralRepoPath(false);
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleBrowsePath(setCentralRepoPathInput)}
-                      disabled={savingCentralRepoPath}
-                      className={`${actionButtonClass} text-muted hover:text-secondary`}
-                    >
-                      <FolderOpen className="w-3 h-3" />
-                      {t("settings.selectFolder")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleSaveCentralRepoPath()}
-                      disabled={savingCentralRepoPath}
-                      className={`${actionButtonClass} border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5 dark:text-emerald-400`}
-                    >
-                      {savingCentralRepoPath ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Check className="w-3 h-3" />
-                      )}
-                      {t("common.save")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
-                        setEditingCentralRepoPath(false);
-                      }}
-                      disabled={savingCentralRepoPath}
-                      className={`${actionButtonClass} text-muted hover:text-secondary`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border-subtle bg-background px-3 py-2">
-                    <Folder className="w-3 h-3 text-muted" />
-                    <span className="truncate text-[13px] font-mono text-tertiary">{displayedRepoPath}</span>
-                  </div>
-                )}
-                {!editingCentralRepoPath && (
-                  <button
-                    type="button"
-                    onClick={handleStartEditCentralRepoPath}
-                    className={`${actionButtonClass} text-muted hover:text-secondary`}
-                  >
-                    <Pencil className="w-3 h-3" />
-                    {t("settings.changeDir")}
-                  </button>
-                )}
-                {!editingCentralRepoPath && centralRepoPathOverride && (
-                  <button
-                    type="button"
-                    onClick={() => void handleResetCentralRepoPath()}
-                    disabled={savingCentralRepoPath}
-                    className={`${actionButtonClass} text-muted hover:text-secondary`}
-                  >
-                    {savingCentralRepoPath ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <RotateCcw className="w-3 h-3" />
-                    )}
-                    {t("settings.resetPath")}
-                  </button>
-                )}
                 <button
                   type="button"
-                  onClick={handleOpenRepoInFinder}
-                  disabled={openingRepo}
-                  className={cn(
-                    actionButtonClass,
-                    "border-accent-border bg-accent-bg text-accent",
-                    "hover:border-accent hover:bg-accent-bg",
-                    openingRepo && "cursor-wait opacity-70"
-                  )}
+                  onClick={() => void handleSaveCentralRepoPath()}
+                  disabled={savingCentralRepoPath}
+                  className={`${actionButtonClass} border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5 dark:text-emerald-400`}
                 >
-                  {openingRepo ? (
+                  {savingCentralRepoPath ? (
                     <Loader2 className="w-3 h-3 animate-spin" />
                   ) : (
-                    <ExternalLink className="w-3 h-3" />
+                    <Check className="w-3 h-3" />
                   )}
-                  {t("settings.openInFinder")}
-                </button>
-              </div>
-              <div className="w-full text-[12px] text-muted">
-                {centralRepoPathOverride
-                  ? t("settings.repoPathCustomHint")
-                  : t("settings.repoPathDefaultHint")}
-              </div>
-            </div>
-
-            {/* Sync mode */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[14px] font-semibold text-primary">{t("settings.syncMode")}</h3>
-                <p className="mt-0.5 text-[12px] text-muted">{t("settings.syncModeDesc")}</p>
-              </div>
-              <div className="app-segmented flex-wrap bg-background">
-                <button
-                  onClick={() => handleSyncModeChange("symlink")}
-                  className={cn(
-                    segmentedButtonClass,
-                    syncMode === "symlink" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
-                >
-                  <LinkIcon className="w-3 h-3" /> {t("settings.symlink")}
+                  {t("common.save")}
                 </button>
                 <button
-                  onClick={() => handleSyncModeChange("copy")}
-                  className={cn(
-                    segmentedButtonClass,
-                    syncMode === "copy" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
-                  )}
+                  type="button"
+                  onClick={() => {
+                    setCentralRepoPathInput(centralRepoPathOverride ?? centralRepoPath);
+                    setEditingCentralRepoPath(false);
+                  }}
+                  disabled={savingCentralRepoPath}
+                  className={`${actionButtonClass} text-muted hover:text-secondary`}
                 >
-                  <Copy className="w-3 h-3" /> {t("settings.copy")}
+                  <X className="w-3 h-3" />
                 </button>
               </div>
-            </div>
-
-            {/* Theme */}
-            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[14px] font-semibold text-primary">{t("settings.theme")}</h3>
-                <p className="mt-0.5 text-[12px] text-muted">{t("settings.themeDesc")}</p>
+            ) : (
+              <div className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                <Folder className="w-3 h-3 text-muted" />
+                <span className="truncate text-[13px] font-mono text-tertiary">{displayedRepoPath}</span>
               </div>
-              <div className="app-segmented flex-wrap bg-background">
-                {themeOptions.map((opt) => {
-                  const Icon = opt.icon;
-                  return (
+            )}
+            {!editingCentralRepoPath && (
+              <button
+                type="button"
+                onClick={handleStartEditCentralRepoPath}
+                className={`${actionButtonClass} text-muted hover:text-secondary`}
+              >
+                <Pencil className="w-3 h-3" />
+                {t("settings.changeDir")}
+              </button>
+            )}
+            {!editingCentralRepoPath && centralRepoPathOverride && (
+              <button
+                type="button"
+                onClick={() => void handleResetCentralRepoPath()}
+                disabled={savingCentralRepoPath}
+                className={`${actionButtonClass} text-muted hover:text-secondary`}
+              >
+                {savingCentralRepoPath ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3 h-3" />
+                )}
+                {t("settings.resetPath")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleOpenRepoInFinder}
+              disabled={openingRepo}
+              className={cn(
+                actionButtonClass,
+                "border-accent-border bg-accent-bg text-accent",
+                "hover:border-accent hover:bg-accent-bg",
+                openingRepo && "cursor-wait opacity-70"
+              )}
+            >
+              {openingRepo ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <ExternalLink className="w-3 h-3" />
+              )}
+              {t("settings.openInFinder")}
+            </button>
+          </div>
+          <div className="w-full text-[12px] text-muted">
+            {centralRepoPathOverride
+              ? t("settings.repoPathCustomHint")
+              : t("settings.repoPathDefaultHint")}
+          </div>
+        </div>
+
+        {/* Sync mode */}
+        <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[14px] font-semibold text-primary">{t("settings.syncMode")}</h3>
+            <p className="mt-0.5 text-[12px] text-muted">{t("settings.syncModeDesc")}</p>
+          </div>
+          <div className="app-segmented flex-wrap bg-background">
+            <button
+              onClick={() => handleSyncModeChange("symlink")}
+              className={cn(
+                segmentedButtonClass,
+                syncMode === "symlink" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
+              )}
+            >
+              <LinkIcon className="w-3 h-3" /> {t("settings.symlink")}
+            </button>
+            <button
+              onClick={() => handleSyncModeChange("copy")}
+              className={cn(
+                segmentedButtonClass,
+                syncMode === "copy" ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
+              )}
+            >
+              <Copy className="w-3 h-3" /> {t("settings.copy")}
+            </button>
+          </div>
+        </div>
+
+        {/* Theme */}
+        <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[14px] font-semibold text-primary">{t("settings.theme")}</h3>
+            <p className="mt-0.5 text-[12px] text-muted">{t("settings.themeDesc")}</p>
+          </div>
+          <div className="app-segmented flex-wrap bg-background">
+            {themeOptions.map((opt) => {
+              const Icon = opt.icon;
+
+
+  return (
                     <button
                       key={opt.value}
                       onClick={() => setTheme(opt.value)}
@@ -1585,9 +1583,10 @@ export function Settings() {
             </div>
           </div>
         </section>
+  );
 
-        {/* Proxy config */}
-        <section>
+  const networkSection = (
+    <section className="settings-network">
           <h2 className="app-section-title mb-3">
             {t("settings.proxyConfig")}
           </h2>
@@ -1619,9 +1618,10 @@ export function Settings() {
             </div>
           </div>
         </section>
+  );
 
-        {/* Skill auto-update */}
-        <section>
+  const updatesSection = (
+    <section className="settings-updates">
           <h2 className="app-section-title mb-3">
             {t("settings.autoUpdate.title")}
           </h2>
@@ -1713,9 +1713,10 @@ export function Settings() {
             />
           </div>
         </section>
+  );
 
-        {/* Git sync config */}
-        <section>
+  const gitSection = (
+    <section className="settings-git">
           <h2 className="app-section-title mb-3">
             {t("settings.gitSyncConfig")}
           </h2>
@@ -1814,9 +1815,10 @@ export function Settings() {
             </div>
           </div>
         </section>
+  );
 
-        {/* About */}
-        <section className="space-y-2">
+  const aboutSection = (
+    <section className="settings-about space-y-2">
           {repoWarnings.length > 0 && (
             <div className="app-panel flex flex-wrap items-start gap-2 p-3 border border-amber-500/40 bg-amber-500/10">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-700 dark:text-amber-300" />
@@ -1857,7 +1859,7 @@ export function Settings() {
               </div>
             </div>
           )}
-          <div className="app-panel flex flex-wrap items-start justify-between gap-3 p-4">
+          <div className="settings-about-card app-panel flex flex-wrap items-start justify-between gap-3 p-4">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-surface-hover border border-border flex items-center justify-center">
                 <Settings2 className="w-4 h-4 text-accent" />
@@ -1976,7 +1978,15 @@ export function Settings() {
             </div>
           </div>
         </section>
-      </div>
-    </div>
+  );
+
+  return (
+    <SettingsPage
+      header={<h1 className="app-page-title flex items-center gap-2"><Settings2 />{t("settings.title")}</h1>}
+      general={generalSection}
+      agents={agentsSection}
+      connections={<>{networkSection}{gitSection}</>}
+      about={<>{aboutSection}{updatesSection}</>}
+    />
   );
 }

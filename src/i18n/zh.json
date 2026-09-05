@@ -96,7 +96,7 @@
   },
   "agentManagement": {
     "title": "Agent 管理 Skills",
-    "subtitle": "把管理 Skill 与部署目标分开查看。",
+    "subtitle": "选择哪些 Agent 可以帮你管理中央技能库。",
     "deployedCount": "{{count}} 个已部署",
     "skillLabel": "管理 Skill",
     "trustedStatus": "来源可信",
@@ -109,12 +109,11 @@
     "currentDeployments": "当前部署",
     "pendingChanges": "待处理",
     "metricLabel": "{{label}} {{count}}",
-    "targetsTitle": "部署目标",
-    "targetsDescription": "选择可以直接管理 Skills 的 Agent",
+    "targetsTitle": "选择 Agent",
+    "targetsDescription": "勾选只会形成草稿，点击「应用更改」后生效。",
     "searchPlaceholder": "搜索 {{count}} 个 Agent",
     "clearSearch": "清空 Agent 搜索",
     "filterAll": "全部 {{count}}",
-    "filterDeployed": "已部署 {{count}}",
     "filterAvailable": "可启用 {{count}}",
     "filterAttention": "需处理 {{count}}",
     "noResults": "没有符合当前搜索与筛选条件的 Agent",
@@ -134,7 +133,11 @@
     "failureSummary": "{{names}} 配置失败，可重试。",
     "retryFailed": "重试失败项",
     "retrySuccess": "失败项已重试完成。",
-    "errorNotFound": "管理 Skill 安装完成后仍未在技能库中找到。"
+    "errorNotFound": "管理 Skill 安装完成后仍未在技能库中找到。",
+    "filterSelected": "已选择 {{count}}",
+    "pendingEnableStatus": "待启用 · 应用后生效",
+    "pendingDisableStatus": "待撤销 · 应用后生效",
+    "sourceDetails": "查看管理 Skill 详情"
   },
   "plugins": {
     "title": "Codex 插件检查器",
@@ -1039,7 +1042,28 @@
     "trayIconDesc": "在系统托盘中显示图标，便于快速执行显示和退出操作。",
     "trayIcon_on": "显示",
     "trayIcon_off": "隐藏",
-    "trayIconOffHint": "托盘图标已隐藏，关闭窗口时将直接退出应用。"
+    "trayIconOffHint": "托盘图标已隐藏，关闭窗口时将直接退出应用。",
+    "tabs": {
+      "label": "设置分类",
+      "general": "通用",
+      "agents": "Agent",
+      "connections": "连接与同步",
+      "about": "更新与关于"
+    },
+    "agentPurpose": {
+      "label": "Agent 设置用途",
+      "sync": "同步技能到 Agent",
+      "syncDescription": "选择哪些 Agent 接收和使用你的技能",
+      "managementDescription": "让 Agent 帮你管理中央技能库",
+      "immediate": "开关立即生效",
+      "immediateDescription": "开启后同步当前 Preset 的技能；关闭会撤下该 Agent 的已同步技能，中央技能库中的内容保留。",
+      "apply": "选择后，点击「应用更改」",
+      "applyDescription": "给选中的 Agent 部署 manage-skills，让它帮你安装、更新和部署技能。切换本页入口不会丢失待应用的选择。",
+      "paths": "目录设置",
+      "pathsLabel": "{{name}} 的目录设置",
+      "globalPathLabel": "{{name}} 的全局技能目录",
+      "projectPathLabel": "{{name}} 的项目技能目录"
+    }
   },
   "closeAction": {
     "title": "关闭行为",
