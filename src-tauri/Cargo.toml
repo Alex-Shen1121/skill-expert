@@ -20,6 +20,7 @@ tauri-build = { version = "2.5.4", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22"
 log = "0.4"
 tauri = { version = "2.10.0", features = ["tray-icon"] }
 tauri-plugin-log = "2"
@@ -57,5 +58,16 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "6.1.1"
 clap = { version = "4.5", features = ["derive"] }
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27.1", features = ["fs", "process", "signal"] }
+
 [target.'cfg(windows)'.dependencies]
 junction = "2"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+] }

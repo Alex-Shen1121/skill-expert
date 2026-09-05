@@ -51,3 +51,60 @@ test('稳定文件名重新签名复用构建阶段生成的同一临时私钥',
     /echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$TEST_KEY_PASSWORD" >> "\$GITHUB_ENV"/,
   );
 });
+
+test('Windows 与 Linux 在构建不可晋级测试包前运行受控进程 fixture', () => {
+  const builder = readFileSync(
+    path.join(repositoryRoot, '.github/workflows/test-package-build.yml'),
+    'utf8',
+  );
+  const testStep = builder.indexOf('- name: 运行受控进程跨平台测试');
+  const cliBuildStep = builder.indexOf('- name: 构建独立 CLI');
+
+  assert.ok(testStep > 0);
+  assert.ok(testStep < cliBuildStep);
+  assert.match(
+    builder.slice(testStep, cliBuildStep),
+    /if: runner\.os == 'Windows' \|\| runner\.os == 'Linux'/,
+  );
+  assert.match(
+    builder.slice(testStep, cliBuildStep),
+    /cargo test --locked[\s\S]*--target "\$\{\{ matrix\.rust_target \}\}"[\s\S]*core::process_runner::tests/,
+  );
+});
+
+test('手工入口提供不产包且不可晋级的 Windows 与 Linux 进程验证模式', () => {
+  const manual = readFileSync(
+    path.join(repositoryRoot, '.github/workflows/manual-test-package.yml'),
+    'utf8',
+  );
+  const validationStart = manual.indexOf('  validate-process-runner:');
+  const packageStart = manual.indexOf('  manual-package:');
+  const validationJob = manual.slice(validationStart, packageStart);
+
+  assert.ok(validationStart > 0);
+  assert.ok(packageStart > validationStart);
+  assert.match(manual, /validation_only:[\s\S]*type: boolean/);
+  assert.match(validationJob, /if: inputs\.validation_only == true/);
+  assert.match(validationJob, /runner: \[windows-latest, ubuntu-22\.04\]/);
+  assert.match(validationJob, /PROMOTABLE: ['\"]false['\"]/);
+  assert.match(
+    validationJob,
+    /cargo test --locked[\s\S]*core::process_runner::tests/,
+  );
+  assert.match(
+    validationJob,
+    /cargo check --locked[\s\S]*--all-targets/,
+  );
+  assert.doesNotMatch(
+    validationJob,
+    /tauri(?:\s+--)?\s+build|upload-artifact|gh release|git tag|workflow_call/,
+  );
+  assert.match(
+    manual,
+    /select-targets:[\s\S]*if: inputs\.validation_only == false/,
+  );
+  assert.match(
+    manual.slice(packageStart),
+    /if: inputs\.validation_only == false[\s\S]*uses: \.\/\.github\/workflows\/test-package-build\.yml/,
+  );
+});

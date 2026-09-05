@@ -1,3 +1,4 @@
+pub mod agent_plugins;
 pub mod agent_workspace;
 pub mod browse;
 pub mod existing_install_import;

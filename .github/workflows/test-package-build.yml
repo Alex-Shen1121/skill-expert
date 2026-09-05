@@ -101,6 +101,15 @@ jobs:
             --write-keys "$TEST_KEY_PATH"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TEST_KEY_PASSWORD" >> "$GITHUB_ENV"
 
+      - name: 运行受控进程跨平台测试
+        if: runner.os == 'Windows' || runner.os == 'Linux'
+        shell: bash
+        run: >-
+          cargo test --locked
+          --manifest-path src-tauri/Cargo.toml
+          --target "${{ matrix.rust_target }}"
+          core::process_runner::tests
+
       - name: 构建独立 CLI
         shell: bash
         run: >-

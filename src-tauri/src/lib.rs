@@ -31,6 +31,33 @@ const TRAY_OPEN_FOLDER_ID: &str = "tray-open-folder";
 const TRAY_CHECK_UPDATES_ID: &str = "tray-check-updates";
 const TRAY_OPEN_UPDATES_EVENT: &str = "tray-open-updates";
 
+#[cfg(all(debug_assertions, target_os = "macos"))]
+const ACCEPTANCE_DATA_STORE_IDENTIFIER: [u8; 16] = [
+    19, 50, 81, 112, 143, 174, 205, 236, 12, 43, 74, 105, 136, 167, 198, 229,
+];
+
+#[cfg(debug_assertions)]
+fn ensure_debug_acceptance_window(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("SKILL_EXPERT_ACCEPTANCE_ROOT").is_none() {
+        return Ok(());
+    }
+    if app.get_webview_window("main").is_some() {
+        return Err(std::io::Error::other("验收配置必须禁止自动创建主窗口").into());
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .ok_or_else(|| std::io::Error::other("验收配置缺少主窗口模板"))?;
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    #[cfg(target_os = "macos")]
+    let builder = builder.data_store_identifier(ACCEPTANCE_DATA_STORE_IDENTIFIER);
+    builder.build()?;
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 const CUSTOM_TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray/tray-icon-32.png");
 #[cfg(not(target_os = "macos"))]
@@ -882,6 +909,10 @@ fn teardown_before_exit(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(debug_assertions)]
+    core::central_repo::configure_debug_acceptance_root_from_environment()
+        .expect("无法配置 debug 验收状态根");
+
     let pre_builder_start = Instant::now();
     let (store, startup_timings) =
         core::app_state::initialize_store().expect("Failed to initialize app state");
@@ -903,6 +934,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            #[cfg(debug_assertions)]
+            ensure_debug_acceptance_window(app)?;
+
             // Snapshot the builder->setup gap BEFORE doing any work in setup,
             // so the label reflects only the time Tauri spent constructing
             // the App between Builder::default() and invoking this callback.
@@ -1066,6 +1100,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Agent plugins
+            commands::agent_plugins::get_agent_plugin_projection,
+            commands::agent_plugins::get_codex_cli_configuration,
+            commands::agent_plugins::validate_codex_cli_path,
+            commands::agent_plugins::set_codex_cli_path,
+            commands::agent_plugins::reset_codex_cli_path,
             // Tools
             commands::tools::get_tool_status,
             commands::tools::set_tool_enabled,

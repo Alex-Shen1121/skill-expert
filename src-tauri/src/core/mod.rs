@@ -1,3 +1,4 @@
+pub mod agent_plugin_catalog;
 pub mod app_state;
 pub mod audit_log;
 pub mod auto_backup;
@@ -21,6 +22,7 @@ pub mod migrations;
 pub mod panic_log;
 pub mod path_guard;
 pub mod pending_removal;
+pub mod process_runner;
 pub mod project_scanner;
 pub mod removals;
 pub mod repo_lock;

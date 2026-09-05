@@ -92,17 +92,33 @@ fn default_base_dir() -> PathBuf {
 /// Agent 必须在无需读取应用设置的情况下找到 CLI，因此桥接文件使用这里，
 /// 中央技能库仍继续使用可迁移的 [`base_dir`]。
 pub fn home_base_dir() -> PathBuf {
+    runtime_home_dir().join(DEFAULT_BASE_DIR_NAME)
+}
+
+/// 运行时使用的应用主目录。正常构建跟随系统用户目录；隔离验收只重定向应用自有状态。
+pub(crate) fn runtime_home_dir() -> PathBuf {
     if let Some(path) = HOME_DIR_OVERRIDE
         .get_or_init(|| Mutex::new(None))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
     {
-        return path.join(DEFAULT_BASE_DIR_NAME);
+        return path;
     }
-    dirs::home_dir()
-        .expect("Cannot determine home directory")
-        .join(DEFAULT_BASE_DIR_NAME)
+    dirs::home_dir().expect("Cannot determine home directory")
+}
+
+/// 运行时控制文件目录；隔离验收不得触碰当前用户的应用配置与进程锁。
+pub(crate) fn runtime_config_dir() -> PathBuf {
+    if HOME_DIR_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+    {
+        return runtime_home_dir().join(".config");
+    }
+    dirs::config_dir().unwrap_or_else(|| runtime_home_dir().join(".config"))
 }
 
 #[cfg(test)]
@@ -114,10 +130,42 @@ pub(crate) fn set_test_home_dir_override(path: Option<PathBuf>) {
 }
 
 fn config_file_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(default_base_dir)
+    runtime_config_dir()
         .join(CONFIG_DIR_NAME)
         .join(CONFIG_FILE_NAME)
+}
+
+/// 为 debug 验收进程设置专用应用状态根；不会改写进程的 HOME 或 Codex 用户目录。
+pub(crate) fn configure_debug_acceptance_root(root: Option<PathBuf>) -> Result<()> {
+    match root {
+        Some(root) => {
+            anyhow::ensure!(root.is_absolute(), "验收状态根必须是绝对路径");
+            fs::create_dir_all(&root)?;
+            let root = root.canonicalize()?;
+            anyhow::ensure!(root.is_dir(), "验收状态根必须是目录");
+            set_runtime_base_dir_override(Some(root.join("state")));
+            *HOME_DIR_OVERRIDE
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(root.join("home"));
+        }
+        None => {
+            set_runtime_base_dir_override(None);
+            *HOME_DIR_OVERRIDE
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn configure_debug_acceptance_root_from_environment() -> Result<()> {
+    let Some(root) = std::env::var_os("SKILL_EXPERT_ACCEPTANCE_ROOT") else {
+        return Ok(());
+    };
+    configure_debug_acceptance_root(Some(PathBuf::from(root)))
 }
 
 /// Distinguishes "no config file" (normal fresh install) from "config file
@@ -646,6 +694,24 @@ mod tests {
         set_test_base_dir_override(Some(isolated_base.clone()));
         assert_eq!(db_path(), isolated_base.join("skill-expert.db"));
         set_test_base_dir_override(None);
+    }
+
+    #[test]
+    fn debug_acceptance_root_isolates_app_owned_state_without_changing_process_home() {
+        let _guard = test_base_dir_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let expected_root = temp.path().canonicalize().unwrap();
+
+        configure_debug_acceptance_root(Some(temp.path().to_path_buf())).unwrap();
+
+        assert_eq!(base_dir(), expected_root.join("state"));
+        assert_eq!(db_path(), expected_root.join("state/skill-expert.db"));
+        assert_eq!(runtime_home_dir(), expected_root.join("home"));
+        assert_eq!(runtime_config_dir(), expected_root.join("home/.config"));
+        assert_eq!(home_base_dir(), expected_root.join("home/.skill-expert"));
+        assert_ne!(runtime_home_dir(), dirs::home_dir().unwrap());
+
+        configure_debug_acceptance_root(None).unwrap();
     }
 
     // ── migrate_repo_if_needed (#252) ──
