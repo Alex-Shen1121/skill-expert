@@ -17,6 +17,37 @@ struct CompletedCommandAdapter {
 
 struct TimedOutCommandAdapter;
 
+struct RemoteInstalledFixtureAdapter {
+    catalog_stdout: &'static [u8],
+    installed_result: Result<&'static [u8], AgentPluginCatalogError>,
+}
+
+struct InstalledOnlyFixtureAdapter {
+    installed: &'static [u8],
+}
+
+impl CatalogAdapter for RemoteInstalledFixtureAdapter {
+    fn read(&self) -> Result<CatalogCommandOutput, AgentPluginCatalogError> {
+        Ok(CatalogCommandOutput {
+            stdout: self.catalog_stdout.to_vec(),
+        })
+    }
+
+    fn read_installed(&self) -> Option<Result<Vec<u8>, AgentPluginCatalogError>> {
+        Some(self.installed_result.clone().map(ToOwned::to_owned))
+    }
+}
+
+impl CatalogAdapter for InstalledOnlyFixtureAdapter {
+    fn read(&self) -> Result<CatalogCommandOutput, AgentPluginCatalogError> {
+        Err(catalog_error(AgentPluginCatalogErrorKind::TimedOut, None))
+    }
+
+    fn read_installed(&self) -> Option<Result<Vec<u8>, AgentPluginCatalogError>> {
+        Some(Ok(self.installed.to_vec()))
+    }
+}
+
 impl CatalogAdapter for TimedOutCommandAdapter {
     fn read(&self) -> Result<CatalogCommandOutput, AgentPluginCatalogError> {
         Err(codex::classify_process_error(
@@ -349,7 +380,7 @@ fn manifest_screenshots_are_returned_only_after_safe_image_validation() {
 
 #[cfg(unix)]
 #[test]
-fn unsafe_visual_resources_fall_back_per_plugin_without_reducing_the_cli_collection() {
+fn unsafe_visual_resources_fall_back_without_reducing_detail_completeness() {
     use std::os::unix::fs::symlink;
 
     let temp = tempfile::tempdir().unwrap();
@@ -461,21 +492,17 @@ fn unsafe_visual_resources_fall_back_per_plugin_without_reducing_the_cli_collect
     };
 
     assert_eq!(installed.len(), 8);
-    for (id, _, expected_issue) in cases {
+    for (id, _, _) in cases {
         let plugin = installed
             .iter()
             .find(|plugin| plugin.identity.plugin_id == id)
             .unwrap();
         assert_eq!(
             plugin.details.completeness,
-            AgentPluginDetailsCompleteness::Incomplete
+            AgentPluginDetailsCompleteness::Complete
         );
         assert!(plugin.details.icon_data_url.is_none());
-        assert!(
-            plugin.details.issues.contains(&expected_issue),
-            "{id} 应包含 {expected_issue:?}，实际为 {:?}",
-            plugin.details.issues
-        );
+        assert!(plugin.details.issues.is_empty());
     }
     let healthy = installed
         .iter()
@@ -654,7 +681,7 @@ fn malformed_mcp_wrapper_degrades_only_details_and_default_hook_files_are_not_in
 }
 
 #[test]
-fn safe_logo_can_replace_an_unsafe_composer_icon_without_hiding_the_warning() {
+fn safe_logo_can_replace_an_unsafe_composer_icon_without_marking_details_incomplete() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("plugin");
     std::fs::create_dir_all(root.join(".codex-plugin")).unwrap();
@@ -700,11 +727,9 @@ fn safe_logo_can_replace_an_unsafe_composer_icon_without_hiding_the_warning() {
         .is_some_and(|value| value.starts_with("data:image/png;base64,")));
     assert_eq!(
         details.completeness,
-        AgentPluginDetailsCompleteness::Incomplete
+        AgentPluginDetailsCompleteness::Complete
     );
-    assert!(details
-        .issues
-        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+    assert!(details.issues.is_empty());
 }
 
 #[test]
@@ -745,11 +770,9 @@ fn image_dimensions_are_bounded_even_when_the_png_file_is_small() {
     assert!(details.icon_data_url.is_none());
     assert_eq!(
         details.completeness,
-        AgentPluginDetailsCompleteness::Incomplete
+        AgentPluginDetailsCompleteness::Complete
     );
-    assert!(details
-        .issues
-        .contains(&AgentPluginDetailsIssue::ResourceRejected));
+    assert!(details.issues.is_empty());
 }
 
 #[test]
@@ -930,6 +953,227 @@ fn one_snapshot_preserves_every_identity_and_maps_installed_states() {
             }],
         )
     );
+}
+
+#[test]
+fn app_server_installed_state_replaces_the_cli_subset_and_keeps_available_plugins() {
+    let catalog = r#"{
+      "installed":[{
+        "pluginId":"local-only","name":"本地子集","marketplaceName":"openai-bundled",
+        "version":"1.0.0","installed":true,"enabled":true
+      }],
+      "available":[{
+        "pluginId":"available-only","name":"可安装插件","marketplaceName":"marketplace",
+        "version":"2.0.0","installed":false,"enabled":false
+      }]
+    }"#
+    .as_bytes();
+    let installed = r#"{
+      "marketplaces":[{
+        "name":"openai-curated-remote","path":null,"interface":null,"plugins":[
+          {
+            "id":"github@openai-curated-remote","remotePluginId":"github","version":"1.2.3",
+            "localVersion":"1.2.2","name":"github","source":{"type":"remote"},
+            "installed":true,"enabled":true,"installPolicy":"AVAILABLE","authPolicy":"ON_USE",
+            "interface":{
+              "displayName":"GitHub","shortDescription":"处理仓库和拉取请求",
+              "longDescription":"读取 GitHub 仓库并处理拉取请求。","developerName":"GitHub",
+              "category":"Developer Tools","capabilities":["Read","Write"],
+              "defaultPrompt":["检查我的拉取请求"],
+              "composerIconUrl":"https://example.com/github.png","logoUrl":null
+            }
+          },
+          {
+            "id":"vercel@openai-curated-remote","remotePluginId":"vercel","version":"0.21.4",
+            "localVersion":"0.21.4","name":"vercel","source":{"type":"remote"},
+            "installed":true,"enabled":true,"installPolicy":"AVAILABLE","authPolicy":"ON_INSTALL",
+            "interface":{"displayName":"Vercel","logoUrl":"https://example.com/vercel.png"}
+          }
+        ]
+      }],
+      "marketplaceLoadErrors":[]
+    }"#
+    .as_bytes();
+
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &RemoteInstalledFixtureAdapter {
+            catalog_stdout: catalog,
+            installed_result: Ok(installed),
+        },
+    );
+
+    let AgentPluginProjection::Ready {
+        installed,
+        available,
+        installed_complete,
+        available_complete,
+        ..
+    } = projection
+    else {
+        panic!("合法的 App Server 已安装状态应生成就绪投影");
+    };
+    assert!(installed_complete);
+    assert!(available_complete);
+    assert_eq!(
+        installed
+            .iter()
+            .map(|plugin| plugin.identity.plugin_id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "github@openai-curated-remote",
+            "vercel@openai-curated-remote"
+        ]
+    );
+    assert_eq!(available[0].identity.plugin_id, "available-only");
+    assert_eq!(installed[0].display_name, "GitHub");
+    assert_eq!(installed[0].version.as_deref(), Some("1.2.2"));
+    assert_eq!(installed[0].details.developer.as_deref(), Some("GitHub"));
+    assert_eq!(
+        installed[0].details.icon_url.as_deref(),
+        Some("https://example.com/github.png")
+    );
+}
+
+#[test]
+fn app_server_failure_preserves_the_cli_subset_as_an_explicit_partial_projection() {
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &RemoteInstalledFixtureAdapter {
+            catalog_stdout: br#"{
+              "installed":[{"pluginId":"local-only","marketplaceName":"bundled","installed":true,"enabled":true}],
+              "available":[]
+            }"#,
+            installed_result: Err(catalog_error(AgentPluginCatalogErrorKind::TimedOut, None)),
+        },
+    );
+
+    assert!(matches!(
+        projection,
+        AgentPluginProjection::Ready {
+            installed,
+            installed_complete: false,
+            available_complete: true,
+            ..
+        } if installed.len() == 1 && installed[0].identity.plugin_id == "local-only"
+    ));
+}
+
+#[test]
+fn cli_catalog_failure_preserves_the_app_server_installed_collection() {
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &InstalledOnlyFixtureAdapter {
+            installed: br#"{
+              "marketplaces":[{"name":"openai-curated-remote","plugins":[{
+                "id":"github@openai-curated-remote","name":"github","source":{"type":"remote"},
+                "installed":true,"enabled":true,"interface":{"displayName":"GitHub"}
+              }]}],
+              "marketplaceLoadErrors":[]
+            }"#,
+        },
+    );
+
+    assert!(matches!(
+        projection,
+        AgentPluginProjection::Ready {
+            installed,
+            available,
+            installed_complete: true,
+            available_complete: false,
+            ..
+        }
+          if installed.len() == 1
+            && installed[0].identity.plugin_id == "github@openai-curated-remote"
+            && available.is_empty()
+    ));
+}
+
+#[test]
+fn app_server_identity_keeps_matching_cli_manifest_details_for_local_plugins() {
+    let projection = get_agent_plugin_projection_with_adapter(
+        AgentPluginAgent::Codex,
+        &RemoteInstalledFixtureAdapter {
+            catalog_stdout: br#"{
+              "installed":[{"pluginId":"local@bundled","marketplaceName":"bundled","installed":true,"enabled":true}],
+              "available":[]
+            }"#,
+            installed_result: Ok(br#"{
+              "marketplaces":[{"name":"bundled","plugins":[{
+                "id":"local@bundled","name":"local","source":{"type":"local"},
+                "installed":true,"enabled":true,"interface":{"longDescription":"summary"}
+              }]}],
+              "marketplaceLoadErrors":[]
+            }"#),
+        },
+    );
+
+    let AgentPluginProjection::Ready { installed, .. } = projection else {
+        panic!("匹配的本地身份应保留就绪投影");
+    };
+    assert_eq!(
+        installed[0].details.issues,
+        [AgentPluginDetailsIssue::PluginRootUnavailable]
+    );
+    assert_eq!(installed[0].details.technical.source_type, None);
+}
+
+#[test]
+fn app_server_plugin_read_returns_complete_remote_components_without_exposing_paths() {
+    let identity = AgentPluginIdentity {
+        agent: AgentPluginAgent::Codex,
+        marketplace_name: "openai-curated-remote".into(),
+        plugin_id: "vercel@openai-curated-remote".into(),
+    };
+    let response = r#"{
+      "plugin":{
+        "marketplaceName":"openai-curated-remote",
+        "marketplacePath":null,
+        "summary":{
+          "id":"vercel@openai-curated-remote","name":"vercel","source":{"type":"remote"},
+          "interface":{
+            "displayName":"Vercel","longDescription":"构建并部署应用。",
+            "developerName":"Vercel","category":"Developer Tools",
+            "capabilities":["Read","Write"],"defaultPrompt":["检查部署"],
+            "logoUrl":"https://example.com/vercel.png"
+          }
+        },
+        "description":"完整的 Vercel 插件说明。",
+        "skills":[{"name":"vercel-cli","description":"操作 Vercel CLI","path":"/secret/path"}],
+        "hooks":[{"key":"session","eventName":"SessionStart"}],
+        "apps":[{"id":"secret-app-id","name":"Vercel Connector","description":null}],
+        "appTemplates":[],
+        "mcpServers":["vercel"],
+        "scheduledTasks":null,
+        "shareUrl":null
+      }
+    }"#;
+
+    let details = parse_app_server_details(&identity, response.as_bytes()).unwrap();
+
+    assert_eq!(
+        details.completeness,
+        AgentPluginDetailsCompleteness::Complete
+    );
+    assert!(details.issues.is_empty());
+    assert_eq!(
+        details.description.as_deref(),
+        Some("完整的 Vercel 插件说明。")
+    );
+    assert_eq!(details.skills[0].name, "vercel-cli");
+    assert_eq!(details.hook_events, ["SessionStart"]);
+    assert_eq!(details.connectors, ["Vercel Connector"]);
+    assert_eq!(details.mcp_servers, ["vercel"]);
+    assert_eq!(
+        details.icon_url.as_deref(),
+        Some("https://example.com/vercel.png")
+    );
+    assert!(!serde_json::to_string(&details)
+        .unwrap()
+        .contains("/secret/path"));
+    assert!(!serde_json::to_string(&details)
+        .unwrap()
+        .contains("secret-app-id"));
 }
 
 #[test]
@@ -1205,7 +1449,7 @@ fn debug_acceptance_summary_compares_raw_and_projected_identities_without_storin
     }"#;
     let (installed, available) = parse_projection(AgentPluginAgent::Codex, raw).unwrap();
 
-    let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
+    let evidence = acceptance::build_identity_evidence(raw, None, &installed, &available).unwrap();
 
     assert_eq!(
         (
@@ -1224,6 +1468,7 @@ fn debug_acceptance_summary_compares_raw_and_projected_identities_without_storin
         evidence.installed.projected_sha256
     );
     let serialized = serde_json::to_string(&evidence).unwrap();
+    assert!(serialized.contains("\"installed_source\":\"cli\""));
     assert!(serialized.contains("\"installed\":{\"raw_count\":1,\"projected_count\":1"));
     assert!(serialized.contains("\"available\":{\"raw_count\":1,\"projected_count\":1"));
     assert!(serialized.contains("\"all_collections_match\":true"));
@@ -1246,9 +1491,62 @@ fn debug_acceptance_summary_rejects_identities_swapped_between_status_collection
     }"#;
     let (installed, available) = parse_projection(AgentPluginAgent::Codex, swapped).unwrap();
 
-    let evidence = acceptance::build_identity_evidence(raw, &installed, &available).unwrap();
+    let evidence = acceptance::build_identity_evidence(raw, None, &installed, &available).unwrap();
 
     assert!(!evidence.installed.identities_match);
     assert!(!evidence.available.identities_match);
     assert!(!evidence.all_collections_match);
+}
+
+#[test]
+fn debug_acceptance_compares_installed_identities_to_app_server_without_a_fixed_count() {
+    let catalog = br#"{
+      "installed":[{"pluginId":"local","marketplaceName":"bundled","installed":true,"enabled":true}],
+      "available":[{"pluginId":"available","marketplaceName":"market","installed":false,"enabled":false}]
+    }"#;
+    let app_server = br#"{
+      "marketplaces":[{"name":"remote","plugins":[
+        {"id":"github@remote"},{"id":"vercel@remote"}
+      ]}],
+      "marketplaceLoadErrors":[]
+    }"#;
+    let installed = vec![
+        AgentPluginSummary {
+            identity: AgentPluginIdentity {
+                agent: AgentPluginAgent::Codex,
+                marketplace_name: "remote".into(),
+                plugin_id: "github@remote".into(),
+            },
+            display_name: "GitHub".into(),
+            version: None,
+            install_status: AgentPluginInstallStatus::InstalledEnabled,
+            update_available: None,
+            install_policy: None,
+            auth_policy: None,
+            details: AgentPluginDetails::default(),
+        },
+        AgentPluginSummary {
+            identity: AgentPluginIdentity {
+                agent: AgentPluginAgent::Codex,
+                marketplace_name: "remote".into(),
+                plugin_id: "vercel@remote".into(),
+            },
+            display_name: "Vercel".into(),
+            version: None,
+            install_status: AgentPluginInstallStatus::InstalledEnabled,
+            update_available: None,
+            install_policy: None,
+            auth_policy: None,
+            details: AgentPluginDetails::default(),
+        },
+    ];
+    let (_, available) = parse_projection(AgentPluginAgent::Codex, catalog).unwrap();
+
+    let evidence =
+        acceptance::build_identity_evidence(catalog, Some(app_server), &installed, &available)
+            .unwrap();
+
+    assert_eq!(evidence.installed_source, "app_server");
+    assert_eq!(evidence.installed.raw_count, 2);
+    assert!(evidence.all_collections_match);
 }

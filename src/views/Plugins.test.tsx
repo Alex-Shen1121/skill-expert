@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n, { i18nReady } from "../i18n";
@@ -19,6 +19,7 @@ type ReadyProjectionWithViewItems = Omit<
 
 const apiMocks = vi.hoisted(() => ({
   getAgentPluginProjection: vi.fn(),
+  getAgentPluginDetails: vi.fn(),
 }));
 
 function deferred<T>() {
@@ -62,12 +63,14 @@ const incompleteDetails: AgentPluginDetails = {
 vi.mock("../lib/agentPlugins", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/agentPlugins")>()),
   getAgentPluginProjection: apiMocks.getAgentPluginProjection,
+  getAgentPluginDetails: apiMocks.getAgentPluginDetails,
 }));
 
 const projection: ReadyProjectionWithViewItems = {
   read_status: "ready",
   agent: "codex",
   refreshed_at_unix_ms: 1_788_537_600_000,
+  installed_complete: true,
   installed: [
     {
       identity: {
@@ -145,6 +148,11 @@ beforeAll(async () => {
 beforeEach(async () => {
   await i18n.changeLanguage("zh");
   apiMocks.getAgentPluginProjection.mockResolvedValue(projection);
+  apiMocks.getAgentPluginDetails.mockResolvedValue({
+    read_status: "error",
+    identity: projection.installed[0].identity,
+    error: { kind: "internal" },
+  });
 });
 
 afterEach(() => {
@@ -153,6 +161,140 @@ afterEach(() => {
 });
 
 describe("Plugins 可信基础快照", () => {
+  it("远程插件进入已安装全集，并在选择后按需读取详情与降级失效图标", async () => {
+    const remoteDetails = {
+      ...completeDetails,
+      description: "GitHub 完整远程详情",
+      skills: [{ name: "pull-request", description: "检查拉取请求" }],
+      icon_url: "https://example.com/github.png",
+      technical: { source_type: "remote", location: null },
+    };
+    const remoteProjection: ReadyProjectionWithViewItems = {
+      ...projection,
+      installed: [
+        {
+          ...projection.installed[0],
+          identity: {
+            agent: "codex",
+            marketplace_name: "openai-curated-remote",
+            plugin_id: "github@openai-curated-remote",
+          },
+          display_name: "GitHub",
+          details: {
+            ...incompleteDetails,
+            icon_url: "https://example.com/github.png",
+            technical: { source_type: "remote", location: null },
+          },
+        },
+        {
+          ...projection.installed[0],
+          identity: {
+            agent: "codex",
+            marketplace_name: "openai-curated-remote",
+            plugin_id: "vercel@openai-curated-remote",
+          },
+          display_name: "Vercel",
+          details: {
+            ...incompleteDetails,
+            technical: { source_type: "remote", location: null },
+          },
+        },
+      ],
+    };
+    const detailRequest = deferred<unknown>();
+    apiMocks.getAgentPluginProjection.mockResolvedValueOnce(remoteProjection);
+    apiMocks.getAgentPluginDetails.mockReturnValueOnce(detailRequest.promise);
+
+    const view = render(<Plugins />);
+
+    expect(await screen.findByRole("option", { name: /github@openai-curated-remote/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /vercel@openai-curated-remote/ })).toBeTruthy();
+    await waitFor(() => expect(apiMocks.getAgentPluginDetails).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("正在读取完整插件详情")).toBeTruthy();
+    detailRequest.resolve({
+      read_status: "ready",
+      identity: remoteProjection.installed[0].identity,
+      details: remoteDetails,
+    });
+    expect(await screen.findByText("GitHub 完整远程详情")).toBeTruthy();
+    expect(apiMocks.getAgentPluginDetails).toHaveBeenCalledWith(
+      remoteProjection.installed[0].identity,
+    );
+    const details = screen.getByRole("complementary", { name: "插件详情" });
+    const mark = within(details).getByRole("img", { name: "GitHub 图标" });
+    fireEvent.error(mark.querySelector("img")!);
+    expect(within(details).getByRole("img", { name: "默认插件图标" })).toBeTruthy();
+    view.unmount();
+  });
+
+  it("远程已安装读取失败时保留本地结果并明确显示至少数量", async () => {
+    apiMocks.getAgentPluginProjection.mockResolvedValueOnce({
+      ...projection,
+      installed_complete: false,
+      installed: [projection.installed[0]],
+    });
+
+    render(<Plugins />);
+
+    expect(await screen.findByRole("tab", { name: "已安装 至少 1 个" })).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toContain("当前至少读取到 1 个插件");
+    expect(screen.getByRole("button", { name: "重试读取" })).toBeTruthy();
+  });
+
+  it("可安装目录读取失败时仍保留已安装视图并标明目录不完整", async () => {
+    const user = userEvent.setup();
+    apiMocks.getAgentPluginProjection.mockResolvedValueOnce({
+      ...projection,
+      available_complete: false,
+      available: [],
+    });
+
+    render(<Plugins />);
+
+    const availableTab = await screen.findByRole("tab", { name: "可安装 至少 0 个" });
+    await user.click(availableTab);
+    expect(screen.getByRole("note").textContent).toContain("可安装目录暂时无法读取");
+  });
+
+  it("单个远程详情失败只提示当前插件，并可独立重试", async () => {
+    const user = userEvent.setup();
+    const remotePlugin = {
+      ...projection.installed[0],
+      identity: {
+        agent: "codex" as const,
+        marketplace_name: "openai-curated-remote",
+        plugin_id: "github@openai-curated-remote",
+      },
+      display_name: "GitHub",
+      details: {
+        ...incompleteDetails,
+        technical: { source_type: "remote", location: null },
+      },
+    };
+    apiMocks.getAgentPluginProjection.mockResolvedValueOnce({
+      ...projection,
+      installed: [remotePlugin],
+    });
+    apiMocks.getAgentPluginDetails.mockResolvedValueOnce({
+      read_status: "error",
+      identity: remotePlugin.identity,
+      error: { kind: "timed_out" },
+    });
+    render(<Plugins />);
+
+    expect(await screen.findByText("完整插件详情读取失败，列表中的安装状态仍然有效。")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /github@openai-curated-remote/ })).toBeTruthy();
+    apiMocks.getAgentPluginDetails.mockResolvedValueOnce({
+      read_status: "ready",
+      identity: remotePlugin.identity,
+      details: { ...completeDetails, description: "重试后的完整详情" },
+    });
+    await user.click(screen.getByRole("button", { name: "重试详情" }));
+
+    expect(await screen.findByText("重试后的完整详情")).toBeTruthy();
+    expect(apiMocks.getAgentPluginDetails).toHaveBeenCalledTimes(2);
+  });
+
   it("把 manifest 安全详情组合进方案 B 的固定右栏", async () => {
     render(<Plugins />);
 

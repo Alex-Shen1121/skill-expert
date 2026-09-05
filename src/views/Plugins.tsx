@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CircleAlert,
   LoaderCircle,
   Puzzle,
   RefreshCw,
@@ -16,7 +17,9 @@ import {
 } from "../components/plugins/PluginDetails";
 import {
   agentPluginIdentityKey,
+  getAgentPluginDetails,
   getAgentPluginProjection,
+  type AgentPluginDetailsProjection,
   type AgentPluginProjection,
 } from "../lib/agentPlugins";
 import { agentPluginErrorMessageKey } from "../lib/agentPluginErrors";
@@ -28,6 +31,8 @@ import {
   type AgentPluginScope,
 } from "../lib/agentPluginView";
 import { cn } from "../utils";
+
+type DetailCacheEntry = { read_status: "loading" } | AgentPluginDetailsProjection;
 
 function LoadingPanel() {
   const { t } = useTranslation();
@@ -51,7 +56,12 @@ export function Plugins() {
   const [query, setQuery] = useState("");
   const [marketplace, setMarketplace] = useState("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [detailsByIdentity, setDetailsByIdentity] = useState<Map<string, DetailCacheEntry>>(
+    () => new Map(),
+  );
   const requestSequence = useRef(0);
+  const detailsGeneration = useRef(0);
+  const detailRequests = useRef(new Set<string>());
 
   const commitProjectionRequest = useCallback((
     requestId: number,
@@ -67,6 +77,9 @@ export function Plugins() {
       .then((next) => {
         if (requestSequence.current === requestId) {
           if (next.read_status === "ready") {
+            detailsGeneration.current += 1;
+            detailRequests.current.clear();
+            setDetailsByIdentity(new Map());
             setMarketplace((current) => (
               current === "all"
               || [...next.installed, ...next.available].some(
@@ -95,6 +108,7 @@ export function Plugins() {
     commitProjectionRequest(requestId, getAgentPluginProjection("codex"));
     return () => {
       requestSequence.current += 1;
+      detailsGeneration.current += 1;
     };
   }, [commitProjectionRequest]);
 
@@ -133,6 +147,61 @@ export function Plugins() {
     ) ?? null,
     [migratedSelectedKey, visiblePlugins],
   );
+  const selectedIdentityKey = selected ? agentPluginIdentityKey(selected.identity) : null;
+  const selectedDetailState = selectedIdentityKey
+    ? detailsByIdentity.get(selectedIdentityKey)
+    : undefined;
+  const selectedNeedsRemoteDetails = selected?.install_status !== "available"
+    && selected?.details.technical.source_type === "remote";
+  const scopeComplete = scope === "installed"
+    ? readyProjection?.installed_complete !== false
+    : readyProjection?.available_complete !== false;
+
+  useEffect(() => {
+    if (
+      !selected
+      || !selectedIdentityKey
+      || !selectedNeedsRemoteDetails
+      || selectedDetailState
+      || detailRequests.current.has(selectedIdentityKey)
+    ) {
+      return;
+    }
+    const generation = detailsGeneration.current;
+    detailRequests.current.add(selectedIdentityKey);
+    queueMicrotask(() => {
+      if (generation !== detailsGeneration.current) return;
+      setDetailsByIdentity((current) => new Map(current).set(
+        selectedIdentityKey,
+        { read_status: "loading" },
+      ));
+    });
+    void getAgentPluginDetails(selected.identity)
+      .catch((): AgentPluginDetailsProjection => ({
+        read_status: "error",
+        identity: selected.identity,
+        error: { kind: "internal" },
+      }))
+      .then((result) => {
+        if (generation !== detailsGeneration.current) return;
+        const matchingIdentity = agentPluginIdentityKey(result.identity) === selectedIdentityKey;
+        setDetailsByIdentity((current) => new Map(current).set(
+          selectedIdentityKey,
+          matchingIdentity
+            ? result
+            : {
+                read_status: "error",
+                identity: selected.identity,
+                error: { kind: "contract_incompatible" },
+              },
+        ));
+      });
+  }, [selected, selectedDetailState, selectedIdentityKey, selectedNeedsRemoteDetails]);
+
+  const selectedWithDetails = selected
+    && selectedDetailState?.read_status === "ready"
+    ? { ...selected, details: selectedDetailState.details }
+    : selected;
 
   const updateFilters = useCallback((next: {
     scope?: AgentPluginScope;
@@ -173,7 +242,11 @@ export function Plugins() {
     ? t(scope === "installed" ? "plugins.emptyTitle" : "plugins.emptyAvailableTitle")
     : t("plugins.noMatchesTitle");
   const emptyDescription = scopeTotal === 0
-    ? t("plugins.emptyDescription")
+    ? t(
+        scope === "available" && readyProjection?.available_complete === false
+          ? "plugins.partialAvailable"
+          : "plugins.emptyDescription",
+      )
     : t("plugins.noMatchesDescription");
   const listLabel = t(
     scope === "installed" ? "plugins.listLabel" : "plugins.availableListLabel",
@@ -264,7 +337,9 @@ export function Plugins() {
               <PluginCatalogControls
                 scope={scope}
                 installedCount={counts.installed}
+                installedComplete={projection.installed_complete !== false}
                 availableCount={counts.available}
+                availableComplete={projection.available_complete !== false}
                 query={query}
                 marketplace={marketplace}
                 marketplaces={marketplaces}
@@ -274,6 +349,25 @@ export function Plugins() {
                   marketplace: nextMarketplace,
                 })}
               />
+              {!scopeComplete && (
+                <div
+                  role="note"
+                  className="m-3 mb-0 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-800 dark:text-amber-200"
+                >
+                  <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="flex-1">
+                    {t(
+                      scope === "installed"
+                        ? "plugins.partialInstalled"
+                        : "plugins.partialAvailable",
+                      { count: counts.installed },
+                    )}
+                  </span>
+                  <button type="button" className="app-button-secondary" onClick={loadProjection}>
+                    {t("plugins.actions.retry")}
+                  </button>
+                </div>
+              )}
               <PluginList
                 plugins={visiblePlugins}
                 selectedKey={migratedSelectedKey}
@@ -283,8 +377,21 @@ export function Plugins() {
                 onSelect={setSelectedKey}
               />
             </section>
-            {selected ? (
-              <PluginDetails plugin={selected} />
+            {selectedWithDetails ? (
+              <PluginDetails
+                plugin={selectedWithDetails}
+                detailsLoading={selectedDetailState?.read_status === "loading"}
+                detailsError={selectedDetailState?.read_status === "error"}
+                onRetryDetails={() => {
+                  if (!selectedIdentityKey) return;
+                  detailRequests.current.delete(selectedIdentityKey);
+                  setDetailsByIdentity((current) => {
+                    const next = new Map(current);
+                    next.delete(selectedIdentityKey);
+                    return next;
+                  });
+                }}
+              />
             ) : (
               <aside
                 aria-label={t("plugins.detailsLabel")}

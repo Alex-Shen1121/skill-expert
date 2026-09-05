@@ -37,6 +37,10 @@ test('插件真实验收使用独立应用身份、WebView 数据和专用状态
   assert.match(runner, /\[\s*'build', '--debug', '--bundles', 'app'/s);
   assert.match(runner, /Agent 技能管家 · 插件验收\.app/);
   assert.match(runner, /Contents.*MacOS.*skill-expert/s);
+  assert.match(runner, /installed_source !== 'app_server'/);
+  assert.match(runner, /all_collections_match !== true/);
+  assert.match(runner, /github_projected !== true/);
+  assert.match(runner, /vercel_projected !== true/);
   assert.match(
     rustApp,
     /#\[cfg\(all\(debug_assertions, target_os = "macos"\)\)\]\s*const ACCEPTANCE_DATA_STORE_IDENTIFIER:\s*\[u8; 16\]/,

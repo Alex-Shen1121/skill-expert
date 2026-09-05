@@ -156,6 +156,9 @@
     "installed": "已安裝",
     "available": "可安裝",
     "count": "{{count}} 個",
+    "atLeastCount": "至少 {{count}} 個",
+    "partialInstalled": "遠端安裝狀態暫時無法完整讀取，目前至少讀取到 {{count}} 個外掛。",
+    "partialAvailable": "可安裝目錄暫時無法讀取，已安裝外掛仍可正常查看。",
     "listLabel": "已安裝外掛",
     "availableListLabel": "可安裝外掛",
     "searchLabel": "搜尋外掛",
@@ -165,6 +168,8 @@
     "detailsLabel": "外掛詳情",
     "basicDetails": "基礎詳情",
     "detailsIncomplete": "詳情不完整：Codex 已確認外掛狀態，但部分 manifest 或資源無法安全讀取。",
+    "detailsLoading": "正在讀取完整外掛詳情",
+    "detailsLoadFailed": "完整外掛詳情讀取失敗，清單中的安裝狀態仍然有效。",
     "technicalDetails": "技術詳情",
     "defaultPrompts": "預設提示詞",
     "screenshots": "截圖",
@@ -212,7 +217,8 @@
     },
     "actions": {
       "openCliSettings": "前往 Codex CLI 設定",
-      "retry": "重試讀取"
+      "retry": "重試讀取",
+      "retryDetails": "重試詳情"
     },
     "errors": {
       "title": "無法讀取外掛狀態",

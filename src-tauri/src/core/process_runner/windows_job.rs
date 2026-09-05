@@ -69,6 +69,10 @@ impl ManagedChild {
         self.child.stdout.take()
     }
 
+    pub(super) fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.child.stdin.take()
+    }
+
     pub(super) fn take_stderr(&mut self) -> Option<ChildStderr> {
         self.child.stderr.take()
     }

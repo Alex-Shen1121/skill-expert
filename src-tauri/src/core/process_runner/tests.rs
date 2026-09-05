@@ -1,6 +1,6 @@
 use super::{
-    run_process, spawn_output_reader, OutputReaderEvent, ProcessError, ProcessPipe, ProcessRequest,
-    ProcessStream,
+    run_json_rpc_exchange, run_process, spawn_output_reader, OutputReaderEvent, ProcessError,
+    ProcessPipe, ProcessRequest, ProcessStream,
 };
 use fs2::FileExt;
 use std::ffi::OsString;
@@ -82,6 +82,26 @@ fn controlled_process_fixture() {
             std::io::stdout()
                 .write_all(&[b'b', b'e', b'f', b'o', b'r', b'e', 0xff, 0xfe, 0x80])
                 .unwrap();
+        }
+        Ok("json-rpc") => {
+            use std::io::BufRead;
+
+            let stdin = std::io::stdin();
+            let mut lines = stdin.lock().lines();
+            let initialize: serde_json::Value =
+                serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+            assert_eq!(initialize["method"], "initialize");
+            let mut stdout = std::io::stdout().lock();
+            writeln!(stdout, r#"{{"id":1,"result":{{}}}}"#).unwrap();
+            stdout.flush().unwrap();
+            let initialized: serde_json::Value =
+                serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+            assert_eq!(initialized["method"], "initialized");
+            let request: serde_json::Value =
+                serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+            assert_eq!(request["method"], "plugin/installed");
+            writeln!(stdout, r#"{{"id":2,"result":{{"value":"ready"}}}}"#).unwrap();
+            stdout.flush().unwrap();
         }
         Ok("environment-parent") => {
             std::env::set_var(INHERITED_ENV_SENTINEL, "不得继承");
@@ -220,6 +240,23 @@ fn successful_process_preserves_status_and_separate_raw_outputs() {
         .stderr
         .windows(b"fixture-stderr".len())
         .any(|bytes| bytes == b"fixture-stderr"));
+}
+
+#[test]
+fn json_rpc_exchange_waits_for_initialize_before_sending_the_plugin_request() {
+    let output = run_json_rpc_exchange(
+        &fixture_request("json-rpc"),
+        &serde_json::json!({"id":1,"method":"initialize","params":{}}),
+        &serde_json::json!({"method":"initialized","params":{}}),
+        &serde_json::json!({"id":2,"method":"plugin/installed","params":{}}),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output).unwrap()["result"]["value"],
+        "ready"
+    );
 }
 
 #[test]

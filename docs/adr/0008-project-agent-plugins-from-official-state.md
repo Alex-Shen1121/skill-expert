@@ -4,6 +4,8 @@ status: accepted
 
 # 从 Agent 官方状态投影插件目录
 
+远程 Codex 插件安装状态的数据源由 [ADR-0009](./0009-read-remote-codex-plugin-installation-state.md) 补充；本 ADR 中“CLI 是唯一事实来源”的限制仅保留为首版历史决策。
+
 Agent 技能管家通过每个插件支持 Agent 的已验证官方接口生成只读、内存态的插件状态投影，并以 Agent、Marketplace 与插件 ID 的组合保留安装实体身份。首版使用受控外部进程运行 `codex plugin list --available --json`；Agent 插件目录模块集中负责可执行文件解析、命令契约、状态映射和结构化错误，Tauri 命令只切换阻塞线程并序列化结果。
 
 ## 考虑过的方案
@@ -16,7 +18,7 @@ Agent 技能管家通过每个插件支持 Agent 的已验证官方接口生成�
 
 - CLI 定位优先使用用户显式路径，其次按桌面进程 PATH 顺序查找；macOS / Linux 在 PATH 未找到时补查绝对 HOME 下的 `.local/bin/codex`。只接受存在且可执行的普通文件或有效符号链接，不运行登录 Shell、不扫描配置或内部缓存推断可执行文件。
 - 插件浏览不会建立安装数据库，也不会写入 Codex 配置、插件状态、Marketplace 或中央技能库。
-- CLI 的安装与启用字段是插件安装状态的唯一事实来源；补充资料失败不得删除 CLI 已确认的身份。
+- 首版 CLI 的安装与启用字段只作为本地回退事实；完整的已安装集合由 ADR-0009 规定的 App Server 状态确认，任一详情补充失败都不得删除已确认身份。
 - 顶层集合、必要身份或状态字段缺失，以及重复的完整身份，均作为契约不兼容整体拒绝，避免静默漏项或错误合并。
 - 每个 Agent 的读取结果与错误保持隔离，未经清理的命令输出和本地绝对路径不进入前端投影。
 - [OpenAI 官方 manifest 文档](https://developers.openai.com/plugins/build/plugins#manifest-fields)目前只把 `interface.capabilities` 定义为显式能力字符串列表，没有浏览器扩展或自定义 UI 专用字段；UI 由 MCP 集成在运行时声明。
