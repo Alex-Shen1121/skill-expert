@@ -1103,6 +1103,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Agent plugins
             commands::agent_plugins::get_agent_plugin_projection,
+            commands::agent_plugins::get_agent_plugin_details,
             commands::agent_plugins::get_codex_cli_configuration,
             commands::agent_plugins::validate_codex_cli_path,
             commands::agent_plugins::set_codex_cli_path,

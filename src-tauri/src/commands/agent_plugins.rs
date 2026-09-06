@@ -1,10 +1,12 @@
 use crate::core::agent_plugin_catalog::{
+    get_agent_plugin_details as read_agent_plugin_details,
     get_agent_plugin_projection as read_agent_plugin_projection,
     get_codex_cli_configuration as read_codex_cli_configuration,
     reset_codex_cli_path as reset_stored_codex_cli_path,
     save_codex_cli_path as save_stored_codex_cli_path,
     validate_codex_cli_path as validate_candidate_codex_cli_path, AgentPluginAgent,
-    AgentPluginProjection, CodexCliConfiguration, CODEX_CLI_PATH_SETTING_KEY,
+    AgentPluginDetailsProjection, AgentPluginIdentity, AgentPluginProjection,
+    CodexCliConfiguration, CODEX_CLI_PATH_SETTING_KEY,
 };
 use crate::core::error::AppError;
 use crate::core::skill_store::SkillStore;
@@ -24,6 +26,26 @@ pub async fn get_agent_plugin_projection(
             .map_err(AppError::db)?;
         Ok::<_, AppError>(read_agent_plugin_projection(
             agent,
+            configured_path.as_deref(),
+        ))
+    })
+    .await
+    .map_err(AppError::from)?
+}
+
+/// 单个远程插件详情失败时只返回局部错误，不清空目录投影。
+#[tauri::command]
+pub async fn get_agent_plugin_details(
+    identity: AgentPluginIdentity,
+    store: State<'_, Arc<SkillStore>>,
+) -> Result<AgentPluginDetailsProjection, AppError> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let configured_path = store
+            .get_setting(CODEX_CLI_PATH_SETTING_KEY)
+            .map_err(AppError::db)?;
+        Ok::<_, AppError>(read_agent_plugin_details(
+            identity,
             configured_path.as_deref(),
         ))
     })

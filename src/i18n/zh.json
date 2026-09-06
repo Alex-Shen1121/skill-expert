@@ -156,6 +156,9 @@
     "installed": "已安装",
     "available": "可安装",
     "count": "{{count}} 个",
+    "atLeastCount": "至少 {{count}} 个",
+    "partialInstalled": "远程安装状态暂时无法完整读取，当前至少读取到 {{count}} 个插件。",
+    "partialAvailable": "可安装目录暂时无法读取，已安装插件仍可正常查看。",
     "listLabel": "已安装插件",
     "availableListLabel": "可安装插件",
     "searchLabel": "搜索插件",
@@ -165,6 +168,8 @@
     "detailsLabel": "插件详情",
     "basicDetails": "基础详情",
     "detailsIncomplete": "详情不完整：Codex 已确认插件状态，但部分 manifest 或资源无法安全读取。",
+    "detailsLoading": "正在读取完整插件详情",
+    "detailsLoadFailed": "完整插件详情读取失败，列表中的安装状态仍然有效。",
     "technicalDetails": "技术详情",
     "defaultPrompts": "默认提示词",
     "screenshots": "截图",
@@ -212,7 +217,8 @@
     },
     "actions": {
       "openCliSettings": "前往 Codex CLI 设置",
-      "retry": "重试读取"
+      "retry": "重试读取",
+      "retryDetails": "重试详情"
     },
     "errors": {
       "title": "无法读取插件状态",

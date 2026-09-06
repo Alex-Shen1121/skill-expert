@@ -1,8 +1,9 @@
 import { Puzzle } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentPluginSummary } from "../../lib/agentPlugins";
 import { cn } from "../../utils";
-import { isSafePluginImageDataUrl } from "./pluginVisual";
+import { isSafePluginImageDataUrl, isSafePluginImageUrl } from "./pluginVisual";
 
 interface PluginMarkProps {
   plugin: Pick<AgentPluginSummary, "display_name" | "details">;
@@ -11,13 +12,19 @@ interface PluginMarkProps {
 
 export function PluginMark({ plugin, size = "small" }: PluginMarkProps) {
   const { t } = useTranslation();
+  const imageSource = isSafePluginImageDataUrl(plugin.details.icon_data_url)
+    ? plugin.details.icon_data_url
+    : isSafePluginImageUrl(plugin.details.icon_url)
+      ? plugin.details.icon_url
+      : null;
+  const [failedImageSource, setFailedImageSource] = useState<string | null>(null);
   const large = size === "large";
   const className = cn(
     "flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-accent/20 bg-accent/10 text-accent",
     large ? "h-14 w-14" : "h-9 w-9",
   );
 
-  if (isSafePluginImageDataUrl(plugin.details.icon_data_url)) {
+  if (imageSource && imageSource !== failedImageSource) {
     return (
       <span
         className={className}
@@ -25,8 +32,9 @@ export function PluginMark({ plugin, size = "small" }: PluginMarkProps) {
         aria-label={t("plugins.pluginIcon", { name: plugin.display_name })}
       >
         <img
-          src={plugin.details.icon_data_url}
+          src={imageSource}
           alt=""
+          onError={() => setFailedImageSource(imageSource)}
           className="h-full w-full object-cover"
         />
       </span>

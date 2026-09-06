@@ -7,7 +7,9 @@ import { cn } from "../../utils";
 interface PluginCatalogControlsProps {
   scope: AgentPluginScope;
   installedCount: number;
+  installedComplete: boolean;
   availableCount: number;
+  availableComplete: boolean;
   query: string;
   marketplace: string;
   marketplaces: string[];
@@ -19,7 +21,9 @@ interface PluginCatalogControlsProps {
 export function PluginCatalogControls({
   scope,
   installedCount,
+  installedComplete,
   availableCount,
+  availableComplete,
   query,
   marketplace,
   marketplaces,
@@ -77,9 +81,12 @@ export function PluginCatalogControls({
               scope === value && "app-segmented-button-active",
             )}
           >
-            {t(`plugins.${value}`)} {t("plugins.count", {
-              count: value === "installed" ? installedCount : availableCount,
-            })}
+            {t(`plugins.${value}`)} {t(
+              (value === "installed" ? !installedComplete : !availableComplete)
+                ? "plugins.atLeastCount"
+                : "plugins.count",
+              { count: value === "installed" ? installedCount : availableCount },
+            )}
           </button>
         ))}
       </div>

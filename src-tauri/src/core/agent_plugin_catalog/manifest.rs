@@ -446,7 +446,6 @@ impl<'a> ManifestReader<'a> {
 
     fn read_screenshots(&mut self, value: &Value) {
         let Value::Array(values) = value else {
-            self.issue(AgentPluginDetailsIssue::ManifestIncompatible);
             return;
         };
         for value in values.iter().take(MAX_SCREENSHOTS) {
@@ -454,23 +453,21 @@ impl<'a> ManifestReader<'a> {
                 self.details.screenshot_data_urls.push(data_url);
             }
         }
-        if values.len() > MAX_SCREENSHOTS {
-            self.issue(AgentPluginDetailsIssue::ResourceRejected);
-        }
     }
 
     fn read_png_data_url(&mut self, value: &Value, purpose: ImagePurpose) -> Option<String> {
-        let path = self.declared_path(value)?;
+        let value = value.as_str()?;
+        if !value.starts_with("./") || value.contains('\0') {
+            return None;
+        }
+        let relative = Path::new(value);
+        if relative.is_absolute() {
+            return None;
+        }
+        let path = self.root.join(relative);
         let bytes = match read_regular_file(self.root, &path, MAX_IMAGE_BYTES) {
             Ok(bytes) => bytes,
-            Err(ReadFailure::Unsafe | ReadFailure::TooLarge) => {
-                self.issue(AgentPluginDetailsIssue::ResourceRejected);
-                return None;
-            }
-            Err(_) => {
-                self.issue(AgentPluginDetailsIssue::ComponentUnreadable);
-                return None;
-            }
+            Err(_) => return None,
         };
         let dimensions =
             image::ImageReader::with_format(Cursor::new(bytes.as_slice()), image::ImageFormat::Png)
@@ -484,7 +481,6 @@ impl<'a> ManifestReader<'a> {
         });
         let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png);
         if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || !valid_dimensions || decoded.is_err() {
-            self.issue(AgentPluginDetailsIssue::ResourceRejected);
             return None;
         }
         let decoded = decoded.expect("上方已经确认图片解码成功");
@@ -498,12 +494,10 @@ impl<'a> ManifestReader<'a> {
             .write_to(&mut sanitized, image::ImageFormat::Png)
             .is_err()
         {
-            self.issue(AgentPluginDetailsIssue::ResourceRejected);
             return None;
         }
         let sanitized = sanitized.into_inner();
         if sanitized.len() > max_output_bytes {
-            self.issue(AgentPluginDetailsIssue::ResourceRejected);
             return None;
         }
         Some(format!(
