@@ -99,8 +99,28 @@ export interface SkillBrowserSource {
 }
 export const prepareSkillBrowserSource = (skillId: string, sessionId: string) =>
   invoke<SkillBrowserSource>("prepare_skill_browser_source", { skillId, sessionId });
+export interface SkillBrowserComparison {
+  path: string;
+  local: SkillBrowserEntry | null;
+  source: SkillBrowserEntry | null;
+  local_presence: "present" | "missing" | "unknown";
+  source_presence: "present" | "missing" | "unknown";
+  status: "added" | "removed" | "modified" | "unchanged" | "not_compared" | "uncomparable" | null;
+  reason_code: "excluded" | "unsupported_type" | "type_changed" | "unknown_presence" | null;
+  reason: string | null;
+  content_changed: boolean | null;
+  exec_bits_before: number | null;
+  exec_bits_after: number | null;
+}
+export interface SkillBrowserDiff {
+  index: SkillBrowserIndex;
+  entries: SkillBrowserComparison[];
+  changed_file_count: number;
+  source_label: string;
+  revision: string;
+}
 export const getSkillBrowserDiff = (skillId: string, sessionId: string) =>
-  invoke<SkillSourceDiff>("get_skill_browser_diff", { skillId, sessionId });
+  invoke<SkillBrowserDiff>("get_skill_browser_diff", { skillId, sessionId });
 
 export const closeSkillBrowser = (skillId: string, sessionId: string) =>
   invoke<void>("close_skill_browser", { skillId, sessionId });

@@ -10,6 +10,7 @@ export const ERROR_KINDS = [
   "internal",
   "target_conflict",
   "stale_snapshot",
+  "unknown_presence",
 ] as const;
 
 export type ErrorKind = (typeof ERROR_KINDS)[number];

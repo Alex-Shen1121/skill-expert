@@ -5,7 +5,7 @@ use super::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::File,
     io::Read,
     path::{Component, Path, PathBuf},
@@ -55,6 +55,30 @@ pub struct SourceIndex {
     pub revision: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BrowserComparison {
+    pub path: String,
+    pub local: Option<BrowserEntry>,
+    pub source: Option<BrowserEntry>,
+    pub local_presence: String,
+    pub source_presence: String,
+    pub status: Option<String>,
+    pub reason: Option<String>,
+    pub reason_code: Option<String>,
+    pub content_changed: Option<bool>,
+    pub exec_bits_before: Option<u32>,
+    pub exec_bits_after: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrowserDiff {
+    pub index: BrowserIndex,
+    pub entries: Vec<BrowserComparison>,
+    pub changed_file_count: usize,
+    pub source_label: String,
+    pub revision: String,
+}
+
 #[derive(Default)]
 pub struct SkillBrowser {
     sessions: Mutex<HashMap<String, Arc<BrowserSession>>>,
@@ -84,6 +108,7 @@ impl Drop for SourceCheckout {
 struct Snapshot {
     root: PathBuf,
     stamps: HashMap<String, String>,
+    incomplete_paths: Vec<String>,
     index: BrowserIndex,
 }
 
@@ -93,7 +118,15 @@ impl Snapshot {
         let mut stamps = HashMap::new();
         let mut entries = Vec::new();
         let mut issues = Vec::new();
-        scan(&root, "", &mut entries, &mut stamps, &mut issues);
+        let mut incomplete_paths = Vec::new();
+        scan(
+            &root,
+            "",
+            &mut entries,
+            &mut stamps,
+            &mut issues,
+            &mut incomplete_paths,
+        );
         entries.sort_by(|left, right| left.path.cmp(&right.path));
         let candidates = [
             "SKILL.md",
@@ -130,7 +163,7 @@ impl Snapshot {
             entry_path,
             file_count: entries
                 .iter()
-                .filter(|entry| matches!(entry.kind.as_str(), "file" | "symlink" | "special"))
+                .filter(|entry| entry.kind != "directory")
                 .count(),
             directory_count: entries
                 .iter()
@@ -143,6 +176,7 @@ impl Snapshot {
         Ok(Self {
             root: root.path.clone(),
             stamps,
+            incomplete_paths,
             index,
         })
     }
@@ -150,11 +184,24 @@ impl Snapshot {
     fn validate(&self) -> Result<(), AppError> {
         let root = Directory::open(&self.root).map_err(|_| AppError::stale_snapshot())?;
         let mut stamps = HashMap::new();
-        scan(&root, "", &mut Vec::new(), &mut stamps, &mut Vec::new());
+        scan(
+            &root,
+            "",
+            &mut Vec::new(),
+            &mut stamps,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
         if stamps != self.stamps {
             return Err(AppError::stale_snapshot());
         }
         Ok(())
+    }
+
+    fn absence_unknown(&self, path: &str) -> bool {
+        self.incomplete_paths.iter().any(|prefix| {
+            prefix.is_empty() || path == prefix || path.starts_with(&format!("{prefix}/"))
+        })
     }
 
     fn with_entry<T>(
@@ -169,9 +216,13 @@ impl Snapshot {
             .iter()
             .find(|entry| entry.path == path)
             .ok_or_else(|| {
-                self.validate()
-                    .err()
-                    .unwrap_or_else(|| AppError::not_found("此版本中没有该文件"))
+                self.validate().err().unwrap_or_else(|| {
+                    if !self.absence_unknown(path) {
+                        AppError::not_found("此版本中没有该文件")
+                    } else {
+                        AppError::unknown_presence()
+                    }
+                })
             })?;
         if entry.error.is_some() {
             return read(entry, None);
@@ -410,12 +461,7 @@ impl SkillBrowser {
         }
     }
 
-    pub fn source_diff(
-        &self,
-        skill_id: &str,
-        session_id: &str,
-    ) -> Result<crate::commands::skills::SkillSourceDiffDto, AppError> {
-        use crate::commands::skills::{SkillSourceDiffDto, SkillSourceDiffEntryDto};
+    pub fn source_diff(&self, skill_id: &str, session_id: &str) -> Result<BrowserDiff, AppError> {
         self.prepare_source(skill_id, session_id)?;
         let session = self.session(skill_id, session_id)?;
         let source = session
@@ -428,92 +474,197 @@ impl SkillBrowser {
         let remote = &source.snapshot;
         local.validate()?;
         remote.validate()?;
-        if !local.index.complete || !remote.index.complete {
-            return Err(AppError::io("目录未完整读取，暂时无法比较"));
+        let mut union: BTreeMap<&str, (Option<&BrowserEntry>, Option<&BrowserEntry>)> =
+            BTreeMap::new();
+        for entry in &local.index.entries {
+            union.entry(&entry.path).or_default().0 = Some(entry);
         }
-        let paths: std::collections::BTreeSet<_> = local
-            .index
-            .entries
-            .iter()
-            .chain(&remote.index.entries)
-            .filter(|entry| {
-                entry.kind == "file" && !entry.path.split('/').any(super::content_hash::is_ignored)
-            })
-            .map(|entry| entry.path.as_str())
-            .collect();
+        for entry in &remote.index.entries {
+            union.entry(&entry.path).or_default().1 = Some(entry);
+        }
+        let mut index = BrowserIndex {
+            skill_id: skill_id.into(),
+            session_id: session_id.into(),
+            entry_path: local
+                .index
+                .entry_path
+                .clone()
+                .or_else(|| remote.index.entry_path.clone()),
+            entries: Vec::new(),
+            file_count: 0,
+            directory_count: 0,
+            complete: local.index.complete && remote.index.complete,
+            issues: local
+                .index
+                .issues
+                .iter()
+                .map(|issue| format!("当前安装：{issue}"))
+                .chain(
+                    remote
+                        .index
+                        .issues
+                        .iter()
+                        .map(|issue| format!("来源版本：{issue}")),
+                )
+                .collect(),
+        };
         let mut entries = Vec::new();
-        for path in paths {
+        for (path, (left, right)) in union {
             if session.cancelled.load(Ordering::SeqCst) {
                 return Err(AppError::cancelled("浏览会话已关闭"));
             }
-            let exists = |snapshot: &Snapshot| {
-                snapshot
-                    .index
-                    .entries
-                    .iter()
-                    .any(|entry| entry.path == path && entry.kind == "file")
+            // 同路径类型变化以文件为选择入口，同时保留目录侧元数据供树展开。
+            let mut display = left
+                .filter(|entry| entry.kind != "directory")
+                .or(right.filter(|entry| entry.kind != "directory"))
+                .or(left)
+                .or(right)
+                .unwrap()
+                .clone();
+            let errors: Vec<_> = left
+                .into_iter()
+                .chain(right)
+                .filter_map(|entry| entry.error.as_deref())
+                .collect();
+            if !errors.is_empty() {
+                display.error = Some(errors.join("；"));
+            }
+            index.entries.push(display.clone());
+            if display.kind == "directory" {
+                index.directory_count += 1;
+            } else {
+                index.file_count += 1;
+            }
+            let mut comparison = BrowserComparison {
+                path: path.into(),
+                local: left.cloned(),
+                source: right.cloned(),
+                local_presence: if left.is_some() {
+                    "present"
+                } else if !local.absence_unknown(path) {
+                    "missing"
+                } else {
+                    "unknown"
+                }
+                .into(),
+                source_presence: if right.is_some() {
+                    "present"
+                } else if !remote.absence_unknown(path) {
+                    "missing"
+                } else {
+                    "unknown"
+                }
+                .into(),
+                status: None,
+                reason: None,
+                reason_code: None,
+                content_changed: None,
+                exec_bits_before: None,
+                exec_bits_after: None,
             };
-            let before = exists(local).then(|| local.fingerprint(path)).transpose()?;
-            let after = exists(remote)
-                .then(|| remote.fingerprint(path))
-                .transpose()?;
-            if before == after {
+            let unknown_presence =
+                comparison.local_presence == "unknown" || comparison.source_presence == "unknown";
+            if unknown_presence {
+                comparison.reason_code = Some("unknown_presence".into());
+            }
+            if display.kind == "directory" {
+                entries.push(comparison);
                 continue;
             }
-            let original = before.as_ref().map(|_| local.read(path)).transpose()?;
-            let updated = after.as_ref().map(|_| remote.read(path)).transpose()?;
-            if original
-                .iter()
-                .chain(updated.iter())
-                .any(|preview| preview.kind == "unreadable")
-            {
-                return Err(AppError::io(format!("无法读取 {path}，暂时无法比较")));
+            if path.split('/').any(super::content_hash::is_ignored) {
+                comparison.status = Some("not_compared".into());
+                comparison.reason_code = Some("excluded".into());
+                entries.push(comparison);
+                continue;
             }
-            let content_kind = if before
-                .as_ref()
-                .zip(after.as_ref())
-                .is_some_and(|(a, b)| a.0 == b.0)
+            if unknown_presence
+                || left
+                    .into_iter()
+                    .chain(right)
+                    .any(|entry| entry.error.is_some())
             {
-                "permission_only"
-            } else if original
-                .iter()
-                .chain(updated.iter())
-                .any(|preview| preview.kind == "too_large")
+                comparison.status = Some("uncomparable".into());
+                comparison.reason = display.error.clone();
+                entries.push(comparison);
+                continue;
+            }
+            if !left
+                .into_iter()
+                .chain(right)
+                .any(|entry| entry.kind == "file")
             {
-                "too_large"
-            } else if original
-                .iter()
-                .chain(updated.iter())
-                .all(|preview| preview.kind == "text")
-            {
-                "text"
-            } else {
-                "binary"
+                comparison.status = Some("not_compared".into());
+                comparison.reason_code = Some("unsupported_type".into());
+                entries.push(comparison);
+                continue;
+            }
+            let before = left
+                .filter(|entry| entry.kind == "file")
+                .map(|_| local.fingerprint(path))
+                .transpose();
+            let after = right
+                .filter(|entry| entry.kind == "file")
+                .map(|_| remote.fingerprint(path))
+                .transpose();
+            let (before, after) = match (before, after) {
+                (Ok(before), Ok(after)) => (before, after),
+                (before, after) => {
+                    let mut reasons = Vec::new();
+                    for (side, result) in [("当前安装", before), ("来源版本", after)] {
+                        if let Err(error) = result {
+                            if error.kind == super::error::ErrorKind::StaleSnapshot {
+                                return Err(error);
+                            }
+                            reasons.push(format!("{side}：{}", error.message));
+                        }
+                    }
+                    comparison.status = Some("uncomparable".into());
+                    comparison.reason = Some(reasons.join("；"));
+                    entries.push(comparison);
+                    continue;
+                }
             };
-            entries.push(SkillSourceDiffEntryDto {
-                relative_path: path.into(),
-                status: if before.is_none() {
+            if left
+                .zip(right)
+                .is_some_and(|(before, after)| before.kind != after.kind)
+            {
+                comparison.reason_code = Some("type_changed".into());
+            }
+            comparison.exec_bits_before = before.as_ref().map(|(_, bits)| *bits);
+            comparison.exec_bits_after = after.as_ref().map(|(_, bits)| *bits);
+            comparison.content_changed =
+                Some(before.as_ref().map(|value| &value.0) != after.as_ref().map(|value| &value.0));
+            comparison.status = Some(
+                if before == after {
+                    "unchanged"
+                } else if left.is_none() {
                     "added"
-                } else if after.is_none() {
+                } else if right.is_none() {
                     "removed"
                 } else {
                     "modified"
                 }
                 .into(),
-                content_kind: content_kind.into(),
-                original_text: original.and_then(|preview| preview.text),
-                updated_text: updated.and_then(|preview| preview.text),
-                executable_before: before.is_some_and(|(_, bits)| bits != 0),
-                executable_after: after.is_some_and(|(_, bits)| bits != 0),
-            });
+            );
+            entries.push(comparison);
         }
         local.validate()?;
         remote.validate()?;
-        Ok(SkillSourceDiffDto {
-            skill_id: skill_id.into(),
+        let changed_file_count = entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.status.as_deref(),
+                    Some("added" | "removed" | "modified")
+                )
+            })
+            .count();
+        Ok(BrowserDiff {
+            index,
+            entries,
+            changed_file_count,
             source_label: source.info.source_label.clone(),
             revision: source.info.revision.clone(),
-            entries,
         })
     }
 
@@ -619,11 +770,13 @@ fn scan(
     entries: &mut Vec<BrowserEntry>,
     stamps: &mut HashMap<String, String>,
     issues: &mut Vec<String>,
+    incomplete_paths: &mut Vec<String>,
 ) {
     let before = match directory.stamp() {
         Ok(stamp) => stamp,
         Err(error) => {
             issues.push(format!("{prefix}：{error}"));
+            incomplete_paths.push(prefix.into());
             return;
         }
     };
@@ -650,7 +803,7 @@ fn scan(
                             match directory.child(&name) {
                                 Ok(child) => {
                                     let previous = issues.len();
-                                    scan(&child, &path, entries, stamps, issues);
+                                    scan(&child, &path, entries, stamps, issues, incomplete_paths);
                                     if previous != issues.len() {
                                         entry.error = Some("此目录未完整读取，请重新加载".into());
                                     }
@@ -658,6 +811,7 @@ fn scan(
                                 Err(error) => {
                                     entry.error = Some(error.to_string());
                                     issues.push(format!("{path}：{error}"));
+                                    incomplete_paths.push(path.clone());
                                 }
                             }
                         }
@@ -665,6 +819,7 @@ fn scan(
                     }
                     Err(error) => {
                         issues.push(format!("{path}：{error}"));
+                        incomplete_paths.push(path.clone());
                         entries.push(BrowserEntry {
                             path,
                             kind: "unreadable".into(),
@@ -676,10 +831,14 @@ fn scan(
                 }
             }
         }
-        Err(error) => issues.push(format!("{prefix}：{error}")),
+        Err(error) => {
+            issues.push(format!("{prefix}：{error}"));
+            incomplete_paths.push(prefix.into());
+        }
     }
     if directory.stamp().ok().as_ref() != Some(&before) {
         issues.push(format!("{prefix}：扫描期间目录已变化，请重新加载"));
+        incomplete_paths.push(prefix.into());
     }
 }
 

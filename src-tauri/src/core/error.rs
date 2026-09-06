@@ -40,6 +40,8 @@ pub enum ErrorKind {
     TargetConflict,
     /// 浏览所依据的目录或文件已变化，调用方应重新索引。
     StaleSnapshot,
+    /// 目录未完整枚举，不能确认请求的文件是否存在。
+    UnknownPresence,
 }
 
 impl fmt::Display for AppError {
@@ -61,6 +63,14 @@ impl AppError {
         Self {
             kind: ErrorKind::StaleSnapshot,
             message: "目录或文件已变化，请重新加载文件目录".into(),
+            details: None,
+        }
+    }
+
+    pub fn unknown_presence() -> Self {
+        Self {
+            kind: ErrorKind::UnknownPresence,
+            message: "目录未完整读取，无法确定此版本中是否存在该文件".into(),
             details: None,
         }
     }

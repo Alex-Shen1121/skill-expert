@@ -5,11 +5,10 @@ import { cn } from "../utils";
 import {
   openSkillBrowser, readSkillBrowserFile, closeSkillBrowser,
   prepareSkillBrowserSource, getSkillBrowserDiff,
-  type ManagedSkill, type Project, type SkillBrowserSource, type SkillSourceDiff,
+  type ManagedSkill, type Project, type SkillBrowserSource, type SkillBrowserDiff,
   type SkillToolToggle, type ToolInfo, type SkillBrowserIndex, type SkillFilePreview,
 } from "../lib/tauri";
 import { getErrorMessage, getErrorKind } from "../lib/error";
-import { SkillSourceDiffViewer } from "./SkillSourceDiffViewer";
 import { DetailSheet } from "./DetailSheet";
 import { SkillFileBrowser } from "./SkillFileBrowser";
 import { AgentToggleSection, type AgentToggleItem } from "./AgentToggleSection";
@@ -38,24 +37,26 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
   const { t } = useTranslation();
   const [index, setIndex] = useState<SkillBrowserIndex | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ key: string; value: SkillFilePreview } | null>(null);
+  const [previews, setPreviews] = useState<Partial<Record<"local" | "source", { key: string; value: SkillFilePreview }>>>({});
   const [browseError, setBrowseError] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<{ key: string; message: string } | null>(null);
+  const [previewErrors, setPreviewErrors] = useState<Partial<Record<"local" | "source", { key: string; message: string }>>>({});
   const [infoExpanded, setInfoExpanded] = useState(false);
   const [reload, setReload] = useState(0);
   const [source, setSource] = useState<SkillBrowserSource | null>(null);
   const [sourceWanted, setSourceWanted] = useState(false);
-  const [sourceDiff, setSourceDiff] = useState<SkillSourceDiff | null>(null);
+  const [sourceDiff, setSourceDiff] = useState<SkillBrowserDiff | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [contentTab, setContentTab] = useState<"local" | "diff" | "source">("local");
   const skillId = skill.id;
   const supportsSource = ["git", "skillssh"].includes(skill.source_type) || (["local", "import"].includes(skill.source_type) && !!skill.source_ref);
+  const activeIndex = contentTab === "diff" ? sourceDiff?.index ?? null : contentTab === "source" ? source?.index ?? null : index;
+  const readKey = `${index?.session_id}:${selected}`;
+  const previewFor = (side: "local" | "source") => previews[side]?.key === readKey ? previews[side]!.value : null;
+  const errorFor = (side: "local" | "source") => previewErrors[side]?.key === readKey ? previewErrors[side]!.message : null;
   const side = contentTab === "source" ? "source" : "local";
-  const activeIndex = side === "source" ? source?.index ?? null : index;
-  const readKey = `${activeIndex?.session_id}:${side}:${selected}`;
-  const currentPreview = preview?.key === readKey ? preview.value : null;
-  const currentPreviewError = previewError?.key === readKey ? previewError.message : null;
+  const currentPreview = previewFor(side);
+  const currentPreviewError = errorFor(side);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,22 +87,26 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
   }, [skillId, index, sourceWanted, supportsSource, t]);
 
   useEffect(() => {
-    if (!activeIndex || !selected || contentTab === "diff") return;
+    if (!index || !selected || (contentTab !== "local" && !source) || (contentTab === "diff" && !sourceDiff)) return;
     let cancelled = false;
-    readSkillBrowserFile(skillId, activeIndex.session_id, selected, side).then(next => {
-      if (!cancelled) setPreview({ key: readKey, value: next });
-    }).catch(error => {
-      if (cancelled) return;
-      if (getErrorKind(error) === "not_found" && !activeIndex.entries.some(entry => entry.path === selected)) {
-        setPreview({ key: readKey, value: { path: selected, kind: "missing", size: 0, text: null, message: t("skillBrowser.missingFile") } });
-        return;
-      }
-      const message = getErrorMessage(error, t("skillBrowser.readFailed"));
-      setPreviewError({ key: readKey, message });
-      if (getErrorKind(error) === "stale_snapshot") { setSourceDiff(null); setDiffError(message); }
-    });
+    const sides: ("local" | "source")[] = contentTab === "diff" ? ["local", "source"] : [contentTab];
+    for (const readingSide of sides) {
+      const readingIndex = readingSide === "local" ? index : source!.index;
+      readSkillBrowserFile(skillId, index.session_id, selected, readingSide).then(next => {
+        if (!cancelled) setPreviews(current => ({ ...current, [readingSide]: { key: readKey, value: next } }));
+      }).catch(error => {
+        if (cancelled) return;
+        if (getErrorKind(error) === "not_found" && !readingIndex.entries.some(entry => entry.path === selected)) {
+          setPreviews(current => ({ ...current, [readingSide]: { key: readKey, value: { path: selected, kind: "missing", size: 0, text: null, message: t("skillBrowser.missingFile") } } }));
+          return;
+        }
+        const message = getErrorKind(error) === "unknown_presence" ? t("skillBrowser.diffReason.unknown_presence") : getErrorMessage(error, t("skillBrowser.readFailed"));
+        setPreviewErrors(current => ({ ...current, [readingSide]: { key: readKey, message } }));
+        if (getErrorKind(error) === "stale_snapshot") { setSourceDiff(null); setDiffError(message); }
+      });
+    }
     return () => { cancelled = true; };
-  }, [skillId, activeIndex, selected, side, readKey, contentTab, t]);
+  }, [skillId, index, source, sourceDiff, selected, readKey, contentTab, t]);
 
   useEffect(() => {
     if (contentTab !== "diff" || !index || !source || sourceDiff || diffError) return;
@@ -111,8 +116,8 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
     return () => { cancelled = true; };
   }, [contentTab, index, source, sourceDiff, diffError, skillId, t]);
 
-  const chooseFile = (path: string) => { if (path === selected) return; setSelected(path); setPreview(null); setPreviewError(null); };
-  const retry = () => { setIndex(null); setSource(null); setSourceDiff(null); setSourceError(null); setDiffError(null); setPreview(null); setBrowseError(null); setPreviewError(null); setReload(current => current + 1); };
+  const chooseFile = (path: string) => { if (path === selected) return; setSelected(path); setPreviews({}); setPreviewErrors({}); };
+  const retry = () => { setIndex(null); setSource(null); setSourceDiff(null); setSourceError(null); setDiffError(null); setPreviews({}); setBrowseError(null); setPreviewErrors({}); setReload(current => current + 1); };
   const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map(toggle => ({
     key: toggle.tool, displayName: toggle.display_name, enabled: toggle.enabled,
     isAvailable: toggle.installed && toggle.globally_enabled, disabled: !toggle.installed || !toggle.globally_enabled,
@@ -150,14 +155,14 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
       </button>)}
     </nav>
     {source && contentTab !== "local" && <p className="shrink-0 break-all border-t border-border-subtle px-6 py-2 text-[11px] text-muted" title={source.revision}>{source.location} · {source.revision === "workspace" ? t("skillBrowser.workspaceSnapshot") : source.revision.slice(0, 12)}</p>}
-    <div className={contentTab !== "diff" && (side === "local" || source) ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-      {index ? <SkillFileBrowser side={side} index={activeIndex ?? index} selected={selected} onSelect={chooseFile} preview={currentPreview} loading={!!selected && !currentPreview && !currentPreviewError} error={currentPreviewError} onRetry={retry} />
+    <div className={(contentTab === "local" || (contentTab === "source" && source) || (contentTab === "diff" && sourceDiff && !diffError)) ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+      {index ? <SkillFileBrowser side={contentTab} diff={contentTab === "diff" ? sourceDiff : null} sourcePreview={previewFor("source")} sourceError={errorFor("source")} index={activeIndex ?? index} selected={selected} onSelect={chooseFile} preview={currentPreview} loading={!!selected && !currentPreview && !currentPreviewError} error={currentPreviewError} onRetry={retry} />
         : <div className="skill-file-message" role={browseError ? "alert" : "status"}>{browseError ?? t("common.loading")}{browseError && <button onClick={retry}>{t("skillBrowser.reload")}</button>}</div>}
     </div>
-    {contentTab !== "local" && (!source || contentTab === "diff") && <div className="min-h-0 flex-1 overflow-auto border-t border-border-subtle p-6">
+    {contentTab !== "local" && (!source || (contentTab === "diff" && (!sourceDiff || diffError))) && <div className="min-h-0 flex-1 overflow-auto border-t border-border-subtle p-6">
       {!supportsSource ? <p className="skill-file-message">{t("skillBrowser.noSource")}</p>
         : sourceError || diffError || browseError ? <div role="alert" className="skill-file-message"><p>{sourceError ?? diffError ?? browseError}</p><button onClick={retry}>{t("skillBrowser.retrySource")}</button></div>
-        : contentTab === "diff" && sourceDiff ? <SkillSourceDiffViewer entries={sourceDiff.entries} /> : <p role="status" className="skill-file-message">{t("common.loading")}</p>}
+        : <p role="status" className="skill-file-message">{t("common.loading")}</p>}
     </div>}
   </DetailSheet>;
 }

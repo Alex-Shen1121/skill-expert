@@ -98,7 +98,7 @@ it("来源完整树与差异共用一次来源准备，保留相对路径并说�
   const initial = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => {
     if (command === "prepare_skill_browser_source") return Promise.resolve({ index: { ...index, entries: [...index.entries, { path: "source-only.md", kind: "file", size: 20, error: null }], file_count: 3 }, revision: "abc1234", source_label: "git", location: "https://example.com/skills.git · demo" });
-    if (command === "get_skill_browser_diff") return Promise.resolve({ skill_id: "demo", entries: [], revision: "abc1234", source_label: "git" });
+    if (command === "get_skill_browser_diff") return Promise.resolve({ index: { ...index, entries: [...index.entries, { path: "source-only.md", kind: "file", size: 20, error: null }], file_count: 3 }, entries: [{ path: "source-only.md", status: "added", local: null, source: { path: "source-only.md", kind: "file", size: 20, error: null }, local_presence: "missing", source_presence: "present", exec_bits_before: null, exec_bits_after: 0, content_changed: true, reason: null }], changed_file_count: 1, revision: "abc1234", source_label: "git" });
     if (command === "read_skill_browser_file" && (args as { side: string }).side === "local" && (args as { relativePath: string }).relativePath === "source-only.md") return Promise.reject({ kind: "not_found", message: "此版本中没有该文件" });
     if (command === "read_skill_browser_file" && (args as { side: string }).side === "source") {
       const path = (args as { relativePath: string }).relativePath;
@@ -118,7 +118,8 @@ it("来源完整树与差异共用一次来源准备，保留相对路径并说�
   expect(await screen.findByText("此版本中没有该文件")).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "阅读入口" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "差异" }));
-  expect(await screen.findByText(i18n.t("mySkills.sourceDiff.noChanges"))).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText("此版本中没有该文件")).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText("# 来源独有资料")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "来源" }));
   expect(await screen.findByRole("heading", { name: "来源独有资料" })).toBeTruthy();
   expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "prepare_skill_browser_source")).toHaveLength(1);
@@ -347,4 +348,301 @@ it("跨版本缺失路径仍由后端核验快照，变化后的来源不能伪�
   await user.click(screen.getByRole("button", { name: "来源" }));
   expect(await screen.findByText("来源文件已变化，请重新加载")).toBeTruthy();
   expect(screen.queryByText("此版本中没有该文件")).toBeNull();
+});
+
+it("差异以完整并集导航，默认双栏阅读未变化文件并明确新增和删除的缺失侧", async () => {
+  const user = userEvent.setup();
+  const localFiles: Record<string, string> = { "SKILL.md": "# 一致的完整入口\n尾部正文", "local.txt": "当前安装独有全文" };
+  const sourceFiles: Record<string, string> = { "SKILL.md": localFiles["SKILL.md"], "source.txt": "来源独有全文" };
+  const file = (path: string) => ({ path, kind: "file", size: 40, error: null, link_target: null });
+  const entries = ["SKILL.md", "local.txt", "source.txt"].map(path => ({
+    path, local: path in localFiles ? file(path) : null, source: path in sourceFiles ? file(path) : null,
+    local_presence: path in localFiles ? "present" : "missing", source_presence: path in sourceFiles ? "present" : "missing",
+    status: path === "SKILL.md" ? "unchanged" : path === "local.txt" ? "removed" : "added",
+    content_changed: path !== "SKILL.md", exec_bits_before: 0, exec_bits_after: 0, reason: null,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "open_skill_browser") return { ...index, entries: Object.keys(localFiles).map(file), file_count: 2, directory_count: 0 };
+    if (command === "prepare_skill_browser_source") return { index: { ...index, entries: Object.keys(sourceFiles).map(file), directory_count: 0 }, revision: "abc123", source_label: "git", location: "来源快照" };
+    if (command === "get_skill_browser_diff") return { index: { ...index, entries: entries.map(entry => file(entry.path)), file_count: 3, directory_count: 0 }, entries, changed_file_count: 2, revision: "abc123", source_label: "git" };
+    if (command === "read_skill_browser_file") {
+      const { relativePath: path, side } = args as { relativePath: string; side: string };
+      const files = side === "source" ? sourceFiles : localFiles;
+      if (!(path in files)) throw { kind: "not_found", message: "此版本中没有该文件" };
+      return { path, kind: "text", size: 40, text: files[path], message: null };
+    }
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByRole("heading", { name: "一致的完整入口" });
+  await user.click(screen.getByRole("button", { name: "差异" }));
+  const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
+  expect(within(tree).getByText("未变化")).toBeTruthy();
+  expect(within(tree).getByText("3 个文件 · 0 个目录")).toBeTruthy();
+  expect(within(tree).getByText("2 个变化文件")).toBeTruthy();
+  expect((await within(screen.getByRole("region", { name: "当前安装" })).findByLabelText("文件原文")).textContent).toBe(localFiles["SKILL.md"]);
+  expect((await within(screen.getByRole("region", { name: "来源版本" })).findByLabelText("文件原文")).textContent).toBe(sourceFiles["SKILL.md"]);
+  await user.click(within(tree).getByRole("button", { name: "source.txt" }));
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText("此版本中没有该文件")).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText("来源独有全文")).toBeTruthy();
+  await user.click(within(tree).getByRole("button", { name: "local.txt" }));
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText("当前安装独有全文")).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText("此版本中没有该文件")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "来源" }));
+  expect(await screen.findByText("此版本中没有该文件")).toBeTruthy();
+});
+
+it("仅差异按所选文件展示片段、完整执行位和各自不可比较原因，并可恢复全文", async () => {
+  const user = userEvent.setup();
+  const file = (path: string) => ({ path, kind: "file", size: 30, error: null, link_target: null });
+  const statuses = { "SKILL.md": "modified", "chmod.sh": "modified", ".gitignore": "not_compared", "denied.txt": "uncomparable", "same.txt": "unchanged", "failed-preview.txt": "unchanged" };
+  const entries = Object.entries(statuses).map(([path, status]) => ({ path, local: file(path), source: file(path), local_presence: "present", source_presence: "present", status,
+    content_changed: path === "SKILL.md", exec_bits_before: path === "chmod.sh" ? 64 : 0, exec_bits_after: path === "chmod.sh" ? 8 : 0,
+    reason: path === ".gitignore" ? "此条目不参与 Skill 有效内容比较" : path === "denied.txt" ? "当前安装：权限不足" : null }));
+  const all = { ...index, entries: Object.keys(statuses).map(file), file_count: 6, directory_count: 0 };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "open_skill_browser") return all;
+    if (command === "prepare_skill_browser_source") return { index: all, revision: "workspace", source_label: "local", location: "来源目录" };
+    if (command === "get_skill_browser_diff") return { index: all, entries, changed_file_count: 2, revision: "workspace", source_label: "local" };
+    if (command === "read_skill_browser_file") {
+      const { relativePath: path, side } = args as { relativePath: string; side: string };
+      if (path === "failed-preview.txt" && side === "source") throw { kind: "io", message: "来源预览读取失败" };
+      if (path === "denied.txt" && side === "local") throw { kind: "io", message: "当前安装：权限不足" };
+      return { path, kind: "text", size: 30, text: path === "SKILL.md" ? `${side === "local" ? "旧入口行" : "新入口行"}\n保留的尾部` : "相同正文", message: null };
+    }
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByText("旧入口行 保留的尾部");
+  await user.click(screen.getByRole("button", { name: "差异" }));
+  await user.click(await screen.findByRole("button", { name: "仅差异" }));
+  expect(await screen.findByText("新入口行")).toBeTruthy();
+  expect(screen.getByText("旧入口行")).toBeTruthy();
+  expect(screen.getByText(/@@ -1,/)).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "完整内容" }));
+  expect(within(screen.getByRole("region", { name: "来源版本" })).getByLabelText("文件原文").textContent).toBe("新入口行\n保留的尾部");
+  await user.click(screen.getByRole("button", { name: "仅差异" }));
+  await user.click(screen.getByRole("button", { name: "chmod.sh" }));
+  expect(await screen.findByText("执行位 0100 → 0010")).toBeTruthy();
+  expect(screen.getByText("仅执行权限变化，文件内容相同")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: ".gitignore" }));
+  expect(await screen.findByText("此条目不参与 Skill 有效内容比较")).toBeTruthy();
+  expect(screen.getByText("此文件不参与比较，仍可查看完整内容")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "denied.txt" }));
+  expect(await screen.findByText("无法比较此文件，请查看原因或重新加载")).toBeTruthy();
+  expect(screen.getByText("当前安装：权限不足")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "same.txt" }));
+  expect(await screen.findByText("文件内容和执行权限均未变化")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "failed-preview.txt" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("来源预览读取失败");
+});
+
+it.each([
+  { scene: "双侧行数乘积", before: "短行\n".repeat(1500) + "左侧完整尾部", after: "短行\n".repeat(1500) + "右侧完整尾部" },
+  { scene: "单侧大量短行", before: "\n".repeat(25000) + "左侧完整尾部", after: "右侧完整尾部" },
+])("$scene 超过片段计算上限时明确说明，完整两侧文本仍可恢复", async ({ before, after }) => {
+  const user = userEvent.setup();
+  const file = { path: "SKILL.md", kind: "file", size: 18030, error: null, link_target: null };
+  const all = { ...index, entries: [file], file_count: 1, directory_count: 0 };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "open_skill_browser") return all;
+    if (command === "prepare_skill_browser_source") return { index: all, revision: "workspace", source_label: "local", location: "来源目录" };
+    if (command === "get_skill_browser_diff") return { index: all, entries: [{ path: "SKILL.md", local: file, source: file, local_presence: "present", source_presence: "present", status: "modified", content_changed: true, exec_bits_before: 0, exec_bits_after: 0, reason: null }], changed_file_count: 1, revision: "workspace", source_label: "local" };
+    if (command === "read_skill_browser_file") return { ...file, kind: "text", text: (args as { side: string }).side === "source" ? after : before, message: null };
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByRole("button", { name: "SKILL.md" });
+  await user.click(screen.getByRole("button", { name: "差异" }));
+  await user.click(await screen.findByRole("button", { name: "仅差异" }));
+  expect(await screen.findByText("文本行数超过片段计算上限，请查看完整内容")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "完整内容" }));
+  expect(within(screen.getByRole("region", { name: "当前安装" })).getByLabelText("文件原文").textContent).toBe(before);
+  expect(within(screen.getByRole("region", { name: "来源版本" })).getByLabelText("文件原文").textContent).toBe(after);
+});
+
+it("类型变化保留文件和目录两侧信息，混合路径仍可展开子文件并保留非文本原因", async () => {
+  const user = userEvent.setup();
+  const file = (path: string, kind = "file") => ({ path, kind, size: 300000, error: null, link_target: null });
+  const entries = [
+    { path: "changed", local: file("changed"), source: file("changed", "directory"), status: "modified", local_presence: "present", source_presence: "present", reason: "文件类型变化" },
+    { path: "changed/large.bin", local: null, source: file("changed/large.bin"), status: "added", local_presence: "missing", source_presence: "present", reason: null },
+  ].map(entry => ({ ...entry, exec_bits_before: 0, exec_bits_after: 0, content_changed: true }));
+  const all = { ...index, entry_path: "changed", entries: entries.map(entry => file(entry.path)), file_count: 2, directory_count: 0 };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "open_skill_browser") return { ...all, entries: [file("changed")] };
+    if (command === "prepare_skill_browser_source") return { index: { ...all, entries: [file("changed", "directory"), file("changed/large.bin")] }, revision: "workspace", source_label: "local", location: "来源目录" };
+    if (command === "get_skill_browser_diff") return { index: all, entries, changed_file_count: 2, revision: "workspace", source_label: "local" };
+    if (command === "read_skill_browser_file") {
+      const { relativePath: path, side } = args as { relativePath: string; side: string };
+      if (path === "changed/large.bin" && side === "local") throw { kind: "not_found", message: "此版本中没有该文件" };
+      return { path, kind: side === "local" ? "binary" : path === "changed" ? "directory" : "too_large", size: 300000, text: null, message: null };
+    }
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "差异" }));
+  const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
+  await user.click(within(tree).getByRole("button", { name: "changed" }));
+  expect(within(tree).getByRole("button", { name: "changed" }).getAttribute("aria-expanded")).toBe("true");
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText(i18n.t("skillBrowser.previewKind.binary"))).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText(i18n.t("skillBrowser.previewKind.directory"))).toBeTruthy();
+  await user.click(within(tree).getByRole("button", { name: "changed/large.bin" }));
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText(i18n.t("skillBrowser.previewKind.too_large"))).toBeTruthy();
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText("此版本中没有该文件")).toBeTruthy();
+});
+
+it("差异两侧读取绑定当前路径，存在性未知保留读取原因，失效快照要求重试", async () => {
+  const user = userEvent.setup();
+  let finishOldSource: ((value: unknown) => void) | undefined;
+  let sourceChanged = false;
+  const file = (path: string) => ({ path, kind: "file", size: 30, error: null, link_target: null });
+  const paths = ["SKILL.md", "next.txt", "unknown.txt"];
+  const all = { ...index, entries: paths.map(file), file_count: 3, directory_count: 0 };
+  const entries = paths.map(path => ({ path, local: path === "unknown.txt" ? null : file(path), source: file(path), status: path === "unknown.txt" ? "uncomparable" : "modified", local_presence: path === "unknown.txt" ? "unknown" : "present", source_presence: "present", reason: path === "unknown.txt" ? "目录未完整读取，无法确定文件是否存在" : null, content_changed: true, exec_bits_before: 0, exec_bits_after: 0 }));
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "open_skill_browser") return Promise.resolve({ ...all, complete: false, entries: paths.slice(0, 2).map(file), file_count: 2, issues: ["目录未完整读取"] });
+    if (command === "prepare_skill_browser_source") return Promise.resolve({ index: all, revision: "workspace", source_label: "local", location: "来源目录" });
+    if (command === "get_skill_browser_diff") return Promise.resolve({ index: { ...all, complete: false, issues: ["目录未完整读取"] }, entries, changed_file_count: 2, revision: "workspace", source_label: "local" });
+    if (command === "read_skill_browser_file") {
+      const { relativePath: path, side } = args as { relativePath: string; side: string };
+      if (path === "SKILL.md" && side === "source") return new Promise(resolve => { finishOldSource = resolve; });
+      if (path === "unknown.txt" && side === "local") return Promise.reject({ kind: "io", message: "目录未完整读取，无法确定文件是否存在" });
+      if (path === "next.txt" && side === "source" && sourceChanged) return Promise.reject({ kind: "stale_snapshot", message: "来源快照已变化，请重新加载" });
+      return Promise.resolve({ path, kind: "text", size: 30, text: side === "source" ? "当前路径的来源全文" : "当前路径的安装全文", message: null });
+    }
+    if (command === "close_skill_browser") return Promise.resolve();
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByText("当前路径的安装全文");
+  await user.click(screen.getByRole("button", { name: "差异" }));
+  const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
+  await user.click(within(tree).getByRole("button", { name: "next.txt" }));
+  expect(await within(screen.getByRole("region", { name: "来源版本" })).findByText("当前路径的来源全文")).toBeTruthy();
+  await act(async () => { finishOldSource?.({ path: "SKILL.md", kind: "text", size: 20, text: "旧路径的迟到来源", message: null }); });
+  expect(screen.queryByText("旧路径的迟到来源")).toBeNull();
+  await user.click(within(tree).getByRole("button", { name: "unknown.txt" }));
+  expect(await within(screen.getByRole("region", { name: "当前安装" })).findByText("目录未完整读取，无法确定文件是否存在")).toBeTruthy();
+  expect(screen.queryByText("此版本中没有该文件")).toBeNull();
+  sourceChanged = true;
+  await user.click(within(tree).getByRole("button", { name: "next.txt" }));
+  expect(await screen.findByText("来源快照已变化，请重新加载")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "重新准备来源" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "本地文件" }));
+  expect(await screen.findByText("当前路径的安装全文")).toBeTruthy();
+});
+
+it("英文详情翻译受控差异原因与未知存在性提示，并保留真实 I/O 诊断", async () => {
+  await i18n.changeLanguage("en");
+  const user = userEvent.setup();
+  const file = (path: string, kind = "file") => ({ path, kind, size: 20, error: null, link_target: null });
+  const entries = [
+    { path: ".gitignore", local: file(".gitignore"), source: file(".gitignore"), status: "not_compared", reason_code: "excluded" },
+    { path: "link", local: file("link", "symlink"), source: file("link", "symlink"), status: "not_compared", reason_code: "unsupported_type" },
+    { path: "changed", local: file("changed"), source: file("changed", "directory"), status: "modified", reason_code: "type_changed" },
+    { path: "unknown", local: null, source: file("unknown"), status: "uncomparable", reason_code: "unknown_presence" },
+    { path: "io.txt", local: file("io.txt"), source: file("io.txt"), status: "uncomparable", reason_code: null },
+  ].map(entry => ({ ...entry, local_presence: entry.local ? "present" : "unknown", source_presence: "present", content_changed: null, exec_bits_before: null, exec_bits_after: null, reason: entry.path === "io.txt" ? "EACCES: fixture diagnostic" : null }));
+  const all = { ...index, entry_path: ".gitignore", entries: entries.map(entry => entry.local ?? entry.source), file_count: 5, directory_count: 0 };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "open_skill_browser") return { ...all, entries: entries.flatMap(entry => entry.local ? [entry.local] : []), complete: false, issues: ["EACCES: fixture diagnostic"] };
+    if (command === "prepare_skill_browser_source") return { index: all, revision: "workspace", source_label: "local", location: "fixture" };
+    if (command === "get_skill_browser_diff") return { index: all, entries, changed_file_count: 1, revision: "workspace", source_label: "local" };
+    if (command === "read_skill_browser_file") {
+      const { relativePath: path, side } = args as { relativePath: string; side: string };
+      if (path === "unknown" && side === "local") throw { kind: "unknown_presence", message: "目录未完整读取，无法确定此版本中是否存在该文件" };
+      return { path, kind: "text", size: 20, text: "fixture", message: null };
+    }
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  try {
+    await user.click(await screen.findByRole("button", { name: i18n.t("mySkills.docTabs.diff") }));
+    await screen.findByRole("navigation", { name: "Complete comparison file tree" });
+    expect(await screen.findByText("This entry is excluded from Skill effective content comparison")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "link" }));
+    expect(await screen.findByText("Symbolic links and special files show information only; their targets are not read or compared")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "changed" }));
+    expect(await screen.findByText("File type changed; inspect the entry information for both versions")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "unknown" }));
+    expect(await within(screen.getByRole("region", { name: "Current installation" })).findByText("The directory listing is incomplete; this entry's presence cannot be determined")).toBeTruthy();
+    expect(screen.queryByText("目录未完整读取，无法确定此版本中是否存在该文件")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "io.txt" }));
+    expect(screen.getByText("EACCES: fixture diagnostic")).toBeTruthy();
+  } finally {
+    unmount();
+    await i18n.changeLanguage("zh");
+  }
+});
+
+it("差异树保留来源目录的枚举错误，只有两侧已确认的空目录才提示空目录", async () => {
+  const user = userEvent.setup();
+  const directory = (path: string, error: string | null = null) => ({ path, kind: "directory", size: 0, error, link_target: null });
+  const sourceError = "Permission denied (os error 13)";
+  const localEntries = [directory("restricted"), directory("empty")];
+  const sourceEntries = [directory("restricted", sourceError), directory("empty")];
+  const all = { ...index, entry_path: null, entries: localEntries, file_count: 0, directory_count: 2 };
+  vi.mocked(invoke).mockImplementation(async command => {
+    if (command === "open_skill_browser") return all;
+    if (command === "prepare_skill_browser_source") return { index: { ...all, entries: sourceEntries, complete: false, issues: [sourceError] }, revision: "workspace", source_label: "local", location: "来源目录" };
+    if (command === "get_skill_browser_diff") return { index: { ...all, entries: sourceEntries, complete: false, issues: [sourceError] }, entries: localEntries.map((local, i) => ({ path: local.path, local, source: sourceEntries[i], local_presence: "present", source_presence: "present", status: null, reason_code: null, reason: null, content_changed: null, exec_bits_before: null, exec_bits_after: null })), changed_file_count: 0, revision: "workspace", source_label: "local" };
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "差异" }));
+  const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
+  await user.click(within(tree).getByRole("button", { name: "restricted" }));
+  expect(within(tree).queryByText("空目录")).toBeNull();
+  expect(within(tree).getAllByText(sourceError)).toHaveLength(2);
+  expect(within(tree).getByText("目录未完整读取")).toBeTruthy();
+  await user.click(within(tree).getByRole("button", { name: "empty" }));
+  expect(within(tree).getByText("空目录")).toBeTruthy();
+});
+
+it.each(["local", "source"] as const)("%s 祖先目录读取失败时，差异子目录使用翻译后的未知提示而非空目录", async blockedSide => {
+  await i18n.changeLanguage("en");
+  const user = userEvent.setup();
+  const directory = (path: string, error: string | null = null) => ({ path, kind: "directory", size: 0, error, link_target: null });
+  const diagnostic = "Permission denied (os error 13)";
+  const completeEntries = [directory("restricted"), directory("restricted/empty"), directory("empty")];
+  const incompleteEntries = [directory("restricted", diagnostic), directory("empty")];
+  const complete = { ...index, entry_path: null, entries: completeEntries, file_count: 0, directory_count: 3 };
+  const incomplete = { ...complete, entries: incompleteEntries, directory_count: 2, complete: false, issues: [diagnostic] };
+  const localIndex = blockedSide === "local" ? incomplete : complete;
+  const sourceIndex = blockedSide === "source" ? incomplete : complete;
+  const entries = completeEntries.map(entry => {
+    const local = localIndex.entries.find(candidate => candidate.path === entry.path) ?? null;
+    const source = sourceIndex.entries.find(candidate => candidate.path === entry.path) ?? null;
+    return { path: entry.path, local, source, local_presence: local ? "present" : "unknown", source_presence: source ? "present" : "unknown", status: null, reason_code: !local || !source ? "unknown_presence" : null, reason: null, content_changed: null, exec_bits_before: null, exec_bits_after: null };
+  });
+  vi.mocked(invoke).mockImplementation(async command => {
+    if (command === "open_skill_browser") return localIndex;
+    if (command === "prepare_skill_browser_source") return { index: sourceIndex, revision: "workspace", source_label: "local", location: "来源目录" };
+    if (command === "get_skill_browser_diff") return { index: { ...incomplete, entries: [directory("restricted", diagnostic), ...completeEntries.slice(1)], directory_count: 3 }, entries, changed_file_count: 0, revision: "workspace", source_label: "local" };
+    if (command === "close_skill_browser") return;
+    throw new Error(`不应调用 ${command}`);
+  });
+  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  try {
+    await user.click(await screen.findByRole("button", { name: i18n.t("mySkills.docTabs.diff") }));
+    const tree = await screen.findByRole("navigation", { name: "Complete comparison file tree" });
+    await user.click(within(tree).getByRole("button", { name: "restricted" }));
+    await user.click(within(tree).getByRole("button", { name: "restricted/empty" }));
+    expect(within(tree).queryByText(i18n.t("skillBrowser.emptyDirectory"))).toBeNull();
+    expect(within(tree).getByText("The directory listing is incomplete; this entry's presence cannot be determined")).toBeTruthy();
+    expect(within(tree).getAllByText(diagnostic)).toHaveLength(2);
+    await user.click(within(tree).getByRole("button", { name: "empty" }));
+    expect(within(tree).getByText(i18n.t("skillBrowser.emptyDirectory"))).toBeTruthy();
+    expect(within(tree).getByText(i18n.t("skillBrowser.changedFiles", { count: 0 }))).toBeTruthy();
+  } finally {
+    unmount();
+    await i18n.changeLanguage("zh");
+  }
 });

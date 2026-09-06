@@ -409,7 +409,7 @@ pub async fn get_skill_browser_diff(
     skill_id: String,
     session_id: String,
     browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
-) -> Result<SkillSourceDiffDto, AppError> {
+) -> Result<crate::core::skill_browser::BrowserDiff, AppError> {
     let browser = browser.inner().clone();
     tauri::async_runtime::spawn_blocking(move || browser.source_diff(&skill_id, &session_id))
         .await?
@@ -3560,11 +3560,10 @@ mod tests {
         let diff = browser.source_diff(&skill.id, &index.session_id).unwrap();
         assert_eq!(diff.revision, first);
         assert_eq!(
-            diff.entries
-                .iter()
-                .find(|entry| entry.relative_path == "SKILL.md")
+            browser
+                .read_side(&skill.id, &index.session_id, "SKILL.md", "source")
                 .unwrap()
-                .updated_text
+                .text
                 .as_deref(),
             Some("# 第一版")
         );
@@ -3680,6 +3679,419 @@ mod tests {
                 .as_deref(),
             Some("新资料")
         );
+    }
+
+    #[test]
+    fn skill_browser_compares_the_complete_union_without_changing_effective_content() {
+        use crate::core::{content_hash, skill_browser::SkillBrowser};
+        let repo = test_repo();
+        let installed = write_skill_dir("complete-diff");
+        let source = tempfile::tempdir().unwrap();
+        fs::write(installed.join("SKILL.md"), "# 同一入口").unwrap();
+        fs::write(source.path().join("SKILL.md"), "# 同一入口").unwrap();
+        fs::write(installed.join("local.txt"), "安装独有").unwrap();
+        fs::write(source.path().join("source.txt"), "来源独有").unwrap();
+        fs::write(installed.join(".hidden"), "旧隐藏内容").unwrap();
+        fs::write(source.path().join(".hidden"), "新隐藏内容").unwrap();
+        fs::create_dir_all(installed.join(".git/objects")).unwrap();
+        fs::write(installed.join(".git/objects/cache"), "管理数据").unwrap();
+        fs::write(source.path().join("generated.pyc"), "编译缓存").unwrap();
+        fs::create_dir(source.path().join("empty")).unwrap();
+        let before = content_hash::hash_directory(&installed).unwrap();
+        let after = content_hash::hash_directory(source.path()).unwrap();
+        let mut skill = sample_skill("complete-diff", "complete-diff", &installed);
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let result =
+            serde_json::to_value(browser.source_diff(&skill.id, &local.session_id).unwrap())
+                .unwrap();
+        let paths: Vec<_> = result["index"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                ".git",
+                ".git/objects",
+                ".git/objects/cache",
+                ".hidden",
+                "SKILL.md",
+                "empty",
+                "generated.pyc",
+                "local.txt",
+                "source.txt"
+            ]
+        );
+        let entries = result["entries"].as_array().unwrap();
+        let status =
+            |path| entries.iter().find(|entry| entry["path"] == path).unwrap()["status"].clone();
+        assert_eq!(status("SKILL.md"), "unchanged");
+        assert_eq!(status(".hidden"), "modified");
+        assert_eq!(status("local.txt"), "removed");
+        assert_eq!(status("source.txt"), "added");
+        assert_eq!(status(".git/objects/cache"), "not_compared");
+        assert_eq!(status("generated.pyc"), "not_compared");
+        assert_eq!(
+            entries
+                .iter()
+                .find(|entry| entry["path"] == "generated.pyc")
+                .unwrap()["reason_code"],
+            "excluded"
+        );
+        assert_eq!(status("empty"), serde_json::Value::Null);
+        assert_eq!(result["index"]["file_count"], 6);
+        assert_eq!(result["index"]["directory_count"], 3);
+        assert_eq!(result["changed_file_count"], 3);
+        assert_eq!(content_hash::hash_directory(&installed).unwrap(), before);
+        assert_eq!(content_hash::hash_directory(source.path()).unwrap(), after);
+        assert_eq!(
+            repo.store
+                .get_skill_by_id(&skill.id)
+                .unwrap()
+                .unwrap()
+                .source_revision,
+            skill.source_revision
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_keeps_read_failures_and_unknown_absence_in_the_diff() {
+        use crate::core::{error::ErrorKind, skill_browser::SkillBrowser};
+        use std::os::unix::fs::PermissionsExt;
+        let repo = test_repo();
+        let installed = write_skill_dir("partial-diff");
+        let source = tempfile::tempdir().unwrap();
+        for root in [&installed, &source.path().to_path_buf()] {
+            fs::write(root.join("SKILL.md"), "# 可读的一致正文").unwrap();
+            fs::write(root.join("denied.txt"), "不可读正文").unwrap();
+            fs::create_dir(root.join("restricted")).unwrap();
+            fs::write(root.join("restricted/nested.txt"), "无法判断另一侧是否存在").unwrap();
+        }
+        fs::set_permissions(
+            installed.join("denied.txt"),
+            fs::Permissions::from_mode(0o0),
+        )
+        .unwrap();
+        fs::set_permissions(
+            installed.join("restricted"),
+            fs::Permissions::from_mode(0o0),
+        )
+        .unwrap();
+        fs::write(source.path().join("known-added.txt"), "已确认本地缺失").unwrap();
+        let permissions_enforced = fs::read(installed.join("denied.txt")).is_err();
+        let mut skill = sample_skill("partial-diff", "partial-diff", &installed);
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let result = browser.source_diff(&skill.id, &local.session_id);
+        let known_missing = browser.read(&skill.id, &local.session_id, "known-added.txt");
+        let missing_read = browser.read(&skill.id, &local.session_id, "restricted/nested.txt");
+        fs::set_permissions(
+            installed.join("denied.txt"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        fs::set_permissions(
+            installed.join("restricted"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        if !permissions_enforced {
+            eprintln!("当前用户不受权限限制，权限场景未执行");
+            return;
+        }
+        let result = result.unwrap();
+        assert!(!result.index.complete);
+        assert_eq!(result.changed_file_count, 1);
+        assert_eq!(known_missing.unwrap_err().kind, ErrorKind::NotFound);
+        assert_eq!(
+            result
+                .entries
+                .iter()
+                .find(|entry| entry.path == "known-added.txt")
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("added")
+        );
+        let denied = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == "denied.txt")
+            .unwrap();
+        assert_eq!(denied.status.as_deref(), Some("uncomparable"));
+        assert!(denied.reason.is_some());
+        let nested = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == "restricted/nested.txt")
+            .unwrap();
+        assert_eq!(nested.status.as_deref(), Some("uncomparable"));
+        assert_eq!(nested.local_presence, "unknown");
+        assert_eq!(nested.source_presence, "present");
+        assert_eq!(missing_read.unwrap_err().kind, ErrorKind::UnknownPresence);
+        assert_eq!(nested.reason_code.as_deref(), Some("unknown_presence"));
+        assert_eq!(
+            result
+                .entries
+                .iter()
+                .find(|entry| entry.path == "SKILL.md")
+                .unwrap()
+                .status
+                .as_deref(),
+            Some("unchanged")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_preserves_source_directory_failure_in_the_union() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::os::unix::fs::PermissionsExt;
+        let repo = test_repo();
+        let installed = write_skill_dir("unreadable-source-directory");
+        let source = tempfile::tempdir().unwrap();
+        fs::create_dir(installed.join("restricted")).unwrap();
+        fs::create_dir(source.path().join("restricted")).unwrap();
+        fs::write(
+            source.path().join("restricted/hidden.txt"),
+            "无法枚举的来源文件",
+        )
+        .unwrap();
+        fs::set_permissions(
+            source.path().join("restricted"),
+            fs::Permissions::from_mode(0o0),
+        )
+        .unwrap();
+        let permissions_enforced = fs::read_dir(source.path().join("restricted")).is_err();
+        let mut skill = sample_skill(
+            "unreadable-source-directory",
+            "unreadable-source-directory",
+            &installed,
+        );
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let result = browser.source_diff(&skill.id, &local.session_id);
+        fs::set_permissions(
+            source.path().join("restricted"),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        if !permissions_enforced {
+            eprintln!("当前用户不受权限限制，权限场景未执行");
+            return;
+        }
+        let result = result.unwrap();
+        let comparison = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == "restricted")
+            .unwrap();
+        assert!(comparison.local.as_ref().unwrap().error.is_none());
+        let source_error = comparison.source.as_ref().unwrap().error.as_ref().unwrap();
+        let directory = result
+            .index
+            .entries
+            .iter()
+            .find(|entry| entry.path == "restricted")
+            .unwrap();
+        assert_eq!(directory.error.as_ref(), Some(source_error));
+        assert!(!result.index.complete);
+        assert_eq!(comparison.status, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_keeps_directory_presence_unknown_under_unreadable_ancestors() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::os::unix::fs::PermissionsExt;
+        for blocked_side in ["local", "source"] {
+            let repo = test_repo();
+            let installed = write_skill_dir("unknown-directory");
+            let source = tempfile::tempdir().unwrap();
+            fs::copy(installed.join("SKILL.md"), source.path().join("SKILL.md")).unwrap();
+            for root in [installed.as_path(), source.path()] {
+                fs::create_dir_all(root.join("restricted/empty")).unwrap();
+                fs::create_dir(root.join("empty")).unwrap();
+            }
+            let blocked = if blocked_side == "local" {
+                installed.join("restricted")
+            } else {
+                source.path().join("restricted")
+            };
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o0)).unwrap();
+            let permissions_enforced = fs::read_dir(&blocked).is_err();
+            let mut skill = sample_skill("unknown-directory", "unknown-directory", &installed);
+            skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+            repo.store.insert_skill(&skill).unwrap();
+            let browser = SkillBrowser::default();
+            let local = browser.open(&repo.store, &skill.id).unwrap();
+            let result = browser.source_diff(&skill.id, &local.session_id);
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+            if !permissions_enforced {
+                eprintln!("当前用户不受权限限制，权限场景未执行");
+                continue;
+            }
+            let result = result.unwrap();
+            let descendant = result
+                .entries
+                .iter()
+                .find(|entry| entry.path == "restricted/empty")
+                .unwrap();
+            let (presence, side) = if blocked_side == "local" {
+                (&descendant.local_presence, &descendant.local)
+            } else {
+                (&descendant.source_presence, &descendant.source)
+            };
+            assert_eq!(presence, "unknown");
+            assert!(side.is_none());
+            assert_eq!(descendant.reason_code.as_deref(), Some("unknown_presence"));
+            assert!(descendant.reason.is_none());
+            assert!(descendant.status.is_none());
+            let known_empty = result
+                .entries
+                .iter()
+                .find(|entry| entry.path == "empty")
+                .unwrap();
+            assert_eq!(known_empty.local_presence, "present");
+            assert_eq!(known_empty.source_presence, "present");
+            assert!(known_empty.reason_code.is_none());
+            assert!(known_empty.status.is_none());
+            assert_eq!(result.changed_file_count, 0);
+            assert!(!result.index.complete);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_compares_execution_bits_nontext_and_type_changes_without_reading_link_targets()
+    {
+        use crate::core::{
+            content_hash,
+            skill_browser::{SkillBrowser, MAX_PREVIEW_BYTES},
+        };
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let repo = test_repo();
+        let installed = write_skill_dir("typed-diff");
+        let source = tempfile::tempdir().unwrap();
+        for root in [&installed, &source.path().to_path_buf()] {
+            fs::write(root.join("SKILL.md"), "# 一致").unwrap();
+            fs::write(root.join("mode.sh"), "只读，不执行").unwrap();
+        }
+        fs::set_permissions(installed.join("mode.sh"), fs::Permissions::from_mode(0o744)).unwrap();
+        fs::set_permissions(
+            source.path().join("mode.sh"),
+            fs::Permissions::from_mode(0o654),
+        )
+        .unwrap();
+        assert_ne!(
+            content_hash::hash_directory(&installed).unwrap(),
+            content_hash::hash_directory(source.path()).unwrap()
+        );
+        fs::write(installed.join("binary.bin"), [0, 1]).unwrap();
+        fs::write(source.path().join("binary.bin"), [0, 2]).unwrap();
+        fs::write(installed.join("encoding.txt"), [0xff, 0xfe]).unwrap();
+        fs::write(source.path().join("encoding.txt"), [0xff, 0xfe]).unwrap();
+        fs::write(
+            installed.join("large.txt"),
+            vec![b'a'; MAX_PREVIEW_BYTES + 1],
+        )
+        .unwrap();
+        fs::write(
+            source.path().join("large.txt"),
+            vec![b'b'; MAX_PREVIEW_BYTES + 1],
+        )
+        .unwrap();
+        fs::write(installed.join("file-to-dir"), "原文件").unwrap();
+        fs::create_dir(source.path().join("file-to-dir")).unwrap();
+        fs::write(source.path().join("file-to-dir/nested.txt"), "目录内新增").unwrap();
+        fs::create_dir(installed.join("dir-to-file")).unwrap();
+        fs::write(installed.join("dir-to-file/nested.txt"), "目录内删除").unwrap();
+        fs::write(source.path().join("dir-to-file"), "来源文件").unwrap();
+        fs::write(installed.join("file-to-link"), "原文件").unwrap();
+        symlink("/不允许读取的目标", source.path().join("file-to-link")).unwrap();
+        symlink("/目标之一", installed.join("link-only")).unwrap();
+        symlink("/目标之二", source.path().join("link-only")).unwrap();
+        let before = content_hash::hash_directory(&installed).unwrap();
+        let after = content_hash::hash_directory(source.path()).unwrap();
+        let mut skill = sample_skill("typed-diff", "typed-diff", &installed);
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let diff = browser.source_diff(&skill.id, &local.session_id).unwrap();
+        let entry = |path| {
+            diff.entries
+                .iter()
+                .find(|entry| entry.path == path)
+                .unwrap()
+        };
+        let mode = entry("mode.sh");
+        assert_eq!(mode.status.as_deref(), Some("modified"));
+        assert_eq!(
+            (
+                mode.exec_bits_before,
+                mode.exec_bits_after,
+                mode.content_changed
+            ),
+            (Some(0o100), Some(0o010), Some(false))
+        );
+        for path in [
+            "binary.bin",
+            "large.txt",
+            "file-to-dir",
+            "dir-to-file",
+            "file-to-link",
+        ] {
+            assert_eq!(entry(path).status.as_deref(), Some("modified"), "{path}");
+        }
+        assert_eq!(entry("file-to-dir").local.as_ref().unwrap().kind, "file");
+        assert_eq!(
+            entry("file-to-dir").source.as_ref().unwrap().kind,
+            "directory"
+        );
+        assert_eq!(
+            entry("file-to-dir").reason_code.as_deref(),
+            Some("type_changed")
+        );
+        assert_eq!(
+            entry("file-to-dir/nested.txt").status.as_deref(),
+            Some("added")
+        );
+        assert_eq!(
+            entry("dir-to-file/nested.txt").status.as_deref(),
+            Some("removed")
+        );
+        assert_eq!(entry("link-only").status.as_deref(), Some("not_compared"));
+        assert_eq!(
+            entry("link-only").reason_code.as_deref(),
+            Some("unsupported_type")
+        );
+        assert_eq!(entry("encoding.txt").status.as_deref(), Some("unchanged"));
+        assert_eq!(diff.changed_file_count, 8);
+        for (path, expected) in [
+            ("large.txt", "too_large"),
+            ("binary.bin", "binary"),
+            ("encoding.txt", "unsupported_encoding"),
+            ("file-to-link", "symlink"),
+        ] {
+            let preview = browser
+                .read_side(&skill.id, &local.session_id, path, "source")
+                .unwrap();
+            assert_eq!(preview.kind, expected);
+            assert!(preview.text.is_none());
+        }
+        assert_eq!(content_hash::hash_directory(&installed).unwrap(), before);
+        assert_eq!(content_hash::hash_directory(source.path()).unwrap(), after);
     }
 
     #[test]

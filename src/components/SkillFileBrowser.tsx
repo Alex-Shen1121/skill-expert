@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, File, FileText, Folder, Link2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { SkillBrowserIndex, SkillFilePreview } from "../lib/tauri";
+import type { SkillBrowserIndex, SkillFilePreview, SkillBrowserDiff } from "../lib/tauri";
 import { SkillMarkdown } from "./SkillMarkdown";
 import "./SkillFileBrowser.css";
+import { SkillFileText } from "./SkillFileText";
+import { SkillSourceDiffViewer } from "./SkillSourceDiffViewer";
 
 interface Props {
   index: SkillBrowserIndex;
@@ -14,16 +16,21 @@ interface Props {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  side?: "local" | "source";
+  side?: "local" | "source" | "diff";
+  diff?: SkillBrowserDiff | null;
+  sourcePreview?: SkillFilePreview | null;
+  sourceError?: string | null;
 }
 
-export function SkillFileBrowser({ index, selected, onSelect, preview, loading, error, onRetry, side = "local" }: Props) {
+export function SkillFileBrowser({ index, selected, onSelect, preview, loading, error, onRetry, side = "local", diff, sourcePreview = null, sourceError = null }: Props) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState<string[]>([]);
   const [treeVisible, setTreeVisible] = useState(true);
   const [query, setQuery] = useState("");
   const [raw, setRaw] = useState(false);
+  const [onlyDiff, setOnlyDiff] = useState(false);
   const [linkError, setLinkError] = useState<{ path: string | null; side: string; session: string; message: string } | null>(null);
+  const comparisons = useMemo(() => new Map(diff?.entries.map(entry => [entry.path, entry])), [diff]);
   const search = query.trim().toLocaleLowerCase();
   const chooseFile = (path: string) => {
     const parts = path.split("/");
@@ -76,20 +83,24 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
         {search && !visibleEntries.length && <p className="skill-file-empty">{t("skillBrowser.noMatches")}</p>}
         {visibleEntries.map(entry => {
           const depth = search ? 0 : entry.path.split("/").length - 1;
+          const comparison = comparisons.get(entry.path);
           const isDirectory = entry.kind === "directory";
+          const directoryMessage = entry.error || (comparison?.reason_code === "unknown_presence" ? t("skillBrowser.diffReason.unknown_presence") : null);
+          const isContainer = isDirectory || comparison?.local?.kind === "directory" || comparison?.source?.kind === "directory";
           const isExpanded = expanded.includes(entry.path);
           const Icon = isDirectory ? Folder : entry.kind === "symlink" ? Link2 : /\.md$/i.test(entry.path) ? FileText : File;
           return <div key={entry.path}>
             <button className="skill-file-row" title={entry.path} aria-label={entry.path} aria-current={selected === entry.path ? "true" : undefined}
-              aria-expanded={isDirectory ? isExpanded : undefined} style={{ paddingLeft: 12 + depth * 14 }}
-              onClick={() => isDirectory ? setExpanded(current => isExpanded ? current.filter(path => path !== entry.path) : [...current, entry.path]) : chooseFile(entry.path)}>
-              {isDirectory ? isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : <span className="skill-file-indent" />}
+              aria-expanded={isContainer ? isExpanded : undefined} style={{ paddingLeft: 12 + depth * 14 }}
+              onClick={() => { if (isContainer) setExpanded(current => isExpanded ? current.filter(path => path !== entry.path) : [...current, entry.path]); if (!isDirectory) chooseFile(entry.path); }}>
+              {isContainer ? isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : <span className="skill-file-indent" />}
               <Icon size={16} /><span className={search ? "skill-file-result-path" : "skill-file-name"}>{search ? entry.path : entry.path.split("/").pop()}</span>
               {entry.path === index.entry_path && <small>{t("skillBrowser.entry")}</small>}
               {entry.kind === "symlink" && <small>{t("skillBrowser.link")}</small>}
               {entry.error && <small title={entry.error}>!</small>}
+              {comparison?.status && <small>{t(`skillBrowser.diffStatus.${comparison.status}`)}</small>}
             </button>
-            {isDirectory && isExpanded && (entry.error || !index.entries.some(child => child.path.startsWith(`${entry.path}/`))) && <p className="skill-file-empty" style={{ paddingLeft: 40 + depth * 14 }}>{entry.error || t("skillBrowser.emptyDirectory")}</p>}
+            {isDirectory && isExpanded && (directoryMessage || !index.entries.some(child => child.path.startsWith(`${entry.path}/`))) && <p className="skill-file-empty" style={{ paddingLeft: 40 + depth * 14 }}>{directoryMessage || t("skillBrowser.emptyDirectory")}</p>}
           </div>;
         })}
         {index.complete && !index.entries.length && <p className="skill-file-empty">{t("skillBrowser.emptyDirectory")}</p>}
@@ -97,6 +108,7 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
       <div className="skill-file-footer">
         <span>{t(index.complete ? "skillBrowser.counts" : "skillBrowser.partialCounts", { files: index.file_count, directories: index.directory_count })}</span>
         <span>{t("skillBrowser.includesHidden")}</span>
+        {diff && <span>{t("skillBrowser.changedFiles", { count: diff.changed_file_count })}</span>}
         {!index.complete && <><span role="alert">{t("skillBrowser.incomplete")}</span>{index.issues.map(issue => <span key={issue}>{issue}</span>)}<button onClick={onRetry}>{t("skillBrowser.reload")}</button></>}
       </div>
     </nav>}
@@ -104,15 +116,19 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
       <div className="skill-file-toolbar">
         <button aria-label={t(treeVisible ? "skillBrowser.hideTree" : "skillBrowser.showTree")} onClick={() => setTreeVisible(!treeVisible)}>{treeVisible ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}</button>
         <span className="skill-file-path" title={selected ?? undefined}>{selected ?? t("skillBrowser.chooseFile")}</span>
-        {selected && /\.md$/i.test(selected) && preview?.kind === "text" && <div className="skill-file-modes" aria-label={t("skillBrowser.previewMode")}>
+        {side !== "diff" && selected && /\.md$/i.test(selected) && preview?.kind === "text" && <div className="skill-file-modes" aria-label={t("skillBrowser.previewMode")}>
           <button aria-pressed={!raw} onClick={() => setRaw(false)}>{t("skillBrowser.body")}</button>
           <button aria-pressed={raw} onClick={() => setRaw(true)}>{t("skillBrowser.raw")}</button>
+        </div>}
+        {side === "diff" && <div className="skill-file-modes" aria-label={t("skillBrowser.previewMode")}>
+          <button aria-pressed={!onlyDiff} onClick={() => setOnlyDiff(false)}>{t("skillBrowser.fullContent")}</button>
+          <button aria-pressed={onlyDiff} onClick={() => setOnlyDiff(true)}>{t("skillBrowser.onlyDiff")}</button>
         </div>}
         <small>{t("skillBrowser.readOnly")}</small>
       </div>
       {linkError?.path === selected && linkError?.side === side && linkError?.session === index.session_id && <p role="alert" className="skill-file-link-error">{linkError.message}</p>}
       <div className="skill-file-content" key={selected}>
-        {loading ? <p role="status" className="skill-file-message">{t("common.loading")}</p>
+        {side === "diff" ? <SkillSourceDiffViewer onlyDiff={onlyDiff} entry={comparisons.get(selected ?? "") ?? null} original={preview} updated={sourcePreview} originalError={error} updatedError={sourceError} onRetry={onRetry} /> : loading ? <p role="status" className="skill-file-message">{t("common.loading")}</p>
           : error ? <div role="alert" className="skill-file-message"><p>{error}</p><button onClick={onRetry}>{t("skillBrowser.reload")}</button></div>
           : !selected ? <p className="skill-file-message">{t("skillBrowser.chooseFile")}</p>
           : preview?.kind === "text" ? /\.md$/i.test(selected) && !raw
@@ -122,14 +138,5 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
           : null}
       </div>
     </section>
-  </div>;
-}
-
-
-export function SkillFileText({ text }: { text: string }) {
-  const { t } = useTranslation();
-  return <div className="skill-file-code">
-    <pre aria-hidden="true">{Array.from({ length: text.split("\n").length }, (_, number) => number + 1).join("\n")}</pre>
-    <pre aria-label={t("skillBrowser.rawContent")}>{text}</pre>
   </div>;
 }

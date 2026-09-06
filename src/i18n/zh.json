@@ -1438,6 +1438,46 @@
     "snapshotRevision": "本次来源版本",
     "workspaceSnapshot": "原始目录快照",
     "noSource": "此 Skill 没有记录可浏览的来源",
-    "retrySource": "重新准备来源"
+    "retrySource": "重新准备来源",
+    "diffTree": "差异完整文件目录",
+    "diffPreview": "差异只读预览",
+    "changedFiles": "{{count}} 个变化文件",
+    "diffSide": {
+      "local": "当前安装",
+      "source": "来源版本"
+    },
+    "diffStatus": {
+      "added": "新增",
+      "removed": "删除",
+      "modified": "修改",
+      "unchanged": "未变化",
+      "not_compared": "不比较",
+      "uncomparable": "无法比较"
+    },
+    "entryKind": {
+      "file": "文件",
+      "directory": "目录",
+      "symlink": "符号链接",
+      "special": "特殊文件",
+      "unreadable": "无法读取"
+    },
+    "fullContent": "完整内容",
+    "onlyDiff": "仅差异",
+    "unchangedContent": "文件内容和执行权限均未变化",
+    "notComparedContent": "此文件不参与比较，仍可查看完整内容",
+    "uncomparableContent": "无法比较此文件，请查看原因或重新加载",
+    "permissionOnly": "仅执行权限变化，文件内容相同",
+    "snippetsUnavailable": "此文件无法生成文本片段，请查看完整内容中的两侧信息",
+    "execBits": "执行位 {{before}} → {{after}}",
+    "diffReason": {
+      "excluded": "此条目不参与 Skill 有效内容比较",
+      "unsupported_type": "符号链接及特殊文件仅展示信息，不读取目标或参与有效内容比较",
+      "type_changed": "文件类型变化，请查看两侧条目信息",
+      "unknown_presence": "目录未完整读取，无法确定此版本中是否存在该条目"
+    }
+  },
+  "documentDiff": {
+    "limitExceeded": "文本行数超过片段计算上限，请查看完整内容",
+    "noChanges": "文本内容未变化"
   }
 }
