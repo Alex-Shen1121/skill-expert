@@ -1,10 +1,11 @@
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "../utils";
 
 interface SkillMarkdownProps {
   content: string;
   className?: string;
+  onNavigate?: (href: string) => void;
 }
 
 function stripMarkdownFrontmatter(content: string) {
@@ -16,13 +17,14 @@ function stripMarkdownFrontmatter(content: string) {
   return content.slice(end + 5).trimStart();
 }
 
-export function SkillMarkdown({ content, className }: SkillMarkdownProps) {
+export function SkillMarkdown({ content, className, onNavigate }: SkillMarkdownProps) {
   const markdown = stripMarkdownFrontmatter(content);
 
   return (
     <article className={cn("mx-auto w-full max-w-[1240px] text-[13px] leading-6 text-secondary", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url, key, node) => onNavigate && node.tagName === "a" && key === "href" ? url : defaultUrlTransform(url)}
         components={{
           h1: ({ className, ...props }) => (
             <h1
@@ -51,8 +53,9 @@ export function SkillMarkdown({ content, className }: SkillMarkdownProps) {
             return (
               <a
                 className={cn("text-accent-light underline decoration-accent-border underline-offset-4", className)}
-                href={safeHref}
-                target="_blank"
+                href={onNavigate ? /^(https?:|mailto:)/i.test(href ?? "") ? safeHref : "#" : safeHref}
+                onClick={onNavigate ? event => { event.preventDefault(); onNavigate(href ?? ""); } : undefined}
+                target={onNavigate ? undefined : "_blank"}
                 rel="noreferrer"
                 {...props}
               />

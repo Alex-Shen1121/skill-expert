@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../utils";
 
 interface DocumentDiffViewerProps {
@@ -22,11 +23,16 @@ interface DiffHunk {
 }
 
 const CONTEXT_LINES = 3;
+// ponytail: 矩阵最多 100 万格且总行数最多 2 万；更大输入保留全文，需要片段时再换线性空间算法。
+const MAX_DIFF_CELLS = 1_000_000;
+const MAX_DIFF_LINES = 20_000;
 
-function buildDiffRows(original: string, updated: string): DiffRow[] {
+function buildDiffRows(original: string, updated: string): DiffRow[] | null {
+  if (original === updated) return [];
   const left = original.split("\n");
   const right = updated.split("\n");
-  const dp = Array.from({ length: left.length + 1 }, () => Array<number>(right.length + 1).fill(0));
+  if (left.length + right.length > MAX_DIFF_LINES || (left.length + 1) * (right.length + 1) > MAX_DIFF_CELLS) return null;
+  const dp = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1));
 
   for (let i = left.length - 1; i >= 0; i -= 1) {
     for (let j = right.length - 1; j >= 0; j -= 1) {
@@ -153,19 +159,17 @@ function createHunk(rows: DiffRow[], start: number, end: number, index: number):
 function cellTone(type: DiffRow["type"], side: "left" | "right") {
   if (type === "removed" && side === "left") {
     return {
-      lineNoClass: "text-red-900 dark:text-red-200",
-      lineNoStyle: { backgroundColor: "#ffd7d5" },
-      codeClass: "text-red-950 dark:text-red-50",
-      codeStyle: { backgroundColor: "#ffebe9", boxShadow: "inset 3px 0 0 #cf222e" },
+      lineNoClass: "bg-red-200 text-red-900 dark:bg-red-950 dark:text-red-200",
+      codeClass: "bg-red-50 text-red-950 dark:bg-red-950 dark:text-red-50",
+      codeStyle: { boxShadow: "inset 3px 0 0 #cf222e" },
       markerClass: "text-red-700 dark:text-red-300",
     };
   }
   if (type === "added" && side === "right") {
     return {
-      lineNoClass: "text-emerald-900 dark:text-emerald-200",
-      lineNoStyle: { backgroundColor: "#aceebb" },
-      codeClass: "text-emerald-950 dark:text-emerald-50",
-      codeStyle: { backgroundColor: "#dafbe1", boxShadow: "inset 3px 0 0 #1a7f37" },
+      lineNoClass: "bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+      codeClass: "bg-emerald-50 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-50",
+      codeStyle: { boxShadow: "inset 3px 0 0 #1a7f37" },
       markerClass: "text-emerald-700 dark:text-emerald-300",
     };
   }
@@ -214,13 +218,16 @@ function DiffCell({
 }
 
 export function DocumentDiffViewer({ original, updated, className }: DocumentDiffViewerProps) {
+  const { t } = useTranslation();
   const rows = useMemo(() => buildDiffRows(original, updated), [original, updated]);
-  const hunks = useMemo(() => buildHunks(rows), [rows]);
+  const hunks = useMemo(() => rows && buildHunks(rows), [rows]);
+
+  if (!hunks) return <p role="status" className={cn("rounded-xl border border-border-subtle bg-bg-secondary px-4 py-6 text-center text-[13px] text-secondary", className)}>{t("documentDiff.limitExceeded")}</p>;
 
   if (hunks.length === 0) {
     return (
       <div className={cn("rounded-xl border border-border-subtle bg-bg-secondary px-4 py-6 text-center", className)}>
-        <div className="text-[13px] font-medium text-secondary">No content changes</div>
+        <div className="text-[13px] font-medium text-secondary">{t("documentDiff.noChanges")}</div>
       </div>
     );
   }
@@ -229,11 +236,11 @@ export function DocumentDiffViewer({ original, updated, className }: DocumentDif
     <div className={cn("space-y-4", className)}>
       {hunks.map((hunk) => (
         <div key={hunk.id} className="overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary">
-          <div className="grid grid-cols-2 border-b border-border-subtle" style={{ backgroundColor: "#ddf4ff" }}>
-            <div className="border-r border-border-subtle px-3 py-2 font-mono text-[11px] text-sky-800">
+          <div className="grid grid-cols-2 border-b border-border-subtle bg-sky-50 dark:bg-sky-950">
+            <div className="border-r border-border-subtle px-3 py-2 font-mono text-[11px] text-sky-800 dark:text-sky-200">
               @@ -{hunk.leftStart},{hunk.leftCount}
             </div>
-            <div className="px-3 py-2 font-mono text-[11px] text-sky-800">
+            <div className="px-3 py-2 font-mono text-[11px] text-sky-800 dark:text-sky-200">
               @@ +{hunk.rightStart},{hunk.rightCount}
             </div>
           </div>

@@ -382,10 +382,11 @@ fn try_update_cached_repo(
         fetch_cmd.arg("-c").arg(format!("http.proxy={proxy}"));
         fetch_cmd.arg("-c").arg(format!("https.proxy={proxy}"));
     }
-    fetch_cmd.arg("origin");
-    if let Some(branch) = branch {
-        fetch_cmd.arg(branch);
-    }
+    // 未指定分支时每次取远端 HEAD，不依赖缓存首次克隆时的 refspec 或 origin/HEAD。
+    fetch_cmd
+        .arg("--")
+        .arg("origin")
+        .arg(branch.unwrap_or("HEAD"));
     fetch_cmd.stdout(Stdio::null()).stderr(Stdio::null());
 
     let child = fetch_cmd.spawn();
@@ -426,14 +427,11 @@ fn try_update_cached_repo(
         return Ok(false);
     }
 
-    // Reset to the fetched HEAD.
-    let target = branch
-        .map(|b| format!("origin/{b}"))
-        .unwrap_or_else(|| "origin/HEAD".to_string());
+    // 本次只抓取一个明确来源，FETCH_HEAD 记录此次抓取的实际提交。
     let reset_status = git_command()
         .arg("-C")
         .arg(cached)
-        .args(["reset", "--hard", &target])
+        .args(["reset", "--hard", "FETCH_HEAD"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();

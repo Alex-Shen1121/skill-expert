@@ -60,43 +60,76 @@ export interface SkillToolToggle {
   enabled: boolean;
 }
 
+export interface SkillBrowserEntry {
+  path: string;
+  kind: "file" | "directory" | "symlink" | "special" | "unreadable";
+  size: number;
+  error: string | null;
+  link_target: string | null;
+}
+
+export interface SkillBrowserIndex {
+  skill_id: string;
+  session_id: string;
+  entry_path: string | null;
+  entries: SkillBrowserEntry[];
+  file_count: number;
+  directory_count: number;
+  complete: boolean;
+  issues: string[];
+}
+
+export interface SkillFilePreview {
+  path: string;
+  kind: "missing" | "text" | "binary" | "too_large" | "unsupported_encoding" | "file" | "directory" | "symlink" | "special" | "unreadable";
+  size: number;
+  text: string | null;
+  message: string | null;
+}
+
+export const openSkillBrowser = (skillId: string) =>
+  invoke<SkillBrowserIndex>("open_skill_browser", { skillId });
+export const readSkillBrowserFile = (skillId: string, sessionId: string, relativePath: string, side: "local" | "source" = "local") =>
+  invoke<SkillFilePreview>("read_skill_browser_file", { skillId, sessionId, relativePath, side });
+export interface SkillBrowserSource {
+  index: SkillBrowserIndex;
+  source_label: string;
+  location: string;
+  revision: string;
+}
+export const prepareSkillBrowserSource = (skillId: string, sessionId: string) =>
+  invoke<SkillBrowserSource>("prepare_skill_browser_source", { skillId, sessionId });
+export interface SkillBrowserComparison {
+  path: string;
+  local: SkillBrowserEntry | null;
+  source: SkillBrowserEntry | null;
+  local_presence: "present" | "missing" | "unknown";
+  source_presence: "present" | "missing" | "unknown";
+  status: "added" | "removed" | "modified" | "unchanged" | "not_compared" | "uncomparable" | null;
+  reason_code: "excluded" | "unsupported_type" | "type_changed" | "unknown_presence" | null;
+  reason: string | null;
+  content_changed: boolean | null;
+  exec_bits_before: number | null;
+  exec_bits_after: number | null;
+}
+export interface SkillBrowserDiff {
+  index: SkillBrowserIndex;
+  entries: SkillBrowserComparison[];
+  changed_file_count: number;
+  source_label: string;
+  revision: string;
+}
+export const getSkillBrowserDiff = (skillId: string, sessionId: string) =>
+  invoke<SkillBrowserDiff>("get_skill_browser_diff", { skillId, sessionId });
+
+export const closeSkillBrowser = (skillId: string, sessionId: string) =>
+  invoke<void>("close_skill_browser", { skillId, sessionId });
+
 export interface SkillDocument {
   skill_id: string;
   filename: string;
   content: string;
   central_path: string;
-}
-
-export interface SourceSkillDocument {
-  skill_id: string;
-  filename: string;
-  content: string;
-  source_label: string;
-  revision: string;
-}
-
-export type SkillSourceDiffStatus = "added" | "removed" | "modified";
-export type SkillSourceDiffContentKind =
-  | "text"
-  | "binary"
-  | "too_large"
-  | "permission_only";
-
-export interface SkillSourceDiffEntry {
-  relative_path: string;
-  status: SkillSourceDiffStatus;
-  content_kind: SkillSourceDiffContentKind;
-  original_text: string | null;
-  updated_text: string | null;
-  executable_before: boolean;
-  executable_after: boolean;
-}
-
-export interface SkillSourceDiff {
-  skill_id: string;
-  source_label: string;
-  revision: string;
-  entries: SkillSourceDiffEntry[];
 }
 
 export interface Preset {
@@ -246,11 +279,6 @@ export const getSkillsForPreset = (presetId: string) =>
 export const getSkillDocument = (skillId: string) =>
   invoke<SkillDocument>("get_skill_document", { skillId });
 
-export const getSourceSkillDocument = (skillId: string) =>
-  invoke<SourceSkillDocument>("get_source_skill_document", { skillId });
-
-export const getSkillSourceDiff = (skillId: string) =>
-  invoke<SkillSourceDiff>("get_skill_source_diff", { skillId });
 
 export const deleteManagedSkill = (skillId: string) =>
   invoke<void>("delete_managed_skill", { skillId });
