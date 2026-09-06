@@ -683,7 +683,9 @@ impl SkillBrowser {
                 if !Path::new(&location).try_exists().map_err(AppError::io)? {
                     return Err(AppError::not_found("原始来源路径已不存在"));
                 }
-                (PathBuf::from(&location), location, "workspace".into(), None)
+                // 仅解析已记录的来源根；快照固定实际目录，内部链接仍只展示元数据。
+                let root = Path::new(&location).canonicalize().map_err(AppError::io)?;
+                (root, location, "workspace".into(), None)
             }
             "git" | "skillssh" => {
                 use crate::commands::skills::{git_source_from_skill, resolve_skill_dir};
@@ -776,6 +778,14 @@ fn scan(
     match directory.names() {
         Ok(names) => {
             for name in names {
+                let name = match name {
+                    Ok(name) => name,
+                    Err(error) => {
+                        issues.push(format!("{prefix}：{error}"));
+                        incomplete_paths.push(prefix.into());
+                        continue;
+                    }
+                };
                 let path = if prefix.is_empty() {
                     name.clone()
                 } else {
@@ -904,9 +914,10 @@ mod platform {
         pub(super) fn stamp(&self) -> io::Result<String> {
             file_stamp(&self.file)
         }
-        pub(super) fn names(&self) -> io::Result<Vec<String>> {
+        pub(super) fn names(&self) -> io::Result<Vec<io::Result<String>>> {
             let mut dir = Dir::from(self.file.try_clone()?)?;
-            dir.iter()
+            Ok(dir
+                .iter()
                 .filter_map(|entry| match entry {
                     Ok(entry) if matches!(entry.file_name().to_bytes(), b"." | b"..") => None,
                     Ok(entry) => Some(
@@ -916,7 +927,7 @@ mod platform {
                     ),
                     Err(error) => Some(Err(error.into())),
                 })
-                .collect()
+                .collect())
         }
         pub(super) fn info(&self, name: &str) -> io::Result<EntryInfo> {
             let stat = fstatat(self.file.as_raw_fd(), name, AtFlags::AT_SYMLINK_NOFOLLOW)?;
@@ -1024,8 +1035,8 @@ mod platform {
         pub(super) fn stamp(&self) -> io::Result<String> {
             file_stamp(&self.file)
         }
-        pub(super) fn names(&self) -> io::Result<Vec<String>> {
-            fs::read_dir(&self.path)?
+        pub(super) fn names(&self) -> io::Result<Vec<io::Result<String>>> {
+            Ok(fs::read_dir(&self.path)?
                 .map(|entry| {
                     entry.and_then(|entry| {
                         entry
@@ -1034,7 +1045,7 @@ mod platform {
                             .map_err(|_| io::Error::other("文件名不是 UTF-8，目录未完整读取"))
                     })
                 })
-                .collect()
+                .collect())
         }
         pub(super) fn info(&self, name: &str) -> io::Result<EntryInfo> {
             let path = self.path.join(name);
