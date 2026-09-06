@@ -32,6 +32,7 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
   const [changesOnly, setChangesOnly] = useState(false);
   const [linkError, setLinkError] = useState<{ path: string | null; side: string; session: string; message: string } | null>(null);
   const comparisons = useMemo(() => new Map(diff?.entries.map(entry => [entry.path, entry])), [diff]);
+  const linkTarget = index.entries.find(entry => entry.path === selected)?.link_target;
   const changes = useMemo(() => {
     const paths = new Set(diff?.entries.filter(entry => entry.status === "added" || entry.status === "removed" || entry.status === "modified").map(entry => entry.path));
     const ancestors = new Set<string>();
@@ -161,7 +162,7 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
           : preview?.kind === "text" ? /\.md$/i.test(selected) && !raw
             ? <div className="skill-file-markdown"><SkillMarkdown content={preview.text ?? ""} onNavigate={navigate} /></div>
             : <SkillFileText text={preview.text ?? ""} />
-          : preview ? <div className="skill-file-message"><File size={26} /><h3>{selected}</h3><p>{preview.message ?? t(`skillBrowser.previewKind.${preview.kind}`)}</p><small>{preview.size} B</small></div>
+          : preview ? <div className="skill-file-message"><File size={26} /><h3>{selected}</h3><p>{preview.message ?? t(`skillBrowser.previewKind.${preview.kind}`)}</p>{linkTarget && <code>{linkTarget}</code>}<small>{preview.size} B</small></div>
           : null}
       </div>
     </section>

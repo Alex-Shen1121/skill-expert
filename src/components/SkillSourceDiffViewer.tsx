@@ -38,7 +38,7 @@ export function SkillSourceDiffViewer({ entry, onlyDiff, original, updated, orig
             {error ? <div role="alert" className="skill-file-message">{error}<button onClick={onRetry}>{t("skillBrowser.reload")}</button></div>
               : !preview ? <p role="status" className="skill-file-message">{t("common.loading")}</p>
               : preview.kind === "text" ? <SkillFileText text={preview.text ?? ""} />
-              : <div className="skill-file-message">{preview.message ?? t(`skillBrowser.previewKind.${preview.kind}`)}</div>}
+              : <div className="skill-file-message"><p>{preview.message ?? t(`skillBrowser.previewKind.${preview.kind}`)}</p>{metadata?.link_target && <code>{metadata.link_target}</code>}</div>}
           </div>
         </section>;
       })}

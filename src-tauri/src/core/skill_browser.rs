@@ -341,14 +341,6 @@ impl Snapshot {
                 return Ok(preview);
             }
             let Some(file) = file else {
-                preview.message = Some(match entry.kind.as_str() {
-                    "symlink" => format!(
-                        "符号链接，仅展示链接信息，不读取目标：{}",
-                        entry.link_target.as_deref().unwrap_or("未知")
-                    ),
-                    "directory" => "目录，请从左侧选择文件".into(),
-                    _ => "此文件类型不支持预览".into(),
-                });
                 return Ok(preview);
             };
             if entry.size > MAX_PREVIEW_BYTES as u64 {

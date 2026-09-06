@@ -806,6 +806,54 @@ it("差异两侧读取绑定当前路径，存在性未知保留读取原因，�
   expect(await screen.findByText("当前路径的安装全文")).toBeTruthy();
 });
 
+it.each([
+  { language: "en", linkNotice: "Symbolic link; only link information is shown, without reading its target", specialNotice: "Preview is not supported for this file type", directoryNotice: "Directory; select a file" },
+  { language: "zh-TW", linkNotice: "符號連結，僅展示資訊，不讀取目標", specialNotice: "此檔案類型不支援預覽", directoryNotice: "目錄，請選擇檔案" },
+])("$language 详情按类型翻译非文本说明，并保留各版本链接目标和真实诊断", async ({ language, linkNotice, specialNotice, directoryNotice }) => {
+  await i18n.changeLanguage(language);
+  const user = userEvent.setup();
+  const link = comparedFile("outside-link", "not_compared", "symlink");
+  link.local!.link_target = "/当前目录外/资料.md";
+  link.source!.link_target = "/来源目录外/资料.md";
+  const denied = comparedFile("denied", "uncomparable", "unreadable");
+  denied.local!.error = denied.source!.error = "EACCES: fixture diagnostic";
+  const entries = [comparedFile("SKILL.md", "unchanged"), link, comparedFile("shape", "modified", "special", "directory"), denied];
+  mockComparison({ index: { ...index, entries: entries.map(entry => entry.local!), file_count: 4, directory_count: 0 }, entries, changed_file_count: 1, revision: "workspace", source_label: "local" });
+  const invokeBoundary = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command !== "read_skill_browser_file") return invokeBoundary(command, args);
+    const { relativePath: path, side } = args as { relativePath: string; side: "local" | "source" };
+    const entry = entries.find(entry => entry.path === path)![side]!;
+    return { path, kind: entry.kind === "file" ? "text" : entry.kind, size: entry.size, text: entry.kind === "file" ? "# 阅读入口" : null, message: entry.error };
+  });
+  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  try {
+    await user.click(await screen.findByRole("button", { name: "outside-link" }));
+    expect(await screen.findByText(linkNotice)).toBeTruthy();
+    expect(screen.getByText("/当前目录外/资料.md")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: i18n.t("mySkills.docTabs.source") }));
+    expect(await screen.findByText("/来源目录外/资料.md")).toBeTruthy();
+    expect(screen.getByText(linkNotice)).toBeTruthy();
+    expect(screen.queryByText("/当前目录外/资料.md")).toBeNull();
+    await user.click(screen.getByRole("button", { name: i18n.t("mySkills.docTabs.diff") }));
+    const local = await screen.findByRole("region", { name: i18n.t("skillBrowser.diffSide.local") });
+    const source = screen.getByRole("region", { name: i18n.t("skillBrowser.diffSide.source") });
+    expect(await within(local).findByText(linkNotice)).toBeTruthy();
+    expect(within(local).getByText("/当前目录外/资料.md")).toBeTruthy();
+    expect(await within(source).findByText(linkNotice)).toBeTruthy();
+    expect(within(source).getByText("/来源目录外/资料.md")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "shape" }));
+    expect(await within(screen.getByRole("region", { name: i18n.t("skillBrowser.diffSide.local") })).findByText(specialNotice)).toBeTruthy();
+    expect(await within(screen.getByRole("region", { name: i18n.t("skillBrowser.diffSide.source") })).findByText(directoryNotice)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "denied" }));
+    expect(await within(screen.getByRole("region", { name: i18n.t("skillBrowser.diffSide.local") })).findByText("EACCES: fixture diagnostic")).toBeTruthy();
+    expect(await within(screen.getByRole("region", { name: i18n.t("skillBrowser.diffSide.source") })).findByText("EACCES: fixture diagnostic")).toBeTruthy();
+  } finally {
+    unmount();
+    await i18n.changeLanguage("zh");
+  }
+});
+
 it("英文详情翻译受控差异原因与未知存在性提示，并保留真实 I/O 诊断", async () => {
   await i18n.changeLanguage("en");
   const user = userEvent.setup();

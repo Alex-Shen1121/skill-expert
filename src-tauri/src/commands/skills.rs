@@ -233,31 +233,6 @@ pub struct SkillDocumentDto {
     pub central_path: String,
 }
 
-/// Whole-directory diff between the central copy (`original`) and the source
-/// (`updated`), covering the same file scope that drives the update badge so
-/// the diff can never come back empty while the badge says "update available".
-#[derive(Debug, Serialize)]
-pub struct SkillSourceDiffDto {
-    pub skill_id: String,
-    pub source_label: String,
-    pub revision: String,
-    pub entries: Vec<SkillSourceDiffEntryDto>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SkillSourceDiffEntryDto {
-    pub relative_path: String,
-    /// "added" | "removed" | "modified"
-    pub status: String,
-    /// "text" | "binary" | "too_large" | "permission_only"
-    pub content_kind: String,
-    /// Present only when `content_kind == "text"`.
-    pub original_text: Option<String>,
-    pub updated_text: Option<String>,
-    pub executable_before: bool,
-    pub executable_after: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct InstallSourceMetadata {
     pub source_type: String,
@@ -4200,6 +4175,7 @@ mod tests {
         fs::write(&outside, "不能泄露").unwrap();
         symlink(&outside, dir.join("outside-link")).unwrap();
         let _socket = UnixListener::bind(dir.join("socket")).unwrap();
+        fs::create_dir(dir.join("empty-dir")).unwrap();
         repo.store
             .insert_skill(&sample_skill("boundary", "boundary", &dir))
             .unwrap();
@@ -4228,6 +4204,23 @@ mod tests {
             .unwrap();
         assert_eq!(link.kind, "symlink");
         assert!(link.text.is_none());
+        assert!(link.message.is_none());
+        assert_eq!(
+            index
+                .entries
+                .iter()
+                .find(|entry| entry.path == "outside-link")
+                .unwrap()
+                .link_target
+                .as_deref(),
+            outside.to_str()
+        );
+        for (path, kind) in [("socket", "special"), ("empty-dir", "directory")] {
+            let preview = browser.read("boundary", &index.session_id, path).unwrap();
+            assert_eq!(preview.kind, kind);
+            assert!(preview.text.is_none());
+            assert!(preview.message.is_none());
+        }
         for path in [
             "/etc/passwd",
             "../outside.txt",
