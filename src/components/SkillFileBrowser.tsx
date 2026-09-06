@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, File, FileText, Folder, Link2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, File, FileText, Folder, GitCompareArrows, Link2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { SkillBrowserIndex, SkillFilePreview, SkillBrowserDiff } from "../lib/tauri";
+import type { SkillBrowserIndex, SkillFilePreview, SkillBrowserDiff, SkillBrowserEntry } from "../lib/tauri";
 import { SkillMarkdown } from "./SkillMarkdown";
 import "./SkillFileBrowser.css";
 import { SkillFileText } from "./SkillFileText";
@@ -29,8 +29,25 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
   const [query, setQuery] = useState("");
   const [raw, setRaw] = useState(false);
   const [onlyDiff, setOnlyDiff] = useState(false);
+  const [changesOnly, setChangesOnly] = useState(false);
   const [linkError, setLinkError] = useState<{ path: string | null; side: string; session: string; message: string } | null>(null);
   const comparisons = useMemo(() => new Map(diff?.entries.map(entry => [entry.path, entry])), [diff]);
+  const changes = useMemo(() => {
+    const paths = new Set(diff?.entries.filter(entry => entry.status === "added" || entry.status === "removed" || entry.status === "modified").map(entry => entry.path));
+    const ancestors = new Set<string>();
+    for (const path of paths) {
+      const parts = path.split("/");
+      parts.slice(0, -1).forEach((_, i) => ancestors.add(parts.slice(0, i + 1).join("/")));
+    }
+    return { paths, ancestors };
+  }, [diff]);
+  const filtering = side === "diff" && changesOnly;
+  const filteredEntries = filtering ? index.entries.filter(entry => changes.paths.has(entry.path) || changes.ancestors.has(entry.path)) : index.entries;
+  const isFileInView = (entry: SkillBrowserEntry) => filtering ? changes.paths.has(entry.path) : entry.kind !== "directory";
+  const fileCount = filtering ? filteredEntries.filter(isFileInView).length : index.file_count;
+  const directoryCount = filtering ? filteredEntries.length - fileCount : index.directory_count;
+  const hasUncomparable = diff?.entries.some(entry => entry.status === "uncomparable") ?? false;
+  const resultsIncomplete = !index.complete || hasUncomparable;
   const search = query.trim().toLocaleLowerCase();
   const chooseFile = (path: string) => {
     const parts = path.split("/");
@@ -65,26 +82,34 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
     setQuery("");
     chooseFile(path);
   };
-  const visibleEntries = index.entries.filter(entry => {
-    if (search) return entry.kind !== "directory" && entry.path.toLocaleLowerCase().includes(search);
+  const visibleEntries = filteredEntries.filter(entry => {
+    if (search) return isFileInView(entry) && entry.path.toLocaleLowerCase().includes(search);
     const parts = entry.path.split("/");
     return parts.slice(0, -1).every((_, i) => expanded.includes(parts.slice(0, i + 1).join("/")));
   });
   return <div className="skill-file-browser">
-    {treeVisible && <nav className="skill-file-tree" aria-label={t(`skillBrowser.${side}Tree`)}>
-      <div className="skill-file-tree-title"><Folder size={16} /><strong>{t("skillBrowser.allFiles")}</strong></div>
+    {treeVisible && <nav className="skill-file-tree" aria-label={t(filtering ? "skillBrowser.changedTree" : `skillBrowser.${side}Tree`)}>
+      <div className="skill-file-tree-title"><Folder size={16} /><strong>{t(filtering ? "skillBrowser.changedTreeTitle" : "skillBrowser.allFiles")}</strong></div>
       <div className="skill-file-search">
         <Search size={14} aria-hidden="true" />
         <input type="search" aria-label={t("skillBrowser.search")} placeholder={t("skillBrowser.searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />
         {query && <button aria-label={t("skillBrowser.clearSearch")} onClick={() => setQuery("")}><X size={14} /></button>}
       </div>
+      {side === "diff" && <div className="skill-file-filter">
+        <button aria-label={t("skillBrowser.onlyChangesLabel")} aria-pressed={changesOnly} onClick={() => {
+          setChangesOnly(!changesOnly);
+          if (!changesOnly) setExpanded(current => [...new Set([...current, ...changes.ancestors])]);
+        }}><GitCompareArrows size={13} aria-hidden="true" />{t("skillBrowser.onlyChanges")}<span>{diff?.changed_file_count ?? 0}</span></button>
+        {changesOnly && <small>{t("skillBrowser.filterActive")}</small>}
+      </div>}
       {search && <p role="status" className="skill-file-search-count">{t("skillBrowser.matches", { count: visibleEntries.length })}</p>}
       <div className="skill-file-tree-list">
-        {search && !visibleEntries.length && <p className="skill-file-empty">{t("skillBrowser.noMatches")}</p>}
+        {filtering && !filteredEntries.length ? <div className="skill-file-empty" role="status"><p>{t(resultsIncomplete ? "skillBrowser.noConfirmedChanges" : "skillBrowser.noChanges")}</p><button onClick={() => setChangesOnly(false)}>{t("skillBrowser.restoreAll")}</button></div>
+          : search && !visibleEntries.length && <p className="skill-file-empty">{t(resultsIncomplete ? "skillBrowser.noKnownMatches" : "skillBrowser.noMatches")}</p>}
         {visibleEntries.map(entry => {
           const depth = search ? 0 : entry.path.split("/").length - 1;
           const comparison = comparisons.get(entry.path);
-          const isDirectory = entry.kind === "directory";
+          const isDirectory = !isFileInView(entry);
           const directoryMessage = entry.error || (comparison?.reason_code === "unknown_presence" ? t("skillBrowser.diffReason.unknown_presence") : null);
           const isContainer = isDirectory || comparison?.local?.kind === "directory" || comparison?.source?.kind === "directory";
           const isExpanded = expanded.includes(entry.path);
@@ -96,20 +121,22 @@ export function SkillFileBrowser({ index, selected, onSelect, preview, loading, 
               {isContainer ? isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : <span className="skill-file-indent" />}
               <Icon size={16} /><span className={search ? "skill-file-result-path" : "skill-file-name"}>{search ? entry.path : entry.path.split("/").pop()}</span>
               {entry.path === index.entry_path && <small>{t("skillBrowser.entry")}</small>}
-              {entry.kind === "symlink" && <small>{t("skillBrowser.link")}</small>}
+              {!isDirectory && entry.kind === "symlink" && <small>{t("skillBrowser.link")}</small>}
               {entry.error && <small title={entry.error}>!</small>}
-              {comparison?.status && <small>{t(`skillBrowser.diffStatus.${comparison.status}`)}</small>}
+              {!isDirectory && comparison?.status && <small>{t(`skillBrowser.diffStatus.${comparison.status}`)}</small>}
             </button>
             {isDirectory && isExpanded && (directoryMessage || !index.entries.some(child => child.path.startsWith(`${entry.path}/`))) && <p className="skill-file-empty" style={{ paddingLeft: 40 + depth * 14 }}>{directoryMessage || t("skillBrowser.emptyDirectory")}</p>}
           </div>;
         })}
-        {index.complete && !index.entries.length && <p className="skill-file-empty">{t("skillBrowser.emptyDirectory")}</p>}
+        {!filtering && index.complete && !index.entries.length && <p className="skill-file-empty">{t("skillBrowser.emptyDirectory")}</p>}
       </div>
       <div className="skill-file-footer">
-        <span>{t(index.complete ? "skillBrowser.counts" : "skillBrowser.partialCounts", { files: index.file_count, directories: index.directory_count })}</span>
-        <span>{t("skillBrowser.includesHidden")}</span>
+        <span>{t(index.complete ? "skillBrowser.counts" : "skillBrowser.partialCounts", { files: fileCount, directories: directoryCount })}</span>
+        <span>{t(filtering ? "skillBrowser.filteredHint" : "skillBrowser.includesHidden")}</span>
         {diff && <span>{t("skillBrowser.changedFiles", { count: diff.changed_file_count })}</span>}
-        {!index.complete && <><span role="alert">{t("skillBrowser.incomplete")}</span>{index.issues.map(issue => <span key={issue}>{issue}</span>)}<button onClick={onRetry}>{t("skillBrowser.reload")}</button></>}
+        {!index.complete && <><span role="alert">{t("skillBrowser.incomplete")}</span>{index.issues.map(issue => <span key={issue}>{issue}</span>)}</>}
+        {hasUncomparable && <span role="alert">{t("skillBrowser.comparisonIncomplete")}</span>}
+        {resultsIncomplete && <button onClick={onRetry}>{t("skillBrowser.reload")}</button>}
       </div>
     </nav>}
     <section className="skill-file-reader" aria-label={t(`skillBrowser.${side}Preview`)}>

@@ -1358,6 +1358,17 @@
     "diffTree": "差異完整檔案目錄",
     "diffPreview": "差異唯讀預覽",
     "changedFiles": "{{count}} 個變更檔案",
+    "onlyChanges": "只看變更",
+    "onlyChangesLabel": "只看變更檔案",
+    "filterActive": "已篩選",
+    "changedTree": "差異變更檔案目錄",
+    "changedTreeTitle": "變更檔案",
+    "filteredHint": "僅顯示變更檔案 · 關閉篩選查看全部",
+    "noChanges": "沒有變更檔案",
+    "restoreAll": "恢復全部檔案",
+    "noConfirmedChanges": "暫未發現已確認的變更檔案",
+    "noKnownMatches": "已讀取的結果中沒有符合條件的檔案",
+    "comparisonIncomplete": "部分檔案無法比較，變更結果可能不完整",
     "diffSide": {
       "local": "目前安裝",
       "source": "來源版本"

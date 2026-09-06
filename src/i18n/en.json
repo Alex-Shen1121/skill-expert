@@ -1442,6 +1442,17 @@
     "diffTree": "Complete comparison file tree",
     "diffPreview": "Read-only comparison preview",
     "changedFiles": "{{count}} changed files",
+    "onlyChanges": "Changes only",
+    "onlyChangesLabel": "Show changed files only",
+    "filterActive": "Filtered",
+    "changedTree": "Changed comparison file tree",
+    "changedTreeTitle": "Changed files",
+    "filteredHint": "Showing changed files · Turn off the filter to view all",
+    "noChanges": "No changed files",
+    "restoreAll": "Show all files",
+    "noConfirmedChanges": "No confirmed changes found yet",
+    "noKnownMatches": "No matching files in the available results",
+    "comparisonIncomplete": "Some files could not be compared; the change results may be incomplete",
     "diffSide": {
       "local": "Current installation",
       "source": "Source version"

@@ -13,7 +13,7 @@
 .skill-file-row small { flex-shrink: 0; font-size: 10px; }
 .skill-file-empty { padding: 8px 14px; font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .skill-file-footer { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--color-border-subtle); padding: 12px 16px; font-size: 11px; color: var(--color-text-muted); }
-.skill-file-footer button, .skill-file-message button { color: var(--color-accent); text-decoration: underline; padding: 6px; }
+.skill-file-footer button, .skill-file-message button, .skill-file-empty button { color: var(--color-accent); text-decoration: underline; padding: 6px; }
 .skill-file-reader { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-surface); }
 .skill-file-toolbar { display: flex; gap: 12px; align-items: center; min-height: 49px; border-bottom: 1px solid var(--color-border-subtle); padding: 8px 18px; font-size: 12px; color: var(--color-text-secondary); }
 .skill-file-toolbar button { padding: 5px; color: var(--color-text-muted); }
@@ -41,6 +41,9 @@
 .skill-file-search svg, .skill-file-search button { flex-shrink: 0; }
 .skill-file-search-count { padding: 0 16px 10px; color: var(--color-text-muted); font-size: 11px; }
 .skill-file-result-path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.skill-file-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 12px 12px; font-size: 11px; color: var(--color-text-muted); }
+.skill-file-filter button { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--color-border-subtle); }
+.skill-file-filter button[aria-pressed="true"] { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent); }
 
 .skill-file-modes { display: flex; flex-shrink: 0; padding: 2px; border-radius: 6px; background: var(--color-bg-secondary); }
 .skill-file-modes button { padding: 4px 8px; }

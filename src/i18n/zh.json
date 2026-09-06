@@ -1442,6 +1442,17 @@
     "diffTree": "差异完整文件目录",
     "diffPreview": "差异只读预览",
     "changedFiles": "{{count}} 个变化文件",
+    "onlyChanges": "只看变化",
+    "onlyChangesLabel": "只看变化文件",
+    "filterActive": "已筛选",
+    "changedTree": "差异变化文件目录",
+    "changedTreeTitle": "变化文件",
+    "filteredHint": "仅显示变化文件 · 关闭筛选查看全部",
+    "noChanges": "没有变化文件",
+    "restoreAll": "恢复全部文件",
+    "noConfirmedChanges": "暂未发现已确认的变化文件",
+    "noKnownMatches": "已读取的结果中没有匹配文件",
+    "comparisonIncomplete": "部分文件无法比较，变化结果可能不完整",
     "diffSide": {
       "local": "当前安装",
       "source": "来源版本"
