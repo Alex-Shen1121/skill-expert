@@ -7,6 +7,7 @@ import {
   Download,
   Globe2,
   KeyRound,
+  LoaderCircle,
   Plug,
   RefreshCw,
   Unplug,
@@ -156,7 +157,17 @@ function CapabilityGroup({ label, Icon, items, skills = false }: CapabilityGroup
   );
 }
 
-export function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
+export function PluginDetails({
+  plugin,
+  detailsLoading = false,
+  detailsError = false,
+  onRetryDetails,
+}: {
+  plugin: AgentPluginSummary;
+  detailsLoading?: boolean;
+  detailsError?: boolean;
+  onRetryDetails?: () => void;
+}) {
   const { t } = useTranslation();
   const groups = [
     { key: "skills", label: t("plugins.capabilities.skills"), Icon: BookOpen, items: plugin.details.skills, skills: true },
@@ -200,7 +211,30 @@ export function PluginDetails({ plugin }: { plugin: AgentPluginSummary }) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 pb-20 scrollbar-hide">
-          {plugin.details.completeness === "incomplete" && (
+          {detailsLoading && (
+            <div
+              role="status"
+              className="flex gap-2 rounded-lg border border-border-subtle bg-bg-secondary p-3 text-[12px] leading-5 text-muted"
+            >
+              <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+              <span>{t("plugins.detailsLoading")}</span>
+            </div>
+          )}
+          {detailsError && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-800 dark:text-amber-200"
+            >
+              <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="flex-1">{t("plugins.detailsLoadFailed")}</span>
+              {onRetryDetails && (
+                <button type="button" className="app-button-secondary" onClick={onRetryDetails}>
+                  {t("plugins.actions.retryDetails")}
+                </button>
+              )}
+            </div>
+          )}
+          {plugin.details.completeness === "incomplete" && !detailsLoading && !detailsError && (
             <div
               role="note"
               className="flex gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-800 dark:text-amber-200"

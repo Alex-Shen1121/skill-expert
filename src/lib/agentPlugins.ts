@@ -43,6 +43,7 @@ export interface AgentPluginDetails {
   browser_extensions: string[];
   custom_ui: string[];
   icon_data_url: string | null;
+  icon_url?: string | null;
   screenshot_data_urls: string[];
   completeness: AgentPluginDetailsCompleteness;
   issues: AgentPluginDetailsIssue[];
@@ -98,6 +99,8 @@ export type AgentPluginProjection =
       read_status: "ready";
       agent: AgentPluginAgent;
       refreshed_at_unix_ms: number;
+      installed_complete?: boolean;
+      available_complete?: boolean;
       installed: AgentPluginSummary[];
       available: AgentPluginSummary[];
     }
@@ -105,6 +108,18 @@ export type AgentPluginProjection =
       read_status: "error";
       agent: AgentPluginAgent;
       refreshed_at_unix_ms: number;
+      error: AgentPluginCatalogError;
+    };
+
+export type AgentPluginDetailsProjection =
+  | {
+      read_status: "ready";
+      identity: AgentPluginIdentity;
+      details: AgentPluginDetails;
+    }
+  | {
+      read_status: "error";
+      identity: AgentPluginIdentity;
       error: AgentPluginCatalogError;
     };
 
@@ -118,6 +133,9 @@ export function agentPluginIdentityKey(identity: AgentPluginIdentity): string {
 
 export const getAgentPluginProjection = (agent: AgentPluginAgent) =>
   invoke<AgentPluginProjection>("get_agent_plugin_projection", { agent });
+
+export const getAgentPluginDetails = (identity: AgentPluginIdentity) =>
+  invoke<AgentPluginDetailsProjection>("get_agent_plugin_details", { identity });
 
 export const getCodexCliConfiguration = () =>
   invoke<CodexCliConfiguration>("get_codex_cli_configuration");

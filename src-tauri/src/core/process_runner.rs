@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
@@ -127,6 +127,7 @@ pub enum ProcessError {
         stream: ProcessStream,
         source: io::Error,
     },
+    InputWriteFailed(io::Error),
     OutputLimitExceeded {
         stream: ProcessStream,
         limit_bytes: usize,
@@ -135,6 +136,7 @@ pub enum ProcessError {
     TimedOut {
         timeout: Duration,
     },
+    ProtocolFailed,
 }
 
 impl fmt::Display for ProcessError {
@@ -151,6 +153,7 @@ impl fmt::Display for ProcessError {
             Self::OutputReaderSpawnFailed { stream, source } => {
                 write!(formatter, "无法启动 {} 读取线程：{source}", stream.name())
             }
+            Self::InputWriteFailed(error) => write!(formatter, "写入外部进程失败：{error}"),
             Self::OutputLimitExceeded {
                 stream,
                 limit_bytes,
@@ -164,6 +167,7 @@ impl fmt::Display for ProcessError {
             Self::TimedOut { timeout } => {
                 write!(formatter, "外部进程在 {} 毫秒后超时", timeout.as_millis())
             }
+            Self::ProtocolFailed => formatter.write_str("外部进程未返回预期协议响应"),
         }
     }
 }
@@ -171,13 +175,16 @@ impl fmt::Display for ProcessError {
 impl Error for ProcessError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::SpawnFailed(error) | Self::WaitFailed(error) => Some(error),
+            Self::SpawnFailed(error) | Self::WaitFailed(error) | Self::InputWriteFailed(error) => {
+                Some(error)
+            }
             Self::OutputReadFailed { source, .. }
             | Self::OutputReaderSpawnFailed { source, .. } => Some(source),
             Self::OutputReaderPanicked { .. }
             | Self::OutputLimitExceeded { .. }
             | Self::Cancelled
-            | Self::TimedOut { .. } => None,
+            | Self::TimedOut { .. }
+            | Self::ProtocolFailed => None,
         }
     }
 }
@@ -348,6 +355,248 @@ pub fn run_process(
         stdout: stdout.expect("stdout 完成事件已收到"),
         stderr: stderr.expect("stderr 完成事件已收到"),
     })
+}
+
+/// 运行一轮按行传输的 JSON-RPC：收到初始化响应后才发送通知和业务请求。
+pub fn run_json_rpc_exchange(
+    request: &ProcessRequest,
+    initialize: &serde_json::Value,
+    initialized: &serde_json::Value,
+    rpc_request: &serde_json::Value,
+    cancellation: Option<&ProcessCancellation>,
+) -> Result<Vec<u8>, ProcessError> {
+    if cancellation.is_some_and(ProcessCancellation::is_cancelled) {
+        return Err(ProcessError::Cancelled);
+    }
+    let initialize_id = initialize.get("id").and_then(serde_json::Value::as_u64);
+    let response_id = rpc_request.get("id").and_then(serde_json::Value::as_u64);
+    if initialize_id.is_none() || response_id.is_none() {
+        return Err(ProcessError::ProtocolFailed);
+    }
+
+    let mut command = Command::new(&request.executable);
+    command
+        .args(&request.arguments)
+        .env_clear()
+        .envs(request.environment.iter().cloned())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = ManagedChild::spawn(&mut command).map_err(ProcessError::SpawnFailed)?;
+    let mut stdin = child.take_stdin().expect("已配置 stdin 管道");
+    let stop = Arc::new(AtomicBool::new(false));
+    let (line_sender, line_receiver) = mpsc::channel();
+    let stdout_reader = match spawn_line_reader(
+        ProcessPipe::Stdout(child.take_stdout().expect("已配置 stdout 管道")),
+        request.stdout_limit_bytes,
+        stop.clone(),
+        line_sender,
+    ) {
+        Ok(reader) => reader,
+        Err(source) => {
+            terminate_and_reap(&mut child)?;
+            return Err(ProcessError::OutputReaderSpawnFailed {
+                stream: ProcessStream::Stdout,
+                source,
+            });
+        }
+    };
+    let (event_sender, event_receiver) = mpsc::channel();
+    let stderr_reader = match spawn_output_reader(
+        ProcessPipe::Stderr(child.take_stderr().expect("已配置 stderr 管道")),
+        ProcessStream::Stderr,
+        "JSON-RPC 进程 stderr",
+        request.stderr_limit_bytes,
+        stop.clone(),
+        event_sender,
+    ) {
+        Ok(reader) => reader,
+        Err(source) => {
+            stop.store(true, Ordering::SeqCst);
+            let _ = terminate_and_reap(&mut child);
+            let _ = stdout_reader.join();
+            return Err(ProcessError::OutputReaderSpawnFailed {
+                stream: ProcessStream::Stderr,
+                source,
+            });
+        }
+    };
+    if let Err(error) = write_json_line(&mut stdin, initialize) {
+        terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+        return Err(ProcessError::InputWriteFailed(error));
+    }
+
+    let started = Instant::now();
+    let mut initialized_sent = false;
+    let mut process_exited = false;
+    let mut stdout_complete = false;
+    loop {
+        if cancellation.is_some_and(ProcessCancellation::is_cancelled) {
+            terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+            return Err(ProcessError::Cancelled);
+        }
+        if started.elapsed() >= request.timeout {
+            terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+            return Err(ProcessError::TimedOut {
+                timeout: request.timeout,
+            });
+        }
+        while let Ok(event) = line_receiver.try_recv() {
+            match event {
+                LineReaderEvent::Line(line) => {
+                    let id = serde_json::from_slice::<serde_json::Value>(&line)
+                        .ok()
+                        .and_then(|value| value.get("id").and_then(serde_json::Value::as_u64));
+                    if id == initialize_id && !initialized_sent {
+                        if let Err(error) = write_json_line(&mut stdin, initialized)
+                            .and_then(|_| write_json_line(&mut stdin, rpc_request))
+                        {
+                            terminate_and_join_readers(
+                                &mut child,
+                                &stop,
+                                stdout_reader,
+                                stderr_reader,
+                            )?;
+                            return Err(ProcessError::InputWriteFailed(error));
+                        }
+                        initialized_sent = true;
+                    } else if id == response_id && initialized_sent {
+                        terminate_and_join_readers(
+                            &mut child,
+                            &stop,
+                            stdout_reader,
+                            stderr_reader,
+                        )?;
+                        return Ok(line);
+                    }
+                }
+                LineReaderEvent::Complete => stdout_complete = true,
+                LineReaderEvent::LimitExceeded => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputLimitExceeded {
+                        stream: ProcessStream::Stdout,
+                        limit_bytes: request.stdout_limit_bytes,
+                    });
+                }
+                LineReaderEvent::ReadFailed(source) => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputReadFailed {
+                        stream: ProcessStream::Stdout,
+                        source,
+                    });
+                }
+                LineReaderEvent::Panicked => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputReaderPanicked {
+                        stream: ProcessStream::Stdout,
+                    });
+                }
+            }
+        }
+        while let Ok(event) = event_receiver.try_recv() {
+            match event {
+                OutputReaderEvent::LimitExceeded(stream) => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputLimitExceeded {
+                        stream,
+                        limit_bytes: request.limit_for(stream),
+                    });
+                }
+                OutputReaderEvent::ReadFailed(stream, source) => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputReadFailed { stream, source });
+                }
+                OutputReaderEvent::Panicked(stream) => {
+                    terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+                    return Err(ProcessError::OutputReaderPanicked { stream });
+                }
+                OutputReaderEvent::Complete(_, _) => {}
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => process_exited = true,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader);
+                return Err(ProcessError::WaitFailed(error));
+            }
+        }
+        if process_exited && stdout_complete {
+            terminate_and_join_readers(&mut child, &stop, stdout_reader, stderr_reader)?;
+            return Err(ProcessError::ProtocolFailed);
+        }
+        thread::sleep(PROCESS_POLL_INTERVAL);
+    }
+}
+
+fn write_json_line(
+    stdin: &mut std::process::ChildStdin,
+    value: &serde_json::Value,
+) -> io::Result<()> {
+    serde_json::to_writer(&mut *stdin, value).map_err(io::Error::other)?;
+    stdin.write_all(b"\n")?;
+    stdin.flush()
+}
+
+enum LineReaderEvent {
+    Line(Vec<u8>),
+    Complete,
+    LimitExceeded,
+    ReadFailed(io::Error),
+    Panicked,
+}
+
+fn spawn_line_reader(
+    mut pipe: ProcessPipe,
+    limit_bytes: usize,
+    stop: Arc<AtomicBool>,
+    sender: mpsc::Sender<LineReaderEvent>,
+) -> io::Result<JoinHandle<()>> {
+    thread::Builder::new()
+        .name("JSON-RPC 进程 stdout".into())
+        .spawn(move || {
+            let event = catch_unwind(AssertUnwindSafe(|| {
+                if let Err(error) = pipe.prepare_interruptible() {
+                    return LineReaderEvent::ReadFailed(error);
+                }
+                let mut pending = Vec::new();
+                let mut total = 0_usize;
+                let mut buffer = [0_u8; OUTPUT_READ_BUFFER_BYTES];
+                loop {
+                    if stop.load(Ordering::SeqCst) {
+                        return LineReaderEvent::Complete;
+                    }
+                    let read = match pipe.read_interruptible(&mut buffer) {
+                        Ok(Some(read)) => read,
+                        Ok(None) => {
+                            thread::sleep(PROCESS_POLL_INTERVAL);
+                            continue;
+                        }
+                        Err(error) => return LineReaderEvent::ReadFailed(error),
+                    };
+                    if read == 0 {
+                        if !pending.is_empty() {
+                            let _ = sender.send(LineReaderEvent::Line(pending));
+                        }
+                        return LineReaderEvent::Complete;
+                    }
+                    total = total.saturating_add(read);
+                    if total > limit_bytes {
+                        return LineReaderEvent::LimitExceeded;
+                    }
+                    pending.extend_from_slice(&buffer[..read]);
+                    while let Some(index) = pending.iter().position(|byte| *byte == b'\n') {
+                        let mut line = pending.drain(..=index).collect::<Vec<_>>();
+                        line.pop();
+                        if !line.is_empty() {
+                            let _ = sender.send(LineReaderEvent::Line(line));
+                        }
+                    }
+                }
+            }));
+            let event = event.unwrap_or(LineReaderEvent::Panicked);
+            let _ = sender.send(event);
+        })
 }
 
 impl ProcessRequest {
@@ -561,6 +810,10 @@ impl ManagedChild {
 
     fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
         self.inner.stdout.take()
+    }
+
+    fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.inner.stdin.take()
     }
 
     fn take_stderr(&mut self) -> Option<std::process::ChildStderr> {

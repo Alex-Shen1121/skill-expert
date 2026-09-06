@@ -156,6 +156,9 @@
     "installed": "Installed",
     "available": "Available",
     "count": "{{count}}",
+    "atLeastCount": "at least {{count}}",
+    "partialInstalled": "The remote installation state could not be read completely. At least {{count}} plugins are shown.",
+    "partialAvailable": "The available catalog could not be read. Installed plugins remain available.",
     "listLabel": "Installed plugins",
     "availableListLabel": "Available plugins",
     "searchLabel": "Search plugins",
@@ -165,6 +168,8 @@
     "detailsLabel": "Plugin details",
     "basicDetails": "Basic details",
     "detailsIncomplete": "Details are incomplete: Codex confirmed the plugin status, but some manifest data or resources could not be read safely.",
+    "detailsLoading": "Reading complete plugin details",
+    "detailsLoadFailed": "Complete plugin details could not be read. The installation state in the list is still valid.",
     "technicalDetails": "Technical details",
     "defaultPrompts": "Default prompts",
     "screenshots": "Screenshots",
@@ -212,7 +217,8 @@
     },
     "actions": {
       "openCliSettings": "Open Codex CLI settings",
-      "retry": "Retry read"
+      "retry": "Retry read",
+      "retryDetails": "Retry details"
     },
     "errors": {
       "title": "Plugin status could not be read",

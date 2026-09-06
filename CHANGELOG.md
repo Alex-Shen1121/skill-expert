@@ -12,10 +12,11 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### User-facing
--
+- Codex 插件页现在会显示 App Server 确认的完整已安装集合，包括 GitHub、Vercel 等远程插件；已安装与可安装来源独立读取，任一来源暂时不可用时仍保留另一份结果并明确标记不完整数量。
+- 远程插件在选中后按需读取完整详情，HTTPS 图标加载失败或本地图标格式不支持时回退默认图标，不再因此误报详情不完整。
 
 ### Developer & Governance
--
+- 插件投影通过受控 JSON-RPC 握手读取 `plugin/installed` 与 `plugin/read`，真实验收按 App Server 身份集合比较投影并检查 GitHub、Vercel 可见性，不固定当前安装数量。
 
 ## [1.0.16] - 2026-09-05
 

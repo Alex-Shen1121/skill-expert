@@ -16,18 +16,25 @@ pub(super) struct IdentityCollectionEvidence {
 
 #[derive(Debug, Serialize)]
 pub(super) struct IdentityEvidence {
+    pub(super) installed_source: &'static str,
     pub(super) installed: IdentityCollectionEvidence,
     pub(super) available: IdentityCollectionEvidence,
     pub(super) all_collections_match: bool,
+    pub(super) github_projected: bool,
+    pub(super) vercel_projected: bool,
 }
 
 pub(super) fn build_identity_evidence(
-    stdout: &[u8],
+    catalog_stdout: &[u8],
+    installed_response: Option<&[u8]>,
     installed: &[AgentPluginSummary],
     available: &[AgentPluginSummary],
 ) -> Result<IdentityEvidence> {
-    let value: Value = serde_json::from_slice(stdout).context("无法解析验收 CLI 快照")?;
-    let mut raw_installed = raw_identities(&value, "installed")?;
+    let value: Value = serde_json::from_slice(catalog_stdout).context("无法解析验收 CLI 快照")?;
+    let (mut raw_installed, installed_source) = match installed_response {
+        Some(response) => (app_server_installed_identities(response)?, "app_server"),
+        None => (raw_identities(&value, "installed")?, "cli"),
+    };
     let mut raw_available = raw_identities(&value, "available")?;
     raw_installed.sort();
     raw_available.sort();
@@ -38,12 +45,22 @@ pub(super) fn build_identity_evidence(
     let installed = compare_identity_collection(&raw_installed, &projected_installed);
     let available = compare_identity_collection(&raw_available, &projected_available);
     let all_collections_match = installed.identities_match && available.identities_match;
+    let github_projected = projected_contains(&projected_installed, "github@openai-curated-remote");
+    let vercel_projected = projected_contains(&projected_installed, "vercel@openai-curated-remote");
 
     Ok(IdentityEvidence {
+        installed_source,
         installed,
         available,
         all_collections_match,
+        github_projected,
+        vercel_projected,
     })
+}
+
+fn projected_contains(rows: &[String], plugin_id: &str) -> bool {
+    rows.iter()
+        .any(|row| row.ends_with(&format!("\0{plugin_id}")))
 }
 
 fn compare_identity_collection(raw: &[String], projected: &[String]) -> IdentityCollectionEvidence {
@@ -57,7 +74,8 @@ fn compare_identity_collection(raw: &[String], projected: &[String]) -> Identity
 }
 
 pub(super) fn record_identity_evidence(
-    stdout: &[u8],
+    catalog_stdout: &[u8],
+    installed_response: Option<&[u8]>,
     installed: &[AgentPluginSummary],
     available: &[AgentPluginSummary],
 ) -> Result<()> {
@@ -66,7 +84,8 @@ pub(super) fn record_identity_evidence(
     };
     let root = PathBuf::from(root);
     anyhow::ensure!(root.is_absolute(), "验收状态根必须是绝对路径");
-    let evidence = build_identity_evidence(stdout, installed, available)?;
+    let evidence =
+        build_identity_evidence(catalog_stdout, installed_response, installed, available)?;
     let directory = root.join("evidence");
     std::fs::create_dir_all(&directory)?;
     let target = directory.join("plugin-projection.json");
@@ -74,6 +93,33 @@ pub(super) fn record_identity_evidence(
     std::fs::write(&staged, serde_json::to_vec_pretty(&evidence)?)?;
     std::fs::rename(&staged, &target)?;
     Ok(())
+}
+
+fn app_server_installed_identities(response: &[u8]) -> Result<Vec<String>> {
+    let value: Value = serde_json::from_slice(response).context("无法解析验收 App Server 快照")?;
+    let marketplaces = value
+        .get("marketplaces")
+        .and_then(Value::as_array)
+        .context("App Server 快照缺少 Marketplace")?;
+    let mut identities = Vec::new();
+    for marketplace in marketplaces {
+        let marketplace_name = marketplace
+            .get("name")
+            .and_then(Value::as_str)
+            .context("App Server 快照缺少 Marketplace 名称")?;
+        for plugin in marketplace
+            .get("plugins")
+            .and_then(Value::as_array)
+            .context("App Server 快照缺少插件集合")?
+        {
+            let plugin_id = plugin
+                .get("id")
+                .and_then(Value::as_str)
+                .context("App Server 快照缺少插件 ID")?;
+            identities.push(format!("codex\0{marketplace_name}\0{plugin_id}"));
+        }
+    }
+    Ok(identities)
 }
 
 fn raw_identities(value: &Value, field: &str) -> Result<Vec<String>> {

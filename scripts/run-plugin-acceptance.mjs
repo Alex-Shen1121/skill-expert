@@ -76,3 +76,20 @@ if (process.platform === 'darwin') {
     'src-tauri/tauri.acceptance.conf.json',
   ]);
 }
+
+const evidencePath = path.join(acceptanceRoot, 'evidence', 'plugin-projection.json');
+if (!fs.existsSync(evidencePath)) {
+  console.error('未生成插件投影验收证据；请在验收应用中打开插件页后退出。');
+  process.exit(1);
+}
+const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+if (
+  evidence.installed_source !== 'app_server'
+  || evidence.all_collections_match !== true
+  || evidence.github_projected !== true
+  || evidence.vercel_projected !== true
+) {
+  console.error('插件投影未通过 App Server 全身份或 GitHub/Vercel 可见性验收。');
+  process.exit(1);
+}
+console.log('插件投影验收通过：App Server 全身份一致，GitHub 与 Vercel 已进入页面投影。');
