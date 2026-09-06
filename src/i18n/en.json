@@ -1430,6 +1430,14 @@
     "raw": "原文",
     "invalidLink": "链接必须指向当前 Skill 目录内的文件",
     "linkMissing": "此版本中没有该文件：{{path}}",
-    "externalLinkFailed": "无法打开外部链接"
+    "externalLinkFailed": "无法打开外部链接",
+    "sourceTree": "Complete source file tree",
+    "sourcePreview": "Read-only source preview",
+    "missingFile": "This version does not contain this file",
+    "snapshotLocation": "Snapshot location",
+    "snapshotRevision": "Snapshot revision",
+    "workspaceSnapshot": "Original directory snapshot",
+    "noSource": "This Skill has no recorded source to browse",
+    "retrySource": "Prepare source again"
   }
 }

@@ -233,15 +233,6 @@ pub struct SkillDocumentDto {
     pub central_path: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct SourceSkillDocumentDto {
-    pub skill_id: String,
-    pub filename: String,
-    pub content: String,
-    pub source_label: String,
-    pub revision: String,
-}
-
 /// Whole-directory diff between the central copy (`original`) and the source
 /// (`updated`), covering the same file scope that drives the update badge so
 /// the diff can never come back empty while the badge says "update available".
@@ -387,13 +378,41 @@ pub async fn read_skill_browser_file(
     skill_id: String,
     session_id: String,
     relative_path: String,
+    side: Option<String>,
     browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
 ) -> Result<crate::core::skill_browser::FilePreview, AppError> {
     let browser = browser.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        browser.read(&skill_id, &session_id, &relative_path)
+        browser.read_side(
+            &skill_id,
+            &session_id,
+            &relative_path,
+            side.as_deref().unwrap_or("local"),
+        )
     })
     .await?
+}
+
+#[tauri::command]
+pub async fn prepare_skill_browser_source(
+    skill_id: String,
+    session_id: String,
+    browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
+) -> Result<crate::core::skill_browser::SourceIndex, AppError> {
+    let browser = browser.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || browser.prepare_source(&skill_id, &session_id))
+        .await?
+}
+
+#[tauri::command]
+pub async fn get_skill_browser_diff(
+    skill_id: String,
+    session_id: String,
+    browser: State<'_, Arc<crate::core::skill_browser::SkillBrowser>>,
+) -> Result<SkillSourceDiffDto, AppError> {
+    let browser = browser.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || browser.source_diff(&skill_id, &session_id))
+        .await?
 }
 
 #[tauri::command]
@@ -429,279 +448,6 @@ pub async fn get_skill_document(
     .await?
 }
 
-#[tauri::command]
-pub async fn get_source_skill_document(
-    skill_id: String,
-    store: State<'_, Arc<SkillStore>>,
-) -> Result<SourceSkillDocumentDto, AppError> {
-    let store = store.inner().clone();
-    let proxy_url = store.proxy_url();
-    tauri::async_runtime::spawn_blocking(move || {
-        let skill = store
-            .get_skill_by_id(&skill_id)
-            .map_err(AppError::db)?
-            .ok_or_else(|| AppError::not_found("Skill not found"))?;
-
-        if matches!(skill.source_type.as_str(), "local" | "import") {
-            let source_path = skill.source_ref.as_ref().ok_or_else(|| {
-                AppError::not_found("Local skill is missing its original source path")
-            })?;
-            let source_dir = PathBuf::from(source_path);
-            if !source_dir.exists() {
-                return Err(AppError::not_found("Original source path no longer exists"));
-            }
-            let (filename, content) = read_skill_document_from_dir(&source_dir)?;
-            return Ok(SourceSkillDocumentDto {
-                skill_id,
-                filename,
-                content,
-                source_label: source_label_for_skill(&skill),
-                revision: "workspace".to_string(),
-            });
-        }
-
-        if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
-            return Err(AppError::invalid_input(
-                "Skill does not support source diff preview",
-            ));
-        }
-
-        let git_source = git_source_from_skill(&skill)?;
-        git_fetcher::validate_git_url(&git_source.clone_url).map_err(AppError::git)?;
-        let remote_revision = git_fetcher::resolve_remote_revision(
-            &git_source.clone_url,
-            git_source.branch.as_deref(),
-            proxy_url.as_deref(),
-        )
-        .map_err(AppError::git)?;
-
-        let temp_dir = git_fetcher::clone_repo_ref(
-            &git_source.clone_url,
-            git_source.branch.as_deref(),
-            None,
-            proxy_url.as_deref(),
-        )
-        .map_err(AppError::classify_git_error)?;
-
-        let result = (|| -> Result<SourceSkillDocumentDto, AppError> {
-            git_fetcher::checkout_revision(&temp_dir, &remote_revision).map_err(AppError::git)?;
-            let skill_dir = resolve_skill_dir(
-                &temp_dir,
-                git_source.subpath.as_deref(),
-                git_source.locator_skill_id.as_deref(),
-            )?;
-            let (filename, content) = read_skill_document_from_dir(&skill_dir)?;
-
-            Ok(SourceSkillDocumentDto {
-                skill_id,
-                filename,
-                content,
-                source_label: source_label_for_skill(&skill),
-                revision: remote_revision,
-            })
-        })();
-
-        git_fetcher::cleanup_temp(&temp_dir);
-        result
-    })
-    .await?
-}
-
-/// Files larger than this are flagged but not sent to the frontend — the
-/// line diff is O(n²), so previewing a huge file would hang the UI.
-const MAX_DIFF_FILE_BYTES: usize = 256 * 1024;
-
-/// Classify a file's bytes for diffing: oversized and binary files get a
-/// summary row instead of a text body.
-fn classify_diff_bytes(bytes: Option<Vec<u8>>) -> (&'static str, Option<String>) {
-    match bytes {
-        Some(b) if b.len() > MAX_DIFF_FILE_BYTES => ("too_large", None),
-        Some(b) if b.contains(&0) => ("binary", None),
-        Some(b) => match String::from_utf8(b) {
-            Ok(text) => ("text", Some(text)),
-            Err(_) => ("binary", None),
-        },
-        None => ("binary", None),
-    }
-}
-
-/// Diff the whole content scope of two skill directories. `original_dir` is
-/// the central copy (old), `updated_dir` is the source (new). Uses the same
-/// file enumeration as the hash so it reports exactly what flips the badge.
-fn build_source_diff_entries(
-    original_dir: &Path,
-    updated_dir: &Path,
-) -> Vec<SkillSourceDiffEntryDto> {
-    use crate::core::content_hash::{self, ContentEntry};
-    use std::collections::BTreeMap;
-
-    let index = |dir: &Path| -> BTreeMap<String, ContentEntry> {
-        content_hash::list_content_files(dir)
-            .into_iter()
-            .map(|e| (e.relative_path.clone(), e))
-            .collect()
-    };
-    let original = index(original_dir);
-    let updated = index(updated_dir);
-
-    let mut keys: Vec<&String> = original.keys().chain(updated.keys()).collect();
-    keys.sort();
-    keys.dedup();
-
-    let mut entries = Vec::new();
-    for key in keys {
-        match (original.get(key), updated.get(key)) {
-            (None, Some(u)) => {
-                let (kind, text) = classify_diff_bytes(std::fs::read(&u.path).ok());
-                entries.push(SkillSourceDiffEntryDto {
-                    relative_path: key.clone(),
-                    status: "added".into(),
-                    content_kind: kind.into(),
-                    original_text: None,
-                    updated_text: text,
-                    executable_before: false,
-                    executable_after: u.is_executable(),
-                });
-            }
-            (Some(o), None) => {
-                let (kind, text) = classify_diff_bytes(std::fs::read(&o.path).ok());
-                entries.push(SkillSourceDiffEntryDto {
-                    relative_path: key.clone(),
-                    status: "removed".into(),
-                    content_kind: kind.into(),
-                    original_text: text,
-                    updated_text: None,
-                    executable_before: o.is_executable(),
-                    executable_after: false,
-                });
-            }
-            (Some(o), Some(u)) => {
-                let o_bytes = std::fs::read(&o.path).ok();
-                let u_bytes = std::fs::read(&u.path).ok();
-                let exec_before = o.is_executable();
-                let exec_after = u.is_executable();
-                let bytes_equal = o_bytes.is_some() && o_bytes == u_bytes;
-
-                if bytes_equal {
-                    if exec_before == exec_after {
-                        continue; // unchanged — must match the hash's verdict
-                    }
-                    entries.push(SkillSourceDiffEntryDto {
-                        relative_path: key.clone(),
-                        status: "modified".into(),
-                        content_kind: "permission_only".into(),
-                        original_text: None,
-                        updated_text: None,
-                        executable_before: exec_before,
-                        executable_after: exec_after,
-                    });
-                    continue;
-                }
-
-                let (o_kind, o_text) = classify_diff_bytes(o_bytes);
-                let (u_kind, u_text) = classify_diff_bytes(u_bytes);
-                let (kind, original_text, updated_text) = if o_kind == "text" && u_kind == "text" {
-                    ("text", o_text, u_text)
-                } else if o_kind == "too_large" || u_kind == "too_large" {
-                    ("too_large", None, None)
-                } else {
-                    ("binary", None, None)
-                };
-                entries.push(SkillSourceDiffEntryDto {
-                    relative_path: key.clone(),
-                    status: "modified".into(),
-                    content_kind: kind.into(),
-                    original_text,
-                    updated_text,
-                    executable_before: exec_before,
-                    executable_after: exec_after,
-                });
-            }
-            (None, None) => {}
-        }
-    }
-
-    entries
-}
-
-#[tauri::command]
-pub async fn get_skill_source_diff(
-    skill_id: String,
-    store: State<'_, Arc<SkillStore>>,
-) -> Result<SkillSourceDiffDto, AppError> {
-    let store = store.inner().clone();
-    let proxy_url = store.proxy_url();
-    tauri::async_runtime::spawn_blocking(move || {
-        let skill = store
-            .get_skill_by_id(&skill_id)
-            .map_err(AppError::db)?
-            .ok_or_else(|| AppError::not_found("Skill not found"))?;
-
-        let central_dir = PathBuf::from(&skill.central_path);
-        let source_label = source_label_for_skill(&skill);
-
-        if matches!(skill.source_type.as_str(), "local" | "import") {
-            let source_path = skill.source_ref.as_ref().ok_or_else(|| {
-                AppError::not_found("Local skill is missing its original source path")
-            })?;
-            let source_dir = PathBuf::from(source_path);
-            if !source_dir.exists() {
-                return Err(AppError::not_found("Original source path no longer exists"));
-            }
-            let entries = build_source_diff_entries(&central_dir, &source_dir);
-            return Ok(SkillSourceDiffDto {
-                skill_id,
-                source_label,
-                revision: "workspace".to_string(),
-                entries,
-            });
-        }
-
-        if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
-            return Err(AppError::invalid_input(
-                "Skill does not support source diff preview",
-            ));
-        }
-
-        let git_source = git_source_from_skill(&skill)?;
-        git_fetcher::validate_git_url(&git_source.clone_url).map_err(AppError::git)?;
-        let remote_revision = git_fetcher::resolve_remote_revision(
-            &git_source.clone_url,
-            git_source.branch.as_deref(),
-            proxy_url.as_deref(),
-        )
-        .map_err(AppError::git)?;
-
-        let temp_dir = git_fetcher::clone_repo_ref(
-            &git_source.clone_url,
-            git_source.branch.as_deref(),
-            None,
-            proxy_url.as_deref(),
-        )
-        .map_err(AppError::classify_git_error)?;
-
-        let result = (|| -> Result<SkillSourceDiffDto, AppError> {
-            git_fetcher::checkout_revision(&temp_dir, &remote_revision).map_err(AppError::git)?;
-            let skill_dir = resolve_skill_dir(
-                &temp_dir,
-                git_source.subpath.as_deref(),
-                git_source.locator_skill_id.as_deref(),
-            )?;
-            let entries = build_source_diff_entries(&central_dir, &skill_dir);
-            Ok(SkillSourceDiffDto {
-                skill_id,
-                source_label,
-                revision: remote_revision,
-                entries,
-            })
-        })();
-
-        git_fetcher::cleanup_temp(&temp_dir);
-        result
-    })
-    .await?
-}
-
 fn read_skill_document_from_dir(dir: &Path) -> Result<(String, String), AppError> {
     let candidates = [
         "SKILL.md",
@@ -729,16 +475,6 @@ fn read_skill_document_from_dir(dir: &Path) -> Result<(String, String), AppError
     }
 
     Err(AppError::not_found("No documentation file found"))
-}
-
-fn source_label_for_skill(skill: &SkillRecord) -> String {
-    match skill.source_type.as_str() {
-        "skillssh" => "skills.sh".to_string(),
-        "git" => "Git".to_string(),
-        "local" => "Local".to_string(),
-        "import" => "Imported".to_string(),
-        other => other.to_string(),
-    }
 }
 
 #[tauri::command]
@@ -3519,6 +3255,485 @@ mod tests {
     }
 
     #[test]
+    fn skill_browser_cancels_pending_source_when_closed_without_blocking_local() {
+        use crate::core::{error::ErrorKind, skill_browser::SkillBrowser};
+        use std::net::TcpListener;
+        let repo = test_repo();
+        let installed = write_skill_dir("cancel-browser");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut skill = sample_skill("cancel-browser", "cancel-browser", &installed);
+        skill.source_type = "git".into();
+        skill.source_ref = Some(format!(
+            "http://{}/pending.git",
+            listener.local_addr().unwrap()
+        ));
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = Arc::new(SkillBrowser::default());
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let worker_browser = browser.clone();
+        let session = local.session_id.clone();
+        let worker =
+            std::thread::spawn(move || worker_browser.prepare_source("cancel-browser", &session));
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let connection = loop {
+            if let Ok((connection, _)) = listener.accept() {
+                break connection;
+            }
+            if Instant::now() > deadline {
+                browser.close(&skill.id, &local.session_id).unwrap();
+                panic!("来源没有连接隔离测试服务器");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(browser
+            .read(&skill.id, &local.session_id, "SKILL.md")
+            .is_ok());
+        browser.close(&skill.id, &local.session_id).unwrap();
+        let error = worker.join().unwrap().unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Cancelled);
+        drop(connection);
+        assert!(browser
+            .prepare_source(&skill.id, &local.session_id)
+            .is_err());
+        assert!(fs::read_dir(central_repo::cache_dir().join("repos"))
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.path().is_dir()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_browser_follows_changed_default_branch_through_the_existing_cache() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::{os::unix::fs::PermissionsExt, process::Command};
+        // 真正的 Git 传输通过隔离 SSH 命令连接本地 upload-pack，URL 不被改写。
+        let Ok(remote_path) = std::env::var("SKILL_BROWSER_DEFAULT_FIXTURE") else {
+            let fixture = tempfile::tempdir().unwrap();
+            let ssh = fixture.path().join("fixture-ssh");
+            fs::write(
+                &ssh,
+                "#!/bin/sh\nexec git-upload-pack \"$SKILL_BROWSER_DEFAULT_FIXTURE/repo\"\n",
+            )
+            .unwrap();
+            fs::set_permissions(&ssh, fs::Permissions::from_mode(0o700)).unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "commands::skills::tests::skill_browser_follows_changed_default_branch_through_the_existing_cache", "--nocapture"])
+                .env("SKILL_BROWSER_DEFAULT_FIXTURE", fixture.path())
+                .env("GIT_SSH", &ssh).env_remove("GIT_SSH_COMMAND").env("GIT_SSH_VARIANT", "simple")
+                .output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let repo = test_repo();
+        let remote = Path::new(&remote_path).join("repo");
+        fs::create_dir(&remote).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&remote)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-b", "main"]);
+        fs::write(remote.join("SKILL.md"), "# 默认 main").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=测试",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "默认 main",
+        ]);
+        let main_revision = git(&["rev-parse", "HEAD"]);
+        let installed = write_skill_dir("default-browser");
+        let mut skill = sample_skill("default-browser", "default-browser", &installed);
+        skill.source_type = "git".into();
+        skill.source_ref = Some("ssh://skill-browser-default.test/repo".into());
+        skill.source_ref_resolved = skill.source_ref.clone();
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let first = browser.open(&repo.store, &skill.id).unwrap();
+        assert_eq!(
+            browser
+                .prepare_source(&skill.id, &first.session_id)
+                .unwrap()
+                .revision,
+            main_revision
+        );
+        let cache = fs::read_dir(central_repo::cache_dir().join("repos"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.join(".git").is_dir())
+            .unwrap();
+        let proof = cache.join(".git/浏览缓存复用证明");
+        fs::write(&proof, "缓存必须保留").unwrap();
+        git(&["checkout", "-b", "dev"]);
+        fs::write(remote.join("SKILL.md"), "# 默认 dev").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=测试",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "默认 dev",
+        ]);
+        let dev_revision = git(&["rev-parse", "HEAD"]);
+        let next = browser.open(&repo.store, &skill.id).unwrap();
+        let next_source = browser.prepare_source(&skill.id, &next.session_id).unwrap();
+        assert_eq!(fs::read_to_string(&proof).unwrap(), "缓存必须保留");
+        assert_eq!(next_source.revision, dev_revision);
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &first.session_id, "SKILL.md", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("# 默认 main")
+        );
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &next.session_id, "SKILL.md", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("# 默认 dev")
+        );
+        let explicit = git_fetcher::clone_repo_ref(
+            skill.source_ref.as_deref().unwrap(),
+            Some("main"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            git_fetcher::get_head_revision(&explicit).unwrap(),
+            main_revision
+        );
+        assert_eq!(fs::read_to_string(&proof).unwrap(), "缓存必须保留");
+        git_fetcher::cleanup_temp(&explicit);
+        let default_again =
+            git_fetcher::clone_repo_ref(skill.source_ref.as_deref().unwrap(), None, None, None)
+                .unwrap();
+        assert_eq!(
+            git_fetcher::get_head_revision(&default_again).unwrap(),
+            dev_revision
+        );
+        assert_eq!(fs::read_to_string(&proof).unwrap(), "缓存必须保留");
+        git_fetcher::cleanup_temp(&default_again);
+        browser.close(&skill.id, &first.session_id).unwrap();
+        browser.close(&skill.id, &next.session_id).unwrap();
+    }
+
+    #[test]
+    fn skill_browser_pins_one_git_source_and_cleans_its_checkout() {
+        use crate::core::skill_browser::SkillBrowser;
+        use std::process::Command;
+        // URL 映射只作用于隔离子进程，不修改用户或并行测试的 Git 配置。
+        let Ok(remote_path) = std::env::var("SKILL_BROWSER_GIT_FIXTURE") else {
+            let remote = tempfile::tempdir().unwrap();
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "commands::skills::tests::skill_browser_pins_one_git_source_and_cleans_its_checkout", "--nocapture"])
+                .env("SKILL_BROWSER_GIT_FIXTURE", remote.path())
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", format!("url.file://{}/.insteadOf", remote.path().display()))
+                .env("GIT_CONFIG_VALUE_0", "https://skill-browser.test/")
+                .output().unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        };
+        let repo = test_repo();
+        let remote = Path::new(&remote_path).join("repo");
+        fs::create_dir_all(remote.join("skills/wanted/refs")).unwrap();
+        fs::create_dir_all(remote.join("skills/sibling")).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&remote)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-b", "main"]);
+        fs::write(remote.join("skills/wanted/SKILL.md"), "# 第一版").unwrap();
+        fs::write(remote.join("skills/wanted/refs/info.md"), "第一版资料").unwrap();
+        fs::write(remote.join("skills/sibling/SKILL.md"), "# 不应展示兄弟技能").unwrap();
+        let marker = uuid::Uuid::new_v4().to_string();
+        fs::write(remote.join("skills/wanted/.browser-marker"), &marker).unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=测试",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "来源第一版",
+        ]);
+        let first = git(&["rev-parse", "HEAD"]);
+        let installed = write_skill_dir("git-browser");
+        let mut skill = sample_skill("git-browser", "git-browser", &installed);
+        skill.source_type = "git".into();
+        skill.source_ref = Some("https://skill-browser.test/repo".into());
+        skill.source_branch = Some("main".into());
+        skill.source_subpath = Some("skills/wanted".into());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let index = browser.open(&repo.store, &skill.id).unwrap();
+        let source = browser
+            .prepare_source(&skill.id, &index.session_id)
+            .unwrap();
+        assert_eq!(source.revision, first);
+        assert_eq!(source.index.file_count, 3);
+        assert!(!source
+            .index
+            .entries
+            .iter()
+            .any(|entry| entry.path.contains("sibling")));
+        let checkouts = || -> Vec<PathBuf> {
+            fs::read_dir(std::env::temp_dir())
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    fs::read_to_string(path.join("skills/wanted/.browser-marker"))
+                        .ok()
+                        .as_deref()
+                        == Some(marker.as_str())
+                })
+                .collect()
+        };
+        assert_eq!(checkouts().len(), 1);
+        fs::write(remote.join("skills/wanted/SKILL.md"), "# 第二版").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=测试",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "来源第二版",
+        ]);
+        assert_eq!(
+            browser
+                .prepare_source(&skill.id, &index.session_id)
+                .unwrap()
+                .revision,
+            first
+        );
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &index.session_id, "SKILL.md", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("# 第一版")
+        );
+        assert_eq!(checkouts().len(), 1);
+        let diff = browser.source_diff(&skill.id, &index.session_id).unwrap();
+        assert_eq!(diff.revision, first);
+        assert_eq!(
+            diff.entries
+                .iter()
+                .find(|entry| entry.relative_path == "SKILL.md")
+                .unwrap()
+                .updated_text
+                .as_deref(),
+            Some("# 第一版")
+        );
+        browser.close(&skill.id, &index.session_id).unwrap();
+        assert!(checkouts().is_empty());
+        let next = browser.open(&repo.store, &skill.id).unwrap();
+        assert_ne!(
+            browser
+                .prepare_source(&skill.id, &next.session_id)
+                .unwrap()
+                .revision,
+            first
+        );
+        browser.close(&skill.id, &next.session_id).unwrap();
+        assert!(checkouts().is_empty());
+        let mut missing = skill.clone();
+        missing.id = "missing-browser".into();
+        missing.source_subpath = Some("missing-skill".into());
+        missing.central_path = write_skill_dir("missing-browser")
+            .to_string_lossy()
+            .into_owned();
+        repo.store.insert_skill(&missing).unwrap();
+        let failed = browser.open(&repo.store, &missing.id).unwrap();
+        assert!(browser
+            .prepare_source(&missing.id, &failed.session_id)
+            .is_err());
+        assert!(checkouts().is_empty());
+        assert!(browser
+            .read(&missing.id, &failed.session_id, "SKILL.md")
+            .is_ok());
+        let mut skills_sh = skill.clone();
+        skills_sh.id = "skills-sh-browser".into();
+        skills_sh.source_type = "skillssh".into();
+        skills_sh.source_ref = Some("owner/repo/wanted".into());
+        skills_sh.source_ref_resolved = skill.source_ref.clone();
+        skills_sh.source_subpath = Some("old-location".into());
+        skills_sh.central_path = write_skill_dir("skills-sh-browser")
+            .to_string_lossy()
+            .into_owned();
+        repo.store.insert_skill(&skills_sh).unwrap();
+        let relocated = browser.open(&repo.store, &skills_sh.id).unwrap();
+        assert_eq!(
+            browser
+                .prepare_source(&skills_sh.id, &relocated.session_id)
+                .unwrap()
+                .index
+                .file_count,
+            3
+        );
+        assert_eq!(
+            browser
+                .read_side(&skills_sh.id, &relocated.session_id, "SKILL.md", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("# 第二版")
+        );
+        browser.close(&skills_sh.id, &relocated.session_id).unwrap();
+        assert!(checkouts().is_empty());
+    }
+
+    #[test]
+    fn skill_browser_invalidates_changed_source_and_keeps_local_readable() {
+        use crate::core::{error::ErrorKind, skill_browser::SkillBrowser};
+        let repo = test_repo();
+        let installed = write_skill_dir("changing-source");
+        let source = tempfile::tempdir().unwrap();
+        fs::write(source.path().join("SKILL.md"), "# 旧来源").unwrap();
+        fs::create_dir(source.path().join("refs")).unwrap();
+        fs::write(source.path().join("refs/other.md"), "旧资料").unwrap();
+        let mut skill = sample_skill("changing-source", "changing-source", &installed);
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        browser
+            .prepare_source(&skill.id, &local.session_id)
+            .unwrap();
+        fs::write(source.path().join("refs/other.md"), "新资料").unwrap();
+        fs::write(source.path().join("new.md"), "新增资料").unwrap();
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &local.session_id, "new.md", "source")
+                .unwrap_err()
+                .kind,
+            ErrorKind::StaleSnapshot
+        );
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &local.session_id, "SKILL.md", "source")
+                .unwrap_err()
+                .kind,
+            ErrorKind::StaleSnapshot
+        );
+        assert_eq!(
+            browser
+                .prepare_source(&skill.id, &local.session_id)
+                .unwrap_err()
+                .kind,
+            ErrorKind::StaleSnapshot
+        );
+        assert!(browser
+            .read(&skill.id, &local.session_id, "SKILL.md")
+            .is_ok());
+        browser.close(&skill.id, &local.session_id).unwrap();
+        let next = browser.open(&repo.store, &skill.id).unwrap();
+        browser.prepare_source(&skill.id, &next.session_id).unwrap();
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &next.session_id, "refs/other.md", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("新资料")
+        );
+    }
+
+    #[test]
+    fn skill_browser_browses_original_source_without_changing_installed_content() {
+        use crate::core::skill_browser::SkillBrowser;
+        let repo = test_repo();
+        let installed = write_skill_dir("source-browser");
+        let source = tempfile::tempdir().unwrap();
+        fs::create_dir_all(source.path().join("refs/deep/empty")).unwrap();
+        fs::write(source.path().join("SKILL.md"), "# 原始来源").unwrap();
+        fs::write(source.path().join("refs/deep/.hidden"), "来源文件").unwrap();
+        let mut skill = sample_skill("source-browser", "source-browser", &installed);
+        skill.source_ref = Some(source.path().to_string_lossy().into_owned());
+        repo.store.insert_skill(&skill).unwrap();
+        let browser = SkillBrowser::default();
+        let local = browser.open(&repo.store, &skill.id).unwrap();
+        let original = browser
+            .prepare_source(&skill.id, &local.session_id)
+            .unwrap();
+        assert_eq!(original.index.session_id, local.session_id);
+        assert!(original
+            .index
+            .entries
+            .iter()
+            .any(|entry| entry.path == "refs/deep/empty"));
+        assert_eq!(
+            browser
+                .read_side(&skill.id, &local.session_id, "refs/deep/.hidden", "source")
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("来源文件")
+        );
+        assert!(browser
+            .read(&skill.id, &local.session_id, "refs/deep/.hidden")
+            .is_err());
+        assert_eq!(
+            browser
+                .prepare_source(&skill.id, &local.session_id)
+                .unwrap()
+                .revision,
+            original.revision
+        );
+        assert_eq!(
+            fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+            "---\nname: source-browser\n---\n"
+        );
+        browser.close(&skill.id, &local.session_id).unwrap();
+        assert!(browser
+            .prepare_source(&skill.id, &local.session_id)
+            .is_err());
+    }
+
+    #[test]
     fn skill_browser_lists_the_complete_installed_directory_and_reads_on_demand() {
         use crate::core::skill_browser::SkillBrowser;
         let repo = test_repo();
@@ -3717,8 +3932,8 @@ mod tests {
         fs::create_dir(dir.join("restricted")).unwrap();
         fs::write(dir.join("restricted/secret.txt"), "目录内不可读").unwrap();
         fs::write(dir.join("restricted.txt"), "文件不可读").unwrap();
-        fs::set_permissions(dir.join("restricted"), fs::Permissions::from_mode(0)).unwrap();
-        fs::set_permissions(dir.join("restricted.txt"), fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(dir.join("restricted"), fs::Permissions::from_mode(0o0)).unwrap();
+        fs::set_permissions(dir.join("restricted.txt"), fs::Permissions::from_mode(0o0)).unwrap();
         repo.store
             .insert_skill(&sample_skill("unreadable", "unreadable", &dir))
             .unwrap();

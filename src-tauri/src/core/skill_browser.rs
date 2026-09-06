@@ -1,11 +1,18 @@
-use super::{error::AppError, skill_store::SkillStore};
+use super::{
+    error::AppError,
+    git_fetcher,
+    skill_store::{SkillRecord, SkillStore},
+};
 use serde::Serialize;
 use std::{
     collections::HashMap,
     fs::File,
     io::Read,
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 pub const MAX_PREVIEW_BYTES: usize = 256 * 1024;
@@ -40,25 +47,49 @@ pub struct FilePreview {
     pub message: Option<String>,
 }
 
-#[derive(Default)]
-pub struct SkillBrowser {
-    sessions: Mutex<HashMap<String, Arc<LocalSnapshot>>>,
+#[derive(Clone, Debug, Serialize)]
+pub struct SourceIndex {
+    pub index: BrowserIndex,
+    pub source_label: String,
+    pub location: String,
+    pub revision: String,
 }
 
-struct LocalSnapshot {
-    skill_id: String,
+#[derive(Default)]
+pub struct SkillBrowser {
+    sessions: Mutex<HashMap<String, Arc<BrowserSession>>>,
+}
+
+struct BrowserSession {
+    skill: SkillRecord,
+    proxy_url: Option<String>,
+    local: Snapshot,
+    source: Mutex<Option<Arc<SourceSnapshot>>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+struct SourceSnapshot {
+    snapshot: Snapshot,
+    info: SourceIndex,
+    _checkout: Option<SourceCheckout>,
+}
+
+struct SourceCheckout(PathBuf);
+impl Drop for SourceCheckout {
+    fn drop(&mut self) {
+        git_fetcher::cleanup_temp(&self.0);
+    }
+}
+
+struct Snapshot {
     root: PathBuf,
     stamps: HashMap<String, String>,
     index: BrowserIndex,
 }
 
-impl SkillBrowser {
-    pub fn open(&self, store: &SkillStore, skill_id: &str) -> Result<BrowserIndex, AppError> {
-        let skill = store
-            .get_skill_by_id(skill_id)
-            .map_err(AppError::db)?
-            .ok_or_else(|| AppError::not_found("Skill 未安装"))?;
-        let root = Directory::open(Path::new(&skill.central_path)).map_err(AppError::io)?;
+impl Snapshot {
+    fn open(path: &Path, skill_id: &str, session_id: &str) -> Result<Self, AppError> {
+        let root = Directory::open(path).map_err(AppError::io)?;
         let mut stamps = HashMap::new();
         let mut entries = Vec::new();
         let mut issues = Vec::new();
@@ -95,7 +126,7 @@ impl SkillBrowser {
             });
         let index = BrowserIndex {
             skill_id: skill_id.into(),
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.into(),
             entry_path,
             file_count: entries
                 .iter()
@@ -109,73 +140,49 @@ impl SkillBrowser {
             entries,
             issues,
         };
-        let snapshot = LocalSnapshot {
-            skill_id: skill_id.into(),
+        Ok(Self {
             root: root.path.clone(),
             stamps,
-            index: index.clone(),
-        };
-        self.sessions
-            .lock()
-            .map_err(AppError::internal)?
-            .insert(index.session_id.clone(), Arc::new(snapshot));
-        Ok(index)
+            index,
+        })
     }
 
-    pub fn close(&self, skill_id: &str, session_id: &str) -> Result<(), AppError> {
-        let mut sessions = self.sessions.lock().map_err(AppError::internal)?;
-        if let Some(session) = sessions.get(session_id) {
-            if session.skill_id != skill_id {
-                return Err(AppError::invalid_input("浏览会话与 Skill 不匹配"));
-            }
+    fn validate(&self) -> Result<(), AppError> {
+        let root = Directory::open(&self.root).map_err(|_| AppError::stale_snapshot())?;
+        let mut stamps = HashMap::new();
+        scan(&root, "", &mut Vec::new(), &mut stamps, &mut Vec::new());
+        if stamps != self.stamps {
+            return Err(AppError::stale_snapshot());
         }
-        sessions.remove(session_id);
         Ok(())
     }
 
-    pub fn read(
+    fn with_entry<T>(
         &self,
-        skill_id: &str,
-        session_id: &str,
-        relative_path: &str,
-    ) -> Result<FilePreview, AppError> {
-        validate_relative_path(relative_path)?;
-        let session = self
-            .sessions
-            .lock()
-            .map_err(AppError::internal)?
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| AppError::not_found("浏览会话已关闭，请重新打开"))?;
-        if session.skill_id != skill_id {
-            return Err(AppError::invalid_input("浏览会话与 Skill 不匹配"));
-        }
-        let entry = session
+        path: &str,
+        read: impl FnOnce(&BrowserEntry, Option<&File>) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        validate_relative_path(path)?;
+        let entry = self
             .index
             .entries
             .iter()
-            .find(|entry| entry.path == relative_path)
-            .ok_or_else(|| AppError::not_found("此版本中没有该文件"))?;
-        let mut preview = FilePreview {
-            path: relative_path.into(),
-            kind: entry.kind.clone(),
-            size: entry.size,
-            text: None,
-            message: entry.error.clone(),
-        };
-        if let Some(message) = &entry.error {
-            preview.kind = "unreadable".into();
-            preview.message = Some(message.clone());
-            return Ok(preview);
+            .find(|entry| entry.path == path)
+            .ok_or_else(|| {
+                self.validate()
+                    .err()
+                    .unwrap_or_else(|| AppError::not_found("此版本中没有该文件"))
+            })?;
+        if entry.error.is_some() {
+            return read(entry, None);
         }
         let changed = AppError::stale_snapshot;
-        // 重新核验安装路径的身份，避免已被替换的根目录继续提供旧版本正文。
-        let current_root = Directory::open(&session.root).map_err(|_| changed())?;
-        if current_root.stamp().map_err(|_| changed())? != session.stamps[""] {
+        // 所有读取共享目录句柄链，Windows 也在读后复验完成前保留祖先句柄。
+        let mut directories = vec![Directory::open(&self.root).map_err(|_| changed())?];
+        if Some(&directories[0].stamp().map_err(|_| changed())?) != self.stamps.get("") {
             return Err(changed());
         }
-        let parts: Vec<_> = relative_path.split('/').collect();
-        let mut directories = vec![current_root];
+        let parts: Vec<_> = path.split('/').collect();
         let mut prefix = String::new();
         for part in &parts[..parts.len() - 1] {
             if !prefix.is_empty() {
@@ -187,7 +194,7 @@ impl SkillBrowser {
                 .unwrap()
                 .child(part)
                 .map_err(|_| changed())?;
-            if Some(&directory.stamp().map_err(|_| changed())?) != session.stamps.get(&prefix) {
+            if Some(&directory.stamp().map_err(|_| changed())?) != self.stamps.get(&prefix) {
                 return Err(changed());
             }
             directories.push(directory);
@@ -195,65 +202,398 @@ impl SkillBrowser {
         let parent = directories.last().unwrap();
         let name = parts.last().unwrap();
         let info = parent.info(name).map_err(|_| changed())?;
-        if Some(&info.stamp) != session.stamps.get(relative_path) {
+        if Some(&info.stamp) != self.stamps.get(path) {
             return Err(changed());
         }
-        if entry.kind != "file" {
-            preview.message = Some(match entry.kind.as_str() {
-                "symlink" => format!(
-                    "符号链接，仅展示链接信息，不读取目标：{}",
-                    entry.link_target.as_deref().unwrap_or("未知")
-                ),
-                "directory" => "目录，请从左侧选择文件".into(),
-                _ => "此文件类型不支持预览".into(),
-            });
-            return Ok(preview);
-        }
-        let file = parent.open_file(name).map_err(AppError::io)?;
-        if file_stamp(&file).map_err(AppError::io)? != info.stamp {
-            return Err(changed());
-        }
-        if entry.size > MAX_PREVIEW_BYTES as u64 {
-            preview.kind = "too_large".into();
-        } else {
-            let mut bytes = Vec::new();
-            (&file)
-                .take((MAX_PREVIEW_BYTES + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(AppError::io)?;
-            if bytes.len() > MAX_PREVIEW_BYTES {
-                preview.kind = "too_large".into();
-            } else if bytes.contains(&0) {
-                preview.kind = "binary".into();
-            } else {
-                match String::from_utf8(bytes) {
-                    Ok(text) => {
-                        preview.kind = "text".into();
-                        preview.text = Some(text);
-                    }
-                    Err(_) => preview.kind = "unsupported_encoding".into(),
+        let file = if entry.kind == "file" {
+            let file = parent.open_file(name).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::PermissionDenied {
+                    AppError::io(error)
+                } else {
+                    changed()
                 }
+            })?;
+            if file_stamp(&file).map_err(AppError::io)? != info.stamp {
+                return Err(changed());
             }
-        }
-        if file_stamp(&file).map_err(AppError::io)? != info.stamp
+            Some(file)
+        } else {
+            None
+        };
+        let result = read(entry, file.as_ref());
+        if file
+            .as_ref()
+            .map(file_stamp)
+            .transpose()
+            .map_err(AppError::io)?
+            .is_some_and(|stamp| stamp != info.stamp)
             || parent.info(name).map_err(|_| changed())?.stamp != info.stamp
         {
             return Err(changed());
         }
         for (depth, directory) in directories.iter().enumerate() {
-            let path = parts[..depth].join("/");
-            if Some(&directory.stamp().map_err(|_| changed())?) != session.stamps.get(&path) {
+            if Some(&directory.stamp().map_err(|_| changed())?)
+                != self.stamps.get(&parts[..depth].join("/"))
+            {
                 return Err(changed());
             }
         }
-        if Directory::open(&session.root)
-            .and_then(|directory| directory.stamp())
-            .map_err(|_| changed())?
-            != session.stamps[""]
+        if Some(
+            &Directory::open(&self.root)
+                .and_then(|root| root.stamp())
+                .map_err(|_| changed())?,
+        ) != self.stamps.get("")
         {
             return Err(changed());
         }
-        Ok(preview)
+        result
+    }
+
+    fn fingerprint(&self, path: &str) -> Result<(Vec<u8>, u32), AppError> {
+        use sha2::{Digest, Sha256};
+        self.with_entry(path, |entry, file| {
+            let file = file.ok_or_else(|| {
+                AppError::io(entry.error.as_deref().unwrap_or("此文件类型无法比较"))
+            })?;
+            let mut hash = Sha256::new();
+            let mut buffer = [0; 8192];
+            let mut reader = file;
+            loop {
+                let count = reader.read(&mut buffer).map_err(AppError::io)?;
+                if count == 0 {
+                    break;
+                }
+                hash.update(&buffer[..count]);
+            }
+            #[cfg(unix)]
+            let bits = {
+                use std::os::unix::fs::PermissionsExt;
+                file.metadata().map_err(AppError::io)?.permissions().mode() & 0o111
+            };
+            #[cfg(not(unix))]
+            let bits = 0;
+            Ok((hash.finalize().to_vec(), bits))
+        })
+    }
+
+    fn read(&self, path: &str) -> Result<FilePreview, AppError> {
+        self.with_entry(path, |entry, file| {
+            let mut preview = FilePreview {
+                path: path.into(),
+                kind: entry.kind.clone(),
+                size: entry.size,
+                text: None,
+                message: entry.error.clone(),
+            };
+            if entry.error.is_some() {
+                preview.kind = "unreadable".into();
+                return Ok(preview);
+            }
+            let Some(file) = file else {
+                preview.message = Some(match entry.kind.as_str() {
+                    "symlink" => format!(
+                        "符号链接，仅展示链接信息，不读取目标：{}",
+                        entry.link_target.as_deref().unwrap_or("未知")
+                    ),
+                    "directory" => "目录，请从左侧选择文件".into(),
+                    _ => "此文件类型不支持预览".into(),
+                });
+                return Ok(preview);
+            };
+            if entry.size > MAX_PREVIEW_BYTES as u64 {
+                preview.kind = "too_large".into();
+            } else {
+                let mut bytes = Vec::new();
+                file.take((MAX_PREVIEW_BYTES + 1) as u64)
+                    .read_to_end(&mut bytes)
+                    .map_err(AppError::io)?;
+                if bytes.len() > MAX_PREVIEW_BYTES {
+                    preview.kind = "too_large".into();
+                } else if bytes.contains(&0) {
+                    preview.kind = "binary".into();
+                } else {
+                    match String::from_utf8(bytes) {
+                        Ok(text) => {
+                            preview.kind = "text".into();
+                            preview.text = Some(text);
+                        }
+                        Err(_) => preview.kind = "unsupported_encoding".into(),
+                    }
+                }
+            }
+            Ok(preview)
+        })
+    }
+}
+
+impl SkillBrowser {
+    pub fn open(&self, store: &SkillStore, skill_id: &str) -> Result<BrowserIndex, AppError> {
+        let skill = store
+            .get_skill_by_id(skill_id)
+            .map_err(AppError::db)?
+            .ok_or_else(|| AppError::not_found("Skill 未安装"))?;
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let local = Snapshot::open(Path::new(&skill.central_path), skill_id, &session_id)?;
+        let index = local.index.clone();
+        let session = BrowserSession {
+            skill,
+            proxy_url: store.proxy_url(),
+            local,
+            source: Mutex::new(None),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        self.sessions
+            .lock()
+            .map_err(AppError::internal)?
+            .insert(session_id, Arc::new(session));
+        Ok(index)
+    }
+
+    fn session(&self, skill_id: &str, session_id: &str) -> Result<Arc<BrowserSession>, AppError> {
+        let session = self
+            .sessions
+            .lock()
+            .map_err(AppError::internal)?
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| AppError::not_found("浏览会话已关闭，请重新打开"))?;
+        if session.skill.id != skill_id {
+            return Err(AppError::invalid_input("浏览会话与 Skill 不匹配"));
+        }
+        Ok(session)
+    }
+
+    pub fn close(&self, skill_id: &str, session_id: &str) -> Result<(), AppError> {
+        let mut sessions = self.sessions.lock().map_err(AppError::internal)?;
+        if let Some(session) = sessions.get(session_id) {
+            if session.skill.id != skill_id {
+                return Err(AppError::invalid_input("浏览会话与 Skill 不匹配"));
+            }
+            session.cancelled.store(true, Ordering::SeqCst);
+        }
+        sessions.remove(session_id);
+        Ok(())
+    }
+
+    pub fn read(
+        &self,
+        skill_id: &str,
+        session_id: &str,
+        path: &str,
+    ) -> Result<FilePreview, AppError> {
+        self.read_side(skill_id, session_id, path, "local")
+    }
+
+    pub fn read_side(
+        &self,
+        skill_id: &str,
+        session_id: &str,
+        path: &str,
+        side: &str,
+    ) -> Result<FilePreview, AppError> {
+        let session = self.session(skill_id, session_id)?;
+        match side {
+            "local" => session.local.read(path),
+            "source" => {
+                let source = session
+                    .source
+                    .lock()
+                    .map_err(AppError::internal)?
+                    .clone()
+                    .ok_or_else(|| AppError::not_found("请先准备来源目录"))?;
+                source.snapshot.validate()?;
+                let preview = source.snapshot.read(path)?;
+                source.snapshot.validate()?;
+                Ok(preview)
+            }
+            _ => Err(AppError::invalid_input("不支持的文件版本")),
+        }
+    }
+
+    pub fn source_diff(
+        &self,
+        skill_id: &str,
+        session_id: &str,
+    ) -> Result<crate::commands::skills::SkillSourceDiffDto, AppError> {
+        use crate::commands::skills::{SkillSourceDiffDto, SkillSourceDiffEntryDto};
+        self.prepare_source(skill_id, session_id)?;
+        let session = self.session(skill_id, session_id)?;
+        let source = session
+            .source
+            .lock()
+            .map_err(AppError::internal)?
+            .clone()
+            .ok_or_else(|| AppError::not_found("来源尚未准备"))?;
+        let local = &session.local;
+        let remote = &source.snapshot;
+        local.validate()?;
+        remote.validate()?;
+        if !local.index.complete || !remote.index.complete {
+            return Err(AppError::io("目录未完整读取，暂时无法比较"));
+        }
+        let paths: std::collections::BTreeSet<_> = local
+            .index
+            .entries
+            .iter()
+            .chain(&remote.index.entries)
+            .filter(|entry| {
+                entry.kind == "file" && !entry.path.split('/').any(super::content_hash::is_ignored)
+            })
+            .map(|entry| entry.path.as_str())
+            .collect();
+        let mut entries = Vec::new();
+        for path in paths {
+            if session.cancelled.load(Ordering::SeqCst) {
+                return Err(AppError::cancelled("浏览会话已关闭"));
+            }
+            let exists = |snapshot: &Snapshot| {
+                snapshot
+                    .index
+                    .entries
+                    .iter()
+                    .any(|entry| entry.path == path && entry.kind == "file")
+            };
+            let before = exists(local).then(|| local.fingerprint(path)).transpose()?;
+            let after = exists(remote)
+                .then(|| remote.fingerprint(path))
+                .transpose()?;
+            if before == after {
+                continue;
+            }
+            let original = before.as_ref().map(|_| local.read(path)).transpose()?;
+            let updated = after.as_ref().map(|_| remote.read(path)).transpose()?;
+            if original
+                .iter()
+                .chain(updated.iter())
+                .any(|preview| preview.kind == "unreadable")
+            {
+                return Err(AppError::io(format!("无法读取 {path}，暂时无法比较")));
+            }
+            let content_kind = if before
+                .as_ref()
+                .zip(after.as_ref())
+                .is_some_and(|(a, b)| a.0 == b.0)
+            {
+                "permission_only"
+            } else if original
+                .iter()
+                .chain(updated.iter())
+                .any(|preview| preview.kind == "too_large")
+            {
+                "too_large"
+            } else if original
+                .iter()
+                .chain(updated.iter())
+                .all(|preview| preview.kind == "text")
+            {
+                "text"
+            } else {
+                "binary"
+            };
+            entries.push(SkillSourceDiffEntryDto {
+                relative_path: path.into(),
+                status: if before.is_none() {
+                    "added"
+                } else if after.is_none() {
+                    "removed"
+                } else {
+                    "modified"
+                }
+                .into(),
+                content_kind: content_kind.into(),
+                original_text: original.and_then(|preview| preview.text),
+                updated_text: updated.and_then(|preview| preview.text),
+                executable_before: before.is_some_and(|(_, bits)| bits != 0),
+                executable_after: after.is_some_and(|(_, bits)| bits != 0),
+            });
+        }
+        local.validate()?;
+        remote.validate()?;
+        Ok(SkillSourceDiffDto {
+            skill_id: skill_id.into(),
+            source_label: source.info.source_label.clone(),
+            revision: source.info.revision.clone(),
+            entries,
+        })
+    }
+
+    pub fn prepare_source(
+        &self,
+        skill_id: &str,
+        session_id: &str,
+    ) -> Result<SourceIndex, AppError> {
+        let session = self.session(skill_id, session_id)?;
+        // 仅锁住当前会话的来源准备；本地读取和其他 Skill 不等待来源操作。
+        let mut source = session.source.lock().map_err(AppError::internal)?;
+        if let Some(source) = source.as_ref() {
+            source.snapshot.validate()?;
+            return Ok(source.info.clone());
+        }
+        let skill = &session.skill;
+        let (root, location, revision, checkout) = match skill.source_type.as_str() {
+            "local" | "import" => {
+                let location = skill
+                    .source_ref
+                    .clone()
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| AppError::not_found("此 Skill 没有记录原始来源"))?;
+                if !Path::new(&location).try_exists().map_err(AppError::io)? {
+                    return Err(AppError::not_found("原始来源路径已不存在"));
+                }
+                (PathBuf::from(&location), location, "workspace".into(), None)
+            }
+            "git" | "skillssh" => {
+                use crate::commands::skills::{git_source_from_skill, resolve_skill_dir};
+                let source = git_source_from_skill(skill)?;
+                git_fetcher::validate_git_url(&source.clone_url).map_err(AppError::git)?;
+                let checkout = SourceCheckout(
+                    git_fetcher::clone_repo_ref(
+                        &source.clone_url,
+                        source.branch.as_deref(),
+                        Some(&session.cancelled),
+                        session.proxy_url.as_deref(),
+                    )
+                    .map_err(AppError::classify_git_error)?,
+                );
+                // 固定实际 checkout HEAD，避免远端在查询与克隆之间移动而混用修订。
+                let revision =
+                    git_fetcher::get_head_revision(&checkout.0).map_err(AppError::git)?;
+                let root = resolve_skill_dir(
+                    &checkout.0,
+                    source.subpath.as_deref(),
+                    source.locator_skill_id.as_deref(),
+                )?;
+                if !super::skill_metadata::is_valid_skill_dir(&root) {
+                    return Err(AppError::not_found("来源位置不是可确定的单个 Skill 目录"));
+                }
+                let relative = root
+                    .strip_prefix(&checkout.0)
+                    .map_err(|error| AppError::invalid_input(error.to_string()))?;
+                let location = if relative.as_os_str().is_empty() {
+                    source.clone_url
+                } else {
+                    format!("{} · {}", source.clone_url, relative.display())
+                };
+                (root, location, revision, Some(checkout))
+            }
+            _ => return Err(AppError::not_found("此 Skill 没有可浏览的来源")),
+        };
+        let snapshot = Snapshot::open(&root, skill_id, session_id)?;
+        let info = SourceIndex {
+            index: snapshot.index.clone(),
+            source_label: skill.source_type.clone(),
+            location,
+            revision,
+        };
+        if session.cancelled.load(Ordering::SeqCst) {
+            return Err(AppError::cancelled("浏览会话已关闭"));
+        }
+        *source = Some(Arc::new(SourceSnapshot {
+            snapshot,
+            info: info.clone(),
+            _checkout: checkout,
+        }));
+        Ok(info)
     }
 }
 

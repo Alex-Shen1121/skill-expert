@@ -93,25 +93,40 @@ it("快速选择文件时迟到正文不覆盖当前路径，切换 Skill 后释
   expect(vi.mocked(invoke)).toHaveBeenCalledWith("close_skill_browser", { skillId: "demo", sessionId: "session-demo" });
 });
 
-it("来源和差异仍可按需访问，关闭按钮保留原有回调", async () => {
+it("来源完整树与差异共用一次来源准备，保留相对路径并说明缺失版本", async () => {
   const user = userEvent.setup();
   const initial = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => {
-    if (command === "get_source_skill_document") return Promise.resolve({ skill_id: "demo", filename: "SKILL.md", content: "# 来源入口", revision: "abc1234", source_label: "来源" });
-    if (command === "get_skill_source_diff") return Promise.resolve({ skill_id: "demo", entries: [], revision: "abc1234", source_label: "来源" });
+    if (command === "prepare_skill_browser_source") return Promise.resolve({ index: { ...index, entries: [...index.entries, { path: "source-only.md", kind: "file", size: 20, error: null }], file_count: 3 }, revision: "abc1234", source_label: "git", location: "https://example.com/skills.git · demo" });
+    if (command === "get_skill_browser_diff") return Promise.resolve({ skill_id: "demo", entries: [], revision: "abc1234", source_label: "git" });
+    if (command === "read_skill_browser_file" && (args as { side: string }).side === "local" && (args as { relativePath: string }).relativePath === "source-only.md") return Promise.reject({ kind: "not_found", message: "此版本中没有该文件" });
+    if (command === "read_skill_browser_file" && (args as { side: string }).side === "source") {
+      const path = (args as { relativePath: string }).relativePath;
+      return Promise.resolve({ path, kind: "text", size: 20, text: path === "source-only.md" ? "# 来源独有资料" : "# 来源入口", message: null });
+    }
     return initial(command, args);
   });
   const onClose = vi.fn();
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={onClose} />);
+  render(<SkillDetailPanel skill={skill} onClose={onClose} />);
   await screen.findByRole("heading", { name: "阅读入口" });
   await user.click(screen.getByRole("button", { name: "来源" }));
+  expect(await screen.findByRole("navigation", { name: "来源完整文件目录" })).toBeTruthy();
   expect(await screen.findByRole("heading", { name: "来源入口" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "source-only.md" }));
+  expect(await screen.findByRole("heading", { name: "来源独有资料" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "本地文件" }));
+  expect(await screen.findByText("此版本中没有该文件")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "阅读入口" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "差异" }));
-  expect(vi.mocked(invoke)).toHaveBeenCalledWith("get_skill_source_diff", { skillId: "demo" });
+  expect(await screen.findByText(i18n.t("mySkills.sourceDiff.noChanges"))).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "来源" }));
+  expect(await screen.findByRole("heading", { name: "来源独有资料" })).toBeTruthy();
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "prepare_skill_browser_source")).toHaveLength(1);
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith("get_skill_browser_diff", { skillId: "demo", sessionId: "session-demo" });
   await user.click(screen.getByRole("button", { name: "关闭" }));
   expect(onClose).toHaveBeenCalledOnce();
-  unmount();
 });
+
 
 
 it("详情关闭后才完成的索引会话也会被释放", async () => {
@@ -283,4 +298,53 @@ it("预览上限内的大量短行仍保留全部原文", async () => {
   await user.type(await screen.findByRole("searchbox", { name: "查找文件" }), "read.py");
   await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
   expect((await screen.findByLabelText("文件原文")).textContent).toBe(content);
+});
+
+it("来源准备失败后本地仍可阅读，重试只使用新会话且迟到来源不覆盖新技能", async () => {
+  const user = userEvent.setup();
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  let attempts = 0;
+  let finishOldSource: ((value: unknown) => void) | undefined;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "prepare_skill_browser_source") {
+      attempts += 1;
+      if (attempts === 1) return Promise.reject({ kind: "network", message: "测试来源暂时不可达" });
+      return new Promise(resolve => { finishOldSource = resolve; });
+    }
+    if (command === "open_skill_browser" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ ...index, skill_id: "second", session_id: "second-session" });
+    if (command === "read_skill_browser_file" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ path: "SKILL.md", kind: "text", text: "# 第二个技能", size: 20, message: null });
+    return initial(command, args);
+  });
+  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await screen.findByRole("heading", { name: "阅读入口" });
+  await user.click(screen.getByRole("button", { name: "来源" }));
+  expect(await screen.findByText("测试来源暂时不可达")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "本地文件" }));
+  expect(await screen.findByRole("heading", { name: "阅读入口" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "来源" }));
+  await user.click(screen.getByRole("button", { name: "重新准备来源" }));
+  await waitFor(() => expect(attempts).toBe(2));
+  rerender(<SkillDetailPanel skill={{ ...skill, id: "second", name: "第二个技能" }} onClose={vi.fn()} />);
+  expect(await screen.findByRole("heading", { name: "第二个技能" })).toBeTruthy();
+  await act(async () => { finishOldSource?.({ index, revision: "old-revision", location: "迟到的来源位置", source_label: "git" }); });
+  expect(screen.queryByText("迟到的来源位置")).toBeNull();
+  expect(screen.getByRole("heading", { name: "第二个技能" })).toBeTruthy();
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith("close_skill_browser", { skillId: "demo", sessionId: "session-demo" });
+});
+
+it("跨版本缺失路径仍由后端核验快照，变化后的来源不能伪装为缺失", async () => {
+  const user = userEvent.setup();
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "prepare_skill_browser_source") return Promise.resolve({ index: { ...index, entries: index.entries.filter(entry => entry.path !== "scripts/read.py") }, revision: "workspace", source_label: "local", location: "/original/skill" });
+    if (command === "read_skill_browser_file" && (args as { side: string }).side === "source") return Promise.reject({ kind: "stale_snapshot", message: "来源文件已变化，请重新加载" });
+    return initial(command, args);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "scripts" }));
+  await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
+  await screen.findByText("print('只读')");
+  await user.click(screen.getByRole("button", { name: "来源" }));
+  expect(await screen.findByText("来源文件已变化，请重新加载")).toBeTruthy();
+  expect(screen.queryByText("此版本中没有该文件")).toBeNull();
 });

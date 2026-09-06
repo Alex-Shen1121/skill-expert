@@ -1346,6 +1346,14 @@
     "raw": "原文",
     "invalidLink": "链接必须指向当前 Skill 目录内的文件",
     "linkMissing": "此版本中没有该文件：{{path}}",
-    "externalLinkFailed": "无法打开外部链接"
+    "externalLinkFailed": "无法打开外部链接",
+    "sourceTree": "來源完整檔案目錄",
+    "sourcePreview": "來源檔案唯讀預覽",
+    "missingFile": "此版本中沒有該檔案",
+    "snapshotLocation": "本次來源位置",
+    "snapshotRevision": "本次來源版本",
+    "workspaceSnapshot": "原始目錄快照",
+    "noSource": "此 Skill 沒有記錄可瀏覽的來源",
+    "retrySource": "重新準備來源"
   }
 }

@@ -81,7 +81,7 @@ export interface SkillBrowserIndex {
 
 export interface SkillFilePreview {
   path: string;
-  kind: "text" | "binary" | "too_large" | "unsupported_encoding" | "file" | "directory" | "symlink" | "special" | "unreadable";
+  kind: "missing" | "text" | "binary" | "too_large" | "unsupported_encoding" | "file" | "directory" | "symlink" | "special" | "unreadable";
   size: number;
   text: string | null;
   message: string | null;
@@ -89,8 +89,19 @@ export interface SkillFilePreview {
 
 export const openSkillBrowser = (skillId: string) =>
   invoke<SkillBrowserIndex>("open_skill_browser", { skillId });
-export const readSkillBrowserFile = (skillId: string, sessionId: string, relativePath: string) =>
-  invoke<SkillFilePreview>("read_skill_browser_file", { skillId, sessionId, relativePath });
+export const readSkillBrowserFile = (skillId: string, sessionId: string, relativePath: string, side: "local" | "source" = "local") =>
+  invoke<SkillFilePreview>("read_skill_browser_file", { skillId, sessionId, relativePath, side });
+export interface SkillBrowserSource {
+  index: SkillBrowserIndex;
+  source_label: string;
+  location: string;
+  revision: string;
+}
+export const prepareSkillBrowserSource = (skillId: string, sessionId: string) =>
+  invoke<SkillBrowserSource>("prepare_skill_browser_source", { skillId, sessionId });
+export const getSkillBrowserDiff = (skillId: string, sessionId: string) =>
+  invoke<SkillSourceDiff>("get_skill_browser_diff", { skillId, sessionId });
+
 export const closeSkillBrowser = (skillId: string, sessionId: string) =>
   invoke<void>("close_skill_browser", { skillId, sessionId });
 
@@ -99,14 +110,6 @@ export interface SkillDocument {
   filename: string;
   content: string;
   central_path: string;
-}
-
-export interface SourceSkillDocument {
-  skill_id: string;
-  filename: string;
-  content: string;
-  source_label: string;
-  revision: string;
 }
 
 export type SkillSourceDiffStatus = "added" | "removed" | "modified";
@@ -280,11 +283,6 @@ export const getSkillsForPreset = (presetId: string) =>
 export const getSkillDocument = (skillId: string) =>
   invoke<SkillDocument>("get_skill_document", { skillId });
 
-export const getSourceSkillDocument = (skillId: string) =>
-  invoke<SourceSkillDocument>("get_source_skill_document", { skillId });
-
-export const getSkillSourceDiff = (skillId: string) =>
-  invoke<SkillSourceDiff>("get_skill_source_diff", { skillId });
 
 export const deleteManagedSkill = (skillId: string) =>
   invoke<void>("delete_managed_skill", { skillId });
