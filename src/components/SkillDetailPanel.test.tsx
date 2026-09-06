@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { SkillDetailPanel } from "./SkillDetailPanel";
 import i18n, { i18nReady } from "../i18n";
 import type { ManagedSkill } from "../lib/tauri";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(async () => {}) }));
 const skill: ManagedSkill = {
   id: "demo", name: "文档技能", description: "完整技能目录", source_type: "git", source_ref: "https://example.com/skills.git", source_ref_resolved: null,
   source_subpath: null, source_branch: null, source_revision: null, remote_revision: null,
@@ -25,6 +27,7 @@ const index = {
 beforeAll(async () => { await i18nReady; await i18n.changeLanguage("zh"); });
 beforeEach(() => {
   vi.mocked(invoke).mockReset();
+  vi.mocked(openUrl).mockClear();
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "open_skill_browser") return index;
     if (command === "read_skill_browser_file") {
@@ -131,4 +134,153 @@ it("重复选择当前文件保持已读正文", async () => {
   await screen.findByRole("heading", { name: "阅读入口" });
   await user.click(screen.getByRole("button", { name: "SKILL.md" }));
   expect(screen.getByRole("heading", { name: "阅读入口" })).toBeTruthy();
+});
+
+
+it("搜索完整相对路径区分同名文件，清除后展开选中文件的父目录", async () => {
+  const user = userEvent.setup();
+  const paths = ["资料/中文长名称的工作流程与边界说明/指南.md", "参考/指南.md"];
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "open_skill_browser") return Promise.resolve({ ...index, entries: [...index.entries,
+      ...["资料", "资料/中文长名称的工作流程与边界说明", "参考"].map(path => ({ path, kind: "directory", size: 0, error: null })),
+      ...paths.map(path => ({ path, kind: "file", size: 14, error: null })),
+    ], file_count: 4, directory_count: 5 });
+    if (command === "read_skill_browser_file" && paths.includes((args as { relativePath: string }).relativePath)) {
+      const path = (args as { relativePath: string }).relativePath;
+      return Promise.resolve({ path, kind: "text", size: 14, text: `# ${path === paths[0] ? "中文目录指南" : "参考目录指南"}`, message: null });
+    }
+    return initial(command, args);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const search = await screen.findByRole("searchbox", { name: "查找文件" });
+  await user.type(search, "指南.md");
+  expect(screen.getByText("找到 2 个文件")).toBeTruthy();
+  expect(screen.getByRole("button", { name: paths[1] })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: paths[0] }));
+  expect(await screen.findByRole("heading", { name: "中文目录指南" })).toBeTruthy();
+  expect(within(screen.getByRole("region", { name: "本地文件只读预览" })).getByText(paths[0])).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "清除搜索" }));
+  expect(screen.getByRole("button", { name: "资料" }).getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("button", { name: paths[0] }).getAttribute("aria-current")).toBe("true");
+  await user.type(search, "不存在的文件");
+  expect(screen.getByText("没有匹配的文件")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "中文目录指南" })).toBeTruthy();
+  await user.clear(search);
+  await user.type(search, "参考/指南");
+  expect(screen.getByText("找到 1 个文件")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: paths[0] })).toBeNull();
+});
+
+
+it("Markdown 正文和原文切换保留 frontmatter、标记与当前路径", async () => {
+  const user = userEvent.setup();
+  const content = "---\nname: 原始元数据\n---\n# 正文标题\n\n**原始标记**\n";
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "read_skill_browser_file"
+    ? Promise.resolve({ path: "SKILL.md", kind: "text", size: 90, text: content, message: null }) : initial(command, args));
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  expect(await screen.findByRole("heading", { name: "正文标题" })).toBeTruthy();
+  expect(screen.queryByText("name: 原始元数据")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "原文" }));
+  expect(screen.getByLabelText("文件原文").textContent).toBe(content);
+  expect(screen.getByRole("button", { name: "SKILL.md" }).getAttribute("aria-current")).toBe("true");
+  expect(screen.getByRole("button", { name: "原文" }).getAttribute("aria-pressed")).toBe("true");
+  await user.click(screen.getByRole("button", { name: "正文" }));
+  expect(screen.getByRole("heading", { name: "正文标题" })).toBeTruthy();
+});
+
+
+it("Markdown 相对链接从当前文档目录导航并展开父目录，保留精确路径", async () => {
+  const user = userEvent.setup();
+  const files: Record<string, string> = {
+    "SKILL.md": "# 链接入口\n[阅读说明](docs/说明.md)",
+    "docs/说明.md": "# 当前目录说明\n[继续阅读](../资料/中文%20指南.md#用法)",
+    "资料/中文 指南.md": "# 中文关联文档",
+  };
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "open_skill_browser") return Promise.resolve({ ...index, entries: [
+      ...["docs", "资料"].map(path => ({ path, kind: "directory", size: 0, error: null })),
+      ...Object.keys(files).map(path => ({ path, kind: "file", size: 100, error: null })),
+    ], file_count: 3, directory_count: 2 });
+    if (command === "read_skill_browser_file") {
+      const path = (args as { relativePath: string }).relativePath;
+      return Promise.resolve({ path, kind: "text", size: 100, text: files[path], message: null });
+    }
+    return initial(command, args);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.click(await screen.findByRole("link", { name: "阅读说明" }));
+  expect(await screen.findByRole("heading", { name: "当前目录说明" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "docs" }).getAttribute("aria-expanded")).toBe("true");
+  await user.click(screen.getByRole("link", { name: "继续阅读" }));
+  expect(await screen.findByRole("heading", { name: "中文关联文档" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "资料/中文 指南.md" }).getAttribute("aria-current")).toBe("true");
+  expect(within(screen.getByRole("region", { name: "本地文件只读预览" })).getByText("资料/中文 指南.md")).toBeTruthy();
+});
+
+
+it("缺失、越界和符号链接目标明确报错且不读取其他文件，外链交给既有安全打开器", async () => {
+  const user = userEvent.setup();
+  const content = "# 安全阅读入口\n[缺失文件](docs/missing.md)\n[根外文件](../outside.md)\n[编码越界](%2e%2e/outside.md)\n[绝对文件](/etc/passwd)\n[本地协议](file:///etc/passwd)\n[链接目标](shared/outside.md)\n[外部资料](https://example.com/docs)";
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "open_skill_browser") return Promise.resolve({ ...index, entries: [...index.entries,
+      { path: "missing.md", kind: "file", size: 9, error: null },
+      { path: "shared", kind: "symlink", size: 0, error: null, link_target: "/outside" },
+    ] });
+    if (command === "read_skill_browser_file") return Promise.resolve({ path: "SKILL.md", kind: "text", text: content, size: 300, message: null });
+    return initial(command, args);
+  });
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.click(await screen.findByRole("link", { name: "缺失文件" }));
+  expect(screen.getByRole("alert").textContent).toContain("此版本中没有该文件：docs/missing.md");
+  for (const label of ["根外文件", "编码越界", "绝对文件", "本地协议"]) {
+    await user.click(screen.getByRole("link", { name: label }));
+    expect(screen.getByRole("alert").textContent).toContain("链接必须指向当前 Skill 目录内的文件");
+  }
+  await user.click(screen.getByRole("link", { name: "链接目标" }));
+  expect(screen.getByRole("alert").textContent).toContain("此版本中没有该文件：shared/outside.md");
+  expect(screen.getByRole("heading", { name: "安全阅读入口" })).toBeTruthy();
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "read_skill_browser_file")).toHaveLength(1);
+  await user.click(screen.getByRole("link", { name: "外部资料" }));
+  expect(vi.mocked(openUrl)).toHaveBeenCalledWith("https://example.com/docs");
+});
+
+
+it("搜索结果可用键盘阅读，切换 Skill 重置搜索并忽略迟到的正文", async () => {
+  const user = userEvent.setup();
+  let finishOldRead: ((value: unknown) => void) | undefined;
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "open_skill_browser" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ ...index, skill_id: "second", session_id: "session-second" });
+    if (command === "read_skill_browser_file" && (args as { relativePath: string }).relativePath === "scripts/read.py") return new Promise(resolve => { finishOldRead = resolve; });
+    if (command === "read_skill_browser_file" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ path: "SKILL.md", kind: "text", text: "# 另一个技能的入口", size: 20, message: null });
+    return initial(command, args);
+  });
+  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const search = await screen.findByRole("searchbox", { name: "查找文件" });
+  await user.type(search, "scripts/read");
+  screen.getByRole("button", { name: "scripts/read.py" }).focus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("button", { name: "scripts/read.py" }).getAttribute("aria-current")).toBe("true");
+  rerender(<SkillDetailPanel skill={{ ...skill, id: "second", name: "另一个技能" }} onClose={vi.fn()} />);
+  expect(await screen.findByRole("heading", { name: "另一个技能的入口" })).toBeTruthy();
+  expect((screen.getByRole("searchbox", { name: "查找文件" }) as HTMLInputElement).value).toBe("");
+  await act(async () => { finishOldRead?.({ path: "scripts/read.py", kind: "text", text: "旧技能的迟到代码", size: 20, message: null }); });
+  expect(screen.queryByText("旧技能的迟到代码")).toBeNull();
+  expect(screen.getByRole("heading", { name: "另一个技能的入口" })).toBeTruthy();
+});
+
+it("预览上限内的大量短行仍保留全部原文", async () => {
+  const user = userEvent.setup();
+  const content = "\n".repeat(256 * 1024);
+  const initial = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "read_skill_browser_file" && (args as { relativePath: string }).relativePath === "scripts/read.py"
+    ? Promise.resolve({ path: "scripts/read.py", kind: "text", text: content, size: 256 * 1024, message: null }) : initial(command, args));
+  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  await user.type(await screen.findByRole("searchbox", { name: "查找文件" }), "read.py");
+  await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
+  expect((await screen.findByLabelText("文件原文")).textContent).toBe(content);
 });

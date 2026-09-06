@@ -1329,6 +1329,17 @@
       "unreadable": "文件无法读取",
       "directory": "目录，请选择文件",
       "file": "无法预览文件"
-    }
+    },
+    "search": "查找文件",
+    "searchPlaceholder": "查找名称或相对路径…",
+    "clearSearch": "清除搜索",
+    "matches": "找到 {{count}} 个文件",
+    "noMatches": "没有匹配的文件",
+    "previewMode": "预览方式",
+    "body": "正文",
+    "raw": "原文",
+    "invalidLink": "链接必须指向当前 Skill 目录内的文件",
+    "linkMissing": "此版本中没有该文件：{{path}}",
+    "externalLinkFailed": "无法打开外部链接"
   }
 }
