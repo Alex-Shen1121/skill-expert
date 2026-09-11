@@ -20,7 +20,10 @@ import {
   Square,
   GripVertical,
   CircleSlash,
+  Circle,
   Pencil,
+  Share2,
+  Tag,
   Trash2,
   ArrowUp,
   ArrowDown,
@@ -37,6 +40,7 @@ import { TagRenameDialog } from "../components/TagRenameDialog";
 import { SkillDetailPanel } from "../components/SkillDetailPanel";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { BatchTagDialog } from "../components/BatchTagDialog";
+import { BatchSyncAgentDialog } from "../components/BatchSyncAgentDialog";
 import { SyncDots } from "../components/SyncDots";
 import { ToggleSwitch } from "../components/ToggleSwitch";
 import { CardActionMenu } from "../components/CardActionMenu";
@@ -247,6 +251,7 @@ export function MySkills() {
     managedSkills: skills,
     refreshPresets,
     refreshManagedSkills,
+    refreshTools,
     detailSkillId,
     openSkillDetailById,
     closeSkillDetail,
@@ -273,6 +278,8 @@ export function MySkills() {
   const refreshAfterDeleteRef = useRef<number | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
+  const [batchSyncDialogOpen, setBatchSyncDialogOpen] = useState(false);
+  const [batchToggling, setBatchToggling] = useState(false);
   const [checkingSkillId, setCheckingSkillId] = useState<string | null>(null);
   const [updatingSkillId, setUpdatingSkillId] = useState<string | null>(null);
   const [batchUpdating, setBatchUpdating] = useState(false);
@@ -577,6 +584,14 @@ export function MySkills() {
     filtered,
     getKey: (s) => s.id,
     isItemActive: (s) => viewedPreset ? s.preset_ids.includes(viewedPreset.id) : true,
+    filterSignal: JSON.stringify([
+      search,
+      [...sourceFilters].sort(),
+      [...tagFilters].sort(),
+      filterMode,
+      viewedPreset?.id ?? null,
+    ]),
+    escapeEnabled: !batchTagDialogOpen && !batchSyncDialogOpen && !batchDeleteConfirm,
   });
 
   const selectedSkill = useMemo(
@@ -856,35 +871,61 @@ export function MySkills() {
   };
 
   const handleBatchTogglePreset = async () => {
-    if (!viewedPreset) return;
-    const selectedSkillsList = skills.filter((s) => selectedIds.has(s.id));
+    if (!viewedPreset || batchToggling) return;
     const enabling = anyDisabled;
     let count = 0;
     let failed = 0;
-    for (const skill of selectedSkillsList) {
-      try {
-        const enabledInPreset = skill.preset_ids.includes(viewedPreset.id);
-        if (enabling && !enabledInPreset) {
-          await api.addSkillToPreset(skill.id, viewedPreset.id);
+    setBatchToggling(true);
+    try {
+      for (const skill of togglableSelectedSkills) {
+        try {
+          if (enabling) {
+            await api.addSkillToPreset(skill.id, viewedPreset.id);
+          } else {
+            await api.removeSkillFromPreset(skill.id, viewedPreset.id);
+          }
           count++;
-        } else if (!enabling && enabledInPreset) {
-          await api.removeSkillFromPreset(skill.id, viewedPreset.id);
-          count++;
+        } catch {
+          failed++;
+          // continue with remaining
         }
-      } catch {
-        failed++;
-        // continue with remaining
+      }
+      if (count > 0) {
+        toast.success(enabling
+          ? t("mySkills.batchEnabled", { count })
+          : t("mySkills.batchDisabled", { count }));
+      }
+      if (failed > 0) {
+        toast.error(t("mySkills.batchToggleFailed", { count: failed }));
+      }
+      await Promise.all([refreshManagedSkills(), refreshPresets()]);
+    } finally {
+      setBatchToggling(false);
+    }
+  };
+
+  const handleBatchSyncAgents = async (agentKeys: string[]) => {
+    const selectedSkillsList = skills.filter((s) => selectedIds.has(s.id));
+    let synced = 0;
+    let failed = 0;
+    for (const skill of selectedSkillsList) {
+      for (const agentKey of agentKeys) {
+        if (skill.targets.some((target) => target.tool === agentKey)) continue;
+        try {
+          await api.syncSkillToTool(skill.id, agentKey);
+          synced++;
+        } catch {
+          failed++;
+        }
       }
     }
-    if (count > 0) {
-      toast.success(enabling
-        ? t("mySkills.batchEnabled", { count })
-        : t("mySkills.batchDisabled", { count }));
+    if (synced > 0) {
+      toast.success(t("mySkills.batchSynced", { count: synced }));
     }
     if (failed > 0) {
-      toast.error(t("mySkills.batchToggleFailed", { count: failed }));
+      toast.error(t("mySkills.batchSyncFailed", { count: failed }));
     }
-    await Promise.all([refreshManagedSkills(), refreshPresets()]);
+    await Promise.all([refreshManagedSkills(), refreshTools()]);
   };
 
   const handleBatchRefresh = async () => {
@@ -1217,6 +1258,18 @@ export function MySkills() {
     () => skills.filter((skill) => selectedIds.has(skill.id) && canRefreshSkill(skill)).length,
     [skills, selectedIds]
   );
+  /**
+   * Only the selected skills the toggle would actually change — a mixed selection
+   * enables the ones that are off, so the button must not count the rest.
+   */
+  const togglableSelectedSkills = useMemo(() => {
+    if (!viewedPreset) return [];
+    const enabling = anyDisabled;
+    return skills.filter((skill) => {
+      if (!selectedIds.has(skill.id)) return false;
+      return skill.preset_ids.includes(viewedPreset.id) !== enabling;
+    });
+  }, [skills, selectedIds, viewedPreset, anyDisabled]);
 
   const sourceTypeLabel = (skill: ManagedSkill) =>
     skill.source_type === "skillssh" ? "skills.sh" : skill.source_type;
@@ -1260,9 +1313,9 @@ export function MySkills() {
 
       </div>
 
-      <div className="app-toolbar flex-nowrap items-start">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-          <div className="relative w-full max-w-[280px]">
+      <div className="app-toolbar">
+        <div className="flex flex-1 items-center gap-3">
+          <div className="relative w-full min-w-[200px] max-w-[280px]">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <input
               type="text"
@@ -1276,32 +1329,31 @@ export function MySkills() {
             />
           </div>
 
-          <div className="shrink-0">
-            <div
-              className="app-segmented w-fit"
-              role="group"
-              aria-label={t("mySkills.filtersLabel")}
-            >
-              {(["all", "enabled", "available"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={filterMode === mode}
-                  onClick={() => setFilterMode(mode)}
-                  className={cn(
-                    "app-segmented-button whitespace-nowrap focus-visible:ring-2 focus-visible:ring-accent",
-                    filterMode === mode && "app-segmented-button-active"
-                  )}
-                >
-                  {t(`mySkills.filters.${mode}`)}
-                </button>
-              ))}
-            </div>
+          <div
+            className="app-segmented app-toolbar-segmented shrink-0"
+            role="group"
+            aria-label={t("mySkills.filtersLabel")}
+          >
+            {(["all", "enabled", "available"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={filterMode === mode}
+                onClick={() => setFilterMode(mode)}
+                className={cn(
+                  "app-segmented-button whitespace-nowrap focus-visible:ring-2 focus-visible:ring-accent",
+                  filterMode === mode && "app-segmented-button-active"
+                )}
+              >
+                {t(`mySkills.filters.${mode}`)}
+              </button>
+            ))}
           </div>
 
         </div>
 
-        <div className="app-segmented">
+        <div className="flex items-center gap-3">
+          <div className="app-segmented app-toolbar-segmented shrink-0">
           {(() => {
             const mode = getGitToolbarMode();
             const meta = getGitStatusMeta(mode);
@@ -1406,16 +1458,20 @@ export function MySkills() {
           >
             <List className="h-4 w-4" />
           </button>
+          <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 self-center bg-border-subtle" />
           <button
+            type="button"
+            aria-pressed={isMultiSelect}
             onClick={() => isMultiSelect ? exitMultiSelect() : setIsMultiSelect(true)}
             className={cn(
-              "rounded-md p-2 transition-colors outline-none",
-              isMultiSelect ? "bg-surface-active text-secondary" : "text-muted hover:text-tertiary"
+              "app-segmented-button inline-flex items-center gap-1.5 hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-border",
+              isMultiSelect && "app-segmented-button-active hover:bg-surface-active hover:text-secondary"
             )}
-            title={isMultiSelect ? t("mySkills.cancelSelect") : t("mySkills.selectMode")}
           >
             <SquareCheck className="h-4 w-4" />
+            {isMultiSelect ? t("mySkills.cancelSelect") : t("mySkills.selectMode")}
           </button>
+          </div>
         </div>
       </div>
 
@@ -1570,28 +1626,62 @@ export function MySkills() {
         <MultiSelectToolbar
           selectedCount={selectedIds.size}
           isAllSelected={isAllSelected}
-          anyDisabled={viewedPreset ? anyDisabled : false}
-          anyUpdatable={anyRefreshableSelected}
-          showToggle={!!viewedPreset}
-          updating={batchUpdating}
+          actions={[
+            ...(viewedPreset && togglableSelectedSkills.length > 0
+              ? [{
+                  key: "toggle",
+                  tone: "primary" as const,
+                  label: anyDisabled
+                    ? t("mySkills.batchEnable", { count: togglableSelectedSkills.length })
+                    : t("mySkills.batchDisable", { count: togglableSelectedSkills.length }),
+                  icon: anyDisabled
+                    ? <CheckCircle2 className="h-3.5 w-3.5" />
+                    : <Circle className="h-3.5 w-3.5" />,
+                  busy: batchToggling,
+                  onSelect: handleBatchTogglePreset,
+                }]
+              : []),
+            {
+              key: "sync",
+              label: t("mySkills.batchSyncAgents", { count: selectedIds.size }),
+              icon: <Share2 className="h-3.5 w-3.5" />,
+              onSelect: () => setBatchSyncDialogOpen(true),
+            },
+            {
+              key: "tags",
+              label: t("mySkills.batchEditTags", { count: selectedIds.size }),
+              icon: <Tag className="h-3.5 w-3.5" />,
+              onSelect: () => setBatchTagDialogOpen(true),
+            },
+          ]}
+          overflowActions={[
+            ...(anyRefreshableSelected
+              ? [{
+                  key: "update",
+                  label: t("mySkills.batchUpdate", { count: refreshableSelectedCount }),
+                  icon: <RotateCcw className="h-3.5 w-3.5" />,
+                  busy: batchUpdating,
+                  onSelect: handleBatchRefresh,
+                }]
+              : []),
+            {
+              key: "delete",
+              tone: "danger" as const,
+              label: t("mySkills.deleteSelected", { count: selectedIds.size }),
+              icon: <Trash2 className="h-3.5 w-3.5" />,
+              onSelect: () => setBatchDeleteConfirm(true),
+            },
+          ]}
           labels={{
             hint: t("mySkills.selectHint"),
             selected: t("mySkills.selectedCount", { count: selectedIds.size }),
-            update: t("mySkills.batchUpdate", { count: refreshableSelectedCount }),
-            delete: t("mySkills.deleteSelected", { count: selectedIds.size }),
-            enable: t("mySkills.batchEnable", { count: selectedIds.size }),
-            disable: t("mySkills.batchDisable", { count: selectedIds.size }),
             selectAll: t("mySkills.selectAll"),
             deselectAll: t("mySkills.deselectAll"),
             cancel: t("common.cancel"),
-            editTags: t("mySkills.batchEditTags", { count: selectedIds.size }),
+            more: t("mySkills.moreActions"),
           }}
-          onUpdate={handleBatchRefresh}
-          onDelete={() => setBatchDeleteConfirm(true)}
-          onToggle={handleBatchTogglePreset}
           onSelectAll={handleSelectAll}
           onCancel={exitMultiSelect}
-          onEditTags={() => setBatchTagDialogOpen(true)}
         />
       )}
 
@@ -2230,6 +2320,14 @@ export function MySkills() {
         allTags={allTags}
         onClose={() => setBatchTagDialogOpen(false)}
         onApply={handleBatchEditTags}
+      />
+
+      <BatchSyncAgentDialog
+        open={batchSyncDialogOpen}
+        skills={skills.filter((s) => selectedIds.has(s.id))}
+        tools={tools}
+        onClose={() => setBatchSyncDialogOpen(false)}
+        onApply={handleBatchSyncAgents}
       />
     </div>
   );
