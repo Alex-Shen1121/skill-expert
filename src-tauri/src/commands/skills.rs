@@ -700,9 +700,10 @@ pub async fn install_git(
                     )
                     .ok();
             });
-            let temp_dir = git_fetcher::clone_repo_ref_with_progress(
+            let temp_dir = git_fetcher::clone_repo_ref_scoped(
                 &parsed.clone_url,
                 parsed.branch.as_deref(),
+                parsed.subpath.as_deref(),
                 Some(&cancel),
                 proxy_url.as_deref(),
                 Some(progress_cb),
@@ -887,9 +888,10 @@ pub async fn preview_git_install(
                 )
                 .ok();
         });
-        let temp_dir = git_fetcher::clone_repo_ref_with_progress(
+        let temp_dir = git_fetcher::clone_repo_ref_scoped(
             &parsed.clone_url,
             parsed.branch.as_deref(),
+            parsed.subpath.as_deref(),
             Some(&cancel),
             proxy_url.as_deref(),
             Some(progress_cb),
@@ -1762,11 +1764,13 @@ pub fn update_git_skill_internal(
         .update_skill_update_status(skill_id, "updating")
         .map_err(AppError::db)?;
 
-    let temp_dir = git_fetcher::clone_repo_ref(
+    let temp_dir = git_fetcher::clone_repo_ref_scoped(
         &git_source.clone_url,
         git_source.branch.as_deref(),
+        git_source.subpath.as_deref(),
         cancel,
         proxy_url,
+        None,
     )
     .map_err(AppError::classify_git_error)?;
     let update_result = (|| -> Result<UpdateOutcome, AppError> {
@@ -2019,9 +2023,15 @@ pub fn set_git_source_internal(
         git_fetcher::resolve_remote_revision(&parsed.clone_url, branch.as_deref(), proxy_url)
             .map_err(|e| AppError::git(e.to_string()))?;
 
-    let temp_dir =
-        git_fetcher::clone_repo_ref(&parsed.clone_url, branch.as_deref(), None, proxy_url)
-            .map_err(AppError::classify_git_error)?;
+    let temp_dir = git_fetcher::clone_repo_ref_scoped(
+        &parsed.clone_url,
+        branch.as_deref(),
+        subpath.as_deref(),
+        None,
+        proxy_url,
+        None,
+    )
+    .map_err(AppError::classify_git_error)?;
 
     // Nothing before this point has written to the store, so a failure during
     // the network phase leaves no state to unwind — in particular the skill is

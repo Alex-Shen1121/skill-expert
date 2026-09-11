@@ -82,7 +82,7 @@ fn invalidate_bridge() -> Result<()> {
 
 /// 运行刚复制的 CLI 并核对完整版本令牌。
 fn verify(path: &Path, expected_version: &str) -> Result<()> {
-    let output = Command::new(path)
+    let output = cli_command(path)
         .arg("--version")
         .output()
         .with_context(|| format!("无法运行 {}", path.display()))?;
@@ -99,6 +99,18 @@ fn verify(path: &Path, expected_version: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// 构造运行已发布 CLI 的命令，避免 Windows 弹出控制台窗口。
+fn cli_command(path: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(path);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
 }
 
 /// 尽力发布当前 CLI；任何失败都会留下无印记状态并写入日志，不阻塞桌面应用启动。
