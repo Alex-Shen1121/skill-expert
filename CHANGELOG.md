@@ -17,6 +17,20 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ### Developer & Governance
 -
 
+## [1.0.18] - 2026-09-11
+
+### Release Overview
+- 同步上游 v1.36.1 至 v1.38.0 的全部功能，并保持 Agent 技能管家独立产品边界。
+
+### User-facing
+- 项目 Preset 默认覆盖全部已安装且启用的 Agent，并修复 Windows CLI 桥接控制台闪窗。
+- Git 来源支持标签引用、私有仓库钥匙串与 credential helper、SSH agent 凭据。
+- 技能库、项目和全局工作区支持多选及批量同步、删除、打标、启停和更新。
+- 单技能来源支持稀疏克隆与完整回退，仓库缓存支持 LRU 清理、取消保护和 Promisor 隔离。
+
+### Developer & Governance
+- 批量操作、Git 凭据和克隆路径继续通过结构化契约校验，保留现有版本、独立 CLI 与正式发布边界。
+
 ## [1.0.17] - 2026-09-06
 
 ### Release Overview
