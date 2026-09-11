@@ -39,14 +39,13 @@ import {
   type ProjectCenterAdapter,
   type ProjectCenterVariant,
 } from "../lib/projectCenterSync";
+import { enabledInstalledAgentKeys, getDefaultExportAgents } from "../lib/exportAgents";
 import { cn } from "../utils";
 import * as api from "../lib/tauri";
 import type { ProjectSkill, ManagedSkill, ProjectAgentTarget } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
 import { AddSkillsSheet } from "../components/AddSkillsSheet";
 
-const PROJECT_DEFAULT_EXPORT_AGENTS_KEY = "project_default_export_agents";
-const PROJECT_EXPORT_AGENT_PRIORITY = ["claude_code", "codex", "cursor", "gemini_cli", "github_copilot"];
 const projectCenterAdapter: ProjectCenterAdapter = {
   updateToCenter: api.updateProjectSkillToCenter,
   updateFromCenter: api.updateProjectSkillFromCenter,
@@ -77,35 +76,6 @@ function toProjectCenterVariants(variants: ProjectSkill[]): ProjectCenterVariant
     relativePath: variant.relative_path,
     syncStatus: variant.sync_status,
   }));
-}
-
-// Keys of project agents that can actually receive skills right now: both
-// installed on disk and enabled by the user. Used everywhere export targets
-// are derived so disabled/uninstalled agents never get project-local skills.
-function enabledInstalledAgentKeys(targets: ProjectAgentTarget[]): string[] {
-  return targets.filter((target) => target.installed && target.enabled).map((target) => target.key);
-}
-
-function getDefaultExportAgents(targets: ProjectAgentTarget[], savedValue?: string | null) {
-  const enabledKeys = enabledInstalledAgentKeys(targets);
-  const availableKeys = new Set(enabledKeys);
-  if (savedValue) {
-    try {
-      const parsed = JSON.parse(savedValue);
-      if (Array.isArray(parsed)) {
-        const filtered = parsed.filter((item): item is string => typeof item === "string" && availableKeys.has(item));
-        if (filtered.length > 0) {
-          return Array.from(new Set(filtered));
-        }
-      }
-    } catch {
-      // Ignore invalid persisted settings and fall back to built-in defaults.
-    }
-  }
-
-  const prioritized = PROJECT_EXPORT_AGENT_PRIORITY.filter((key) => availableKeys.has(key));
-  const fallback = enabledKeys;
-  return Array.from(new Set((prioritized.length > 0 ? prioritized : fallback).slice(0, 3)));
 }
 
 function getSyncStatusMeta(t: (key: string) => string, status: ProjectSkill["sync_status"]) {
@@ -177,7 +147,6 @@ export function ProjectDetail() {
   const { projects, presets, managedSkills, refreshManagedSkills, refreshPresets, refreshProjects } = useApp();
   const [skills, setSkills] = useState<ProjectSkill[]>([]);
   const [projectAgentTargets, setProjectAgentTargets] = useState<ProjectAgentTarget[]>([]);
-  const [selectedExportAgents, setSelectedExportAgents] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [filterMode, setFilterMode] = useState<"all" | "enabled" | "disabled">("all");
@@ -403,18 +372,7 @@ export function ProjectDetail() {
     [projectPresetVariants]
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadDefaultExportAgents = async () => {
-      const savedValue = await api.getSettings(PROJECT_DEFAULT_EXPORT_AGENTS_KEY).catch(() => null);
-      if (cancelled) return;
-      setSelectedExportAgents(getDefaultExportAgents(exportTargets, savedValue));
-    };
-    loadDefaultExportAgents();
-    return () => {
-      cancelled = true;
-    };
-  }, [exportTargets]);
+  const selectedExportAgents = useMemo(() => getDefaultExportAgents(exportTargets), [exportTargets]);
 
   const [lastUsedExportAgents, setLastUsedExportAgents] = useState<string[] | null>(null);
   useEffect(() => {
@@ -466,9 +424,11 @@ export function ProjectDetail() {
   }, [exportTargets, lastUsedExportAgents, selectedExportAgents]);
 
   const presetBarAgentKeys = useMemo(() => {
+    // Agent 目标异步加载完成前，只显示占位的 Claude Code，不能用它执行 Preset。
+    if (projectAgentTargets.length === 0) return [];
     const availableKeys = new Set(enabledInstalledAgentKeys(exportTargets));
     return selectedExportAgents.filter((key) => availableKeys.has(key));
-  }, [exportTargets, selectedExportAgents]);
+  }, [exportTargets, projectAgentTargets, selectedExportAgents]);
 
   const enabledCount = groupedSkills.filter((s) => s.enabledCount > 0).length;
   const allTags = useMemo(() => {

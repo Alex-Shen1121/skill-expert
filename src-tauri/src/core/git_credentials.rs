@@ -126,6 +126,54 @@ pub fn delete_credential(host: &str) -> Result<()> {
     }
 }
 
+/// 为 libgit2 网络操作安装凭据回调。
+///
+/// 按顺序尝试应用钥匙串、用户的 Git credential helper，最后为 SSH 远端
+/// 尝试 ssh-agent。回调只在远端确实要求认证时读取钥匙串，避免公开仓库的
+/// 每次更新检查都触发无意义的钥匙串访问。
+pub fn install_git2_credentials(callbacks: &mut git2::RemoteCallbacks<'_>, url: &str) {
+    let host = https_host(url);
+    let host_label = host.clone().unwrap_or_else(|| "当前远端".to_string());
+    let mut tried_stored = false;
+    let mut tried_helper = false;
+    let mut tried_agent = false;
+
+    callbacks.credentials(move |url, username_from_url, allowed| {
+        if allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+            if !tried_stored {
+                tried_stored = true;
+                if let Some(cred) = host
+                    .as_deref()
+                    .and_then(|h| load_credential(h).ok().flatten())
+                {
+                    return git2::Cred::userpass_plaintext(&cred.username, &cred.password);
+                }
+            }
+            if !tried_helper {
+                tried_helper = true;
+                if let Ok(config) = git2::Config::open_default() {
+                    if let Ok(cred) = git2::Cred::credential_helper(&config, url, username_from_url)
+                    {
+                        return Ok(cred);
+                    }
+                }
+            }
+        }
+        if allowed.contains(git2::CredentialType::SSH_KEY) && !tried_agent {
+            tried_agent = true;
+            if let Some(user) = username_from_url {
+                return git2::Cred::ssh_key_from_agent(user);
+            }
+        }
+        if allowed.contains(git2::CredentialType::DEFAULT) {
+            return git2::Cred::default();
+        }
+        Err(git2::Error::from_str(&format!(
+            "无法认证远端 {host_label}：未找到可用凭据，请先使用 Git 登录该远端后重试"
+        )))
+    });
+}
+
 /// The askpass script git invokes for username/password prompts. Static
 /// content, no secrets — safe on disk. Git for Windows executes shebang
 /// scripts through its bundled sh, so a single POSIX script covers all
