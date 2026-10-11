@@ -193,6 +193,7 @@ npm run cli -- skills show db
 npm run cli -- skills install ./my-skill
 npm run cli -- skills install https://github.com/foo/bar/tree/main/skills/baz
 npm run cli -- skills install vercel-labs/agent-skills@react-best-practices
+npm run cli -- skills install https://www.skills.sh/site/uizze.com/ui-radar # website-synced skill
 
 # Put it into the agents that should have it, then check
 npm run cli -- skills deploy react-best-practices --agent claude_code --agent codex
