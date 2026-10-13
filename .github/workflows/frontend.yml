@@ -15,6 +15,7 @@ on:
       - 'eslint.config.js'
       - 'tailwind.config.js'
       - 'postcss.config.js'
+      - 'scripts/check-ui-spec.mjs'
       - '.github/workflows/frontend.yml'
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - 'eslint.config.js'
       - 'tailwind.config.js'
       - 'postcss.config.js'
+      - 'scripts/check-ui-spec.mjs'
       - '.github/workflows/frontend.yml'
 
 permissions:

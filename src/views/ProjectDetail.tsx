@@ -1648,7 +1648,7 @@ function ProjectSkillDetailPanel({
   });
   const meta = (
     <>
-      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
         <ProjectAgentDots
           assignedAgents={getAssignedAgents(skill.variants)}
           targets={getAgentDotTargets(skill.variants).map((t) => ({
@@ -1673,7 +1673,7 @@ function ProjectSkillDetailPanel({
           </>
         )}
       </div>
-      <div className="mt-3 flex items-center gap-4 text-[12.5px] text-muted">
+      <div className="mt-3 flex items-center gap-4 text-[12px] text-muted">
         <div className="flex min-w-0 items-center gap-1.5">
           <FolderOpen className="h-3.5 w-3.5 shrink-0" />
           <span className="font-mono truncate">{skill.primaryVariant.path}</span>
