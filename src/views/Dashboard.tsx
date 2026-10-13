@@ -139,7 +139,7 @@ export function Dashboard() {
                 className="flex items-center justify-between px-3.5 py-2.5 hover:bg-surface-hover transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-[4px] flex items-center justify-center text-[13px] font-semibold bg-accent-bg text-accent-light shrink-0">
+                  <div className="w-6 h-6 rounded-md flex items-center justify-center text-[13px] font-semibold bg-accent-bg text-accent-light shrink-0">
                     {skill.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
