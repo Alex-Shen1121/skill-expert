@@ -67,7 +67,7 @@ export function ConfirmDialog({
       <div className="relative bg-surface border border-border rounded-xl w-full max-w-sm p-5 shadow-2xl flex flex-col max-h-[calc(85vh/var(--app-scale))]">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[13px] font-semibold text-primary flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             {title || t("common.confirm")}
           </h2>
           <button onClick={close} disabled={locked} className="text-muted hover:text-secondary p-1 rounded transition-colors outline-none disabled:opacity-50">

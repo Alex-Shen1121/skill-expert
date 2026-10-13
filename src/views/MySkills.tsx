@@ -1960,7 +1960,7 @@ export function MySkills() {
                 setTagToDelete(tagMenu.tag);
                 setTagMenu(null);
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-red-400 hover:bg-surface-hover"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-red-600 dark:text-red-400 hover:bg-surface-hover"
             >
               <Trash2 className="h-3.5 w-3.5" />
               {t("mySkills.tags.deleteTag")}
