@@ -83,7 +83,7 @@ export function FirstRunRestoreDialog() {
             <CloudDownload className="h-5 w-5 text-muted" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-primary">{t("firstRun.title")}</h2>
+            <h2 className="text-[14px] font-semibold text-primary">{t("firstRun.title")}</h2>
             <p className="mt-1 text-[13px] leading-5 text-muted">{t("firstRun.subtitle")}</p>
           </div>
         </div>

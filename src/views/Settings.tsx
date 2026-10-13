@@ -856,7 +856,7 @@ export function Settings() {
             </h3>
             {/* Enabled/disabled is carried by the switch; only "not installed" adds info. */}
             {!agent.installed && (
-              <span className="shrink-0 rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-muted">
+              <span className="shrink-0 rounded-full bg-surface-hover px-2 py-0.5 text-[11px] font-medium text-muted">
                 {t("settings.notInstalled")}
               </span>
             )}
@@ -864,17 +864,17 @@ export function Settings() {
 
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             {agent.is_custom && (
-              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
                 {t("settings.customAgent")}
               </span>
             )}
             {agent.is_custom && agent.project_relative_skills_dir && (
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
                 {t("settings.projectAgentSupported")}
               </span>
             )}
             {agent.has_path_override && !agent.is_custom && (
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                 {t("settings.pathOverridden")}
               </span>
             )}
@@ -931,7 +931,7 @@ export function Settings() {
             </button>
             <button
               onClick={handleSavePath}
-              className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+              className="shrink-0 p-1 text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 outline-none"
             >
               <Check className="h-3 w-3" />
             </button>
@@ -989,7 +989,7 @@ export function Settings() {
               />
               <button
                 onClick={handleSaveProjectPath}
-                className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+                className="shrink-0 p-1 text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 outline-none"
               >
                 <Check className="h-3 w-3" />
               </button>

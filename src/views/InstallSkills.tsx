@@ -1064,7 +1064,7 @@ export function InstallSkills() {
                             </button>
                             {isInstalled ? (
                               <span
-                                className="rounded-md border border-emerald-500/20 bg-emerald-500/10 p-1 text-emerald-400"
+                                className="rounded-md border border-emerald-500/20 bg-emerald-500/10 p-1 text-emerald-600 dark:text-emerald-400"
                                 title={t("install.installed")}
                               >
                                 <Check className="h-3.5 w-3.5" />
@@ -1072,7 +1072,7 @@ export function InstallSkills() {
                             ) : installing === skill.id ? (
                               <button
                                 onClick={() => handleCancelInstall(`${skill.source}/${skill.skill_id}`)}
-                                className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-1 text-red-400 transition-colors hover:bg-red-500/20"
+                                className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-1 text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/20"
                                 title={t("install.cancel")}
                                 aria-label={t("install.cancel")}
                               >
@@ -1120,7 +1120,7 @@ export function InstallSkills() {
                             </span>
                           )}
                           {isInstalled ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[13px] leading-4 font-medium text-emerald-400">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[13px] leading-4 font-medium text-emerald-600 dark:text-emerald-400">
                               <Check className="h-3 w-3" />
                               {t("install.installed")}
                             </span>
@@ -1384,7 +1384,7 @@ export function InstallSkills() {
                                   </button>
                                 ) : null}
                                 {group.imported ? (
-                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[13px] font-semibold text-emerald-400">
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">
                                     <Check className="h-3 w-3" />
                                     {t("install.scan.imported")}
                                   </span>
@@ -1480,7 +1480,7 @@ export function InstallSkills() {
                 />
               </div>
               {gitUrl.trim() && findInstalledByGitUrl(gitUrl) && (
-                <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-400">
+                <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-800 dark:text-amber-400">
                   <Check className="h-3.5 w-3.5 shrink-0" />
                   <span>
                     {t("install.gitAlreadyInstalled", { name: findInstalledByGitUrl(gitUrl)!.name })}
@@ -1491,7 +1491,7 @@ export function InstallSkills() {
                 {gitLoading ? (
                   <button
                     onClick={() => gitCancelKey && handleCancelInstall(gitCancelKey)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-[13px] font-medium text-red-400 transition-colors hover:bg-red-500/20"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-[13px] font-medium text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/20"
                     disabled={!gitCancelKey}
                   >
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

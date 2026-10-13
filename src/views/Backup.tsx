@@ -803,7 +803,7 @@ export function Backup() {
                   <StatusIcon className={cn("h-5 w-5", statusMeta.iconClassName)} />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-[15px] font-semibold text-primary">{statusMeta.title}</h2>
+                  <h2 className="text-[14px] font-semibold text-primary">{statusMeta.title}</h2>
                   <p className="mt-1 text-[13px] leading-5 text-muted">{statusMeta.description}</p>
                   <div className="mt-3 grid gap-2 text-[12px] text-tertiary sm:grid-cols-2">
                     <div className="min-w-0">
@@ -1320,11 +1320,11 @@ export function Backup() {
             <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
               <div className="rounded-md border border-border-subtle bg-bg-secondary px-3 py-2">
                 <div className="text-faint">{t("backup.summary.skills")}</div>
-                <div className="mt-1 text-[18px] font-semibold text-primary">{managedSkills.length}</div>
+                <div className="mt-1 text-[17px] font-semibold text-primary">{managedSkills.length}</div>
               </div>
               <div className="rounded-md border border-border-subtle bg-bg-secondary px-3 py-2">
                 <div className="text-faint">{t("backup.summary.snapshots")}</div>
-                <div className="mt-1 text-[18px] font-semibold text-primary">{versions.length}</div>
+                <div className="mt-1 text-[17px] font-semibold text-primary">{versions.length}</div>
               </div>
             </div>
           </section>
