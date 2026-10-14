@@ -80,6 +80,18 @@
     "installNew": "새 스킬 설치",
     "recentActivity": "최근 활동"
   },
+  "agentControl": {
+    "title": "에이전트가 스킬을 관리하도록 하기",
+    "body": "Claude Code, Codex 등이 스킬을 직접 설치하고 배포하게 할 수 있습니다. 출처와 배포 상태는 계속 여기에서 기록됩니다.",
+    "cta": "설정",
+    "pickAgents": "이 작업을 허용할 에이전트",
+    "confirm": "{{count}}개에 사용 설정",
+    "confirmEmpty": "에이전트 선택",
+    "dismiss": "다시 표시하지 않기",
+    "done": "이제 에이전트 {{count}}개가 스킬을 관리할 수 있습니다",
+    "errorNotFound": "관리 스킬은 설치되었지만 라이브러리에서 찾을 수 없습니다.",
+    "errorGeneric": "설정하지 못했습니다."
+  },
   "backup": {
     "title": "백업",
     "subtitle": "한 번만 연결하면 스킬 라이브러리를 한곳에서 백업하고 복원합니다.",
@@ -374,7 +386,10 @@
       "relinked": "출처 경로를 다시 연결했습니다",
       "detachSource": "로컬 복사본만 유지",
       "detachedSource": "출처 추적을 해제했습니다",
-      "alreadyUpToDate": "스킬 내용은 그대로입니다(버전만 맞췄습니다)"
+      "alreadyUpToDate": "스킬 내용은 그대로입니다(버전만 맞췄습니다)",
+      "removalTitle": "이 업데이트는 파일을 삭제합니다",
+      "removalMessage": "{{name}}을(를) 업데이트하면 새 버전에 없는 파일 {{count}}개가 제거됩니다. 직접 만든 파일이 있다면 먼저 스킬 폴더 밖으로 옮기세요. 아직 아무것도 변경되지 않았습니다.",
+      "removalConfirm": "그래도 업데이트"
     },
     "gitConfigEntry": "동기화 설정",
     "filters": {
@@ -436,6 +451,17 @@
       "addButton": "추가",
       "clickToRemove": "눌러서 제거 표시",
       "undoRemove": "눌러서 태그 유지"
+    },
+    "batchHeldBack": "스킬 {{count}}개는 업데이트하지 않았습니다. 업데이트하면 파일이 삭제됩니다({{names}}). 하나씩 업데이트하면 어떤 파일인지 확인할 수 있습니다.",
+    "batchSyncAgents": "에이전트에 동기화 ({{count}})",
+    "batchSynced": "스킬 대상 {{count}}개를 동기화했습니다",
+    "batchSyncFailed": "대상 {{count}}개를 동기화하지 못했습니다",
+    "batchSyncDialog": {
+      "title": "스킬 {{count}}개를 에이전트에 동기화",
+      "description": "대상 에이전트를 선택하세요. 아직 없는 스킬만 추가됩니다. 동기화 해제는 카드의 에이전트 아이콘에서 하나씩 하세요.",
+      "apply": "{{count}}개 동기화",
+      "noAgents": "설치되어 있고 사용 중인 에이전트가 없습니다.",
+      "allSynced": "선택한 스킬이 모두 이 에이전트에 이미 있습니다"
     }
   },
   "install": {
@@ -545,8 +571,8 @@
     "detectedAgents": "찾음",
     "enabledAgents": "사용 중",
     "customAgents": "사용자 지정",
-    "builtInAgents": "기본 제공 에이전트",
-    "moreAgentsSection": "다른 에이전트({{count}})",
+    "detectedAgentsSection": "감지된 에이전트",
+    "otherAgentsSection": "기타 지원 에이전트 ({{count}})",
     "customAgentsSection": "사용자 지정 에이전트",
     "refresh": "새로 고침",
     "notInstalled": "설치 안 됨",
@@ -595,6 +621,7 @@
     "repoPathEmpty": "중앙 저장소 경로를 먼저 입력하세요",
     "repoPathDefaultHint": "기본 중앙 저장소 경로를 쓰는 중",
     "repoPathCustomHint": "직접 지정한 중앙 저장소 경로를 쓰는 중",
+    "repoPathPendingHint": "앱을 다시 시작하면 라이브러리가 {{path}}(으)로 이동합니다. 그때까지 이 세션은 현재 위치를 계속 사용합니다.",
     "changeDir": "디렉터리 변경",
     "openInFinder": "폴더 열기",
     "syncMode": "기본 동기화 방식",
@@ -616,8 +643,9 @@
     "textSizeXLarge": "아주 크게",
     "language": "언어",
     "help": "도움말",
+    "website": "웹사이트",
     "about": "정보",
-    "version": "Skills Manager 1.29.0",
+    "version": "Skills Manager 1.41.0",
     "tagline": "운영체제와 상관없이 여러 프리셋을 가볍고 빠르게 전환합니다.",
     "checkUpdate": "업데이트 확인",
     "checking": "확인 중…",
@@ -627,6 +655,9 @@
     "installUpdate": "업데이트 설치",
     "installing": "설치 중…",
     "restartToApply": "업데이트를 설치했습니다. 앱을 다시 시작하면 적용됩니다.",
+    "restartNow": "지금 다시 시작",
+    "viewUpdate": "보기",
+    "updateRelocate": "앱 안에서 업데이트하려면 Skills Manager를 응용 프로그램 폴더로 옮긴 뒤 그곳에서 실행하세요.",
     "updateError": "자동 업데이트에 실패했습니다. 다운로드 페이지를 엽니다…",
     "reportIssue": "이슈 신고",
     "reportIssueHint": "앱과 OS 정보, 최근 로그 일부를 클립보드에 복사하고 GitHub 이슈를 새로 엽니다",
@@ -697,6 +728,13 @@
     "gitRecoveryCardKeepLocalTitle": "로컬 유지하고 추적 설정",
     "gitRecoveryCardKeepLocalDesc": "로컬 내용을 새 원격 헤드로 올려 봅니다. 원격이 비어 있거나 로컬로 원격을 덮어써야 할 때만 쓰세요.",
     "gitRecoveryRecloneSuccess": "원격 백업을 다시 복제했습니다",
+    "gitRecoveryRecloneKeptHistory": "원격 백업을 다시 복제했습니다. 이전 로컬 Git 기록이 원격에 모두 있는지 확인할 수 없어(푸시하지 않은 커밋이나 태그가 있을 수 있음) 다음 위치에 보관했습니다: {{path}}",
+    "gitSetAsideTitle": "일부 로컬 스킬이 원격 백업과 다릅니다",
+    "gitSetAsideMessage": "다음 스킬의 로컬 버전이 원격 백업에 있는 같은 이름의 사본과 다릅니다. 계속하면 로컬 버전은 스킬 라이브러리 옆의 별도 폴더에 저장되고 라이브러리는 원격 버전을 사용합니다. 폴더 위치는 완료 후 알려 드립니다.",
+    "gitSetAsideConfirm": "로컬 버전을 저장하고 계속",
+    "gitLocalCopiesSaved": "내용이 다른 스킬의 로컬 버전을 다음 위치에 저장했습니다: {{path}}",
+    "gitSetAsideCancelled": "취소했습니다. 아무것도 복제하지 않았으며 이 기기의 스킬 라이브러리는 그대로입니다.",
+    "gitSetAsideListChanged": "확인한 뒤 목록이 바뀌어 아무것도 교체하지 않았습니다. 다시 확인하세요.",
     "gitRecoveryRecloning": "다시 복제하는 중…",
     "gitRecoveryFallbackHint": "\"로컬 유지\"는 아직 터미널에서 직접 해야 합니다. 문서를 보거나 개발자에게 문의하세요.",
     "gitNotInitialized": "초기화 안 됨",
@@ -735,6 +773,8 @@
     "gitErrorAuth": "인증에 실패했습니다. SSH 키나 액세스 토큰을 확인하세요.",
     "gitErrorNetwork": "네트워크 연결에 실패했습니다. 네트워크와 원격 URL을 확인하세요.",
     "gitErrorConflict": "로컬과 원격의 변경이 충돌합니다. 어떻게 해결할지 고르세요.",
+    "gitErrorFilesKeptAside": "작업이 정상적으로 끝나지 않았습니다. 일부 파일이 스킬 라이브러리 밖에 보관되어 있으니 삭제하지 마세요",
+    "gitErrorCloneLocalDiffers": "중지됨: 다음 로컬 스킬이 원격 백업의 같은 이름 사본과 달라 계속하면 덮어쓰게 됩니다: {{names}}. 이 기기에서는 아무것도 변경되지 않았습니다.",
     "gitErrorNotRepo": "Git 저장소를 찾지 못했습니다. 백업을 먼저 설정하세요.",
     "gitErrorRejected": "원격에 새 업데이트가 있습니다. 동기화하기 전에 가져와서 병합하세요.",
     "gitErrorUnrelatedHistories": "로컬과 원격이 같은 히스토리를 공유하지 않습니다. \"동기화 설정 고치기\"를 열어 해결하세요.",
@@ -774,6 +814,7 @@
     "confirm": "확인",
     "delete": "삭제",
     "rename": "이름 변경",
+    "edit": "편집",
     "save": "저장",
     "create": "만들기",
     "search": "검색",
@@ -787,6 +828,10 @@
     "noTargetSelected": "대상 없음",
     "changeTarget": "대상 변경",
     "selectAllTargets": "전체 선택",
+    "selectAllSkills": "스킬 모두 선택",
+    "deselectAllSkills": "스킬 모두 선택 해제",
+    "selectedCount": "{{count}}개 선택됨",
+    "shiftHint": "Shift + 클릭으로 범위 선택",
     "clearTargets": "지우기",
     "searchPlaceholder": "라이브러리 검색…",
     "emptyLibrary": "라이브러리가 비어 있습니다",
@@ -828,9 +873,17 @@
     "descPlaceholder": "이 프리셋을 간단히 설명하세요...",
     "deleteConfirm": "\"{{name}}\" 프리셋을 삭제할까요? 스킬은 중앙 저장소에 그대로 남습니다.",
     "renamed": "프리셋 이름을 바꿨습니다",
+    "updated": "프리셋을 업데이트했습니다",
     "deleted": "프리셋을 삭제했습니다",
     "created": "프리셋을 만들었습니다",
     "switched": "\"{{name}}\" 프리셋으로 바꿨습니다"
+  },
+  "platform": {
+    "fileManager": {
+      "finder": "Finder",
+      "explorer": "파일 탐색기",
+      "linux": "파일 관리자"
+    }
   },
   "project": {
     "title": "프로젝트 스킬",
@@ -866,7 +919,6 @@
     "addSelected": "선택한 항목 추가({{count}})",
     "selectAll": "전체 선택",
     "deselectAll": "전체 해제",
-    "openInFinder": "디렉터리 열기",
     "skillFiles": "파일",
     "importToCenter": "센터 갱신",
     "importFromCenter": "스킬 추가",
@@ -881,6 +933,8 @@
     "importToCenterSuccess": "\"{{name}}\" 스킬을 스킬 센터에 반영했습니다",
     "importFromCenterSuccess": "\"{{name}}\" 스킬을 프로젝트 에이전트 {{count}}개에 추가했습니다",
     "updateCenterSuccess": "\"{{name}}\" 스킬을 스킬 센터에 반영했습니다",
+    "updateCenterConflict": "\"{{name}}\": 변형 {{count}}개가 각각 고유한 내용을 가지고 있을 수 있습니다. 센터를 갱신하기 전에 하나로 정리하세요. 아무것도 기록하지 않았습니다.",
+    "updateCenterAlignFailed": "\"{{name}}\": 센터에 반영했지만 변형 {{count}}개를 다시 맞추지 못했습니다",
     "updateProjectSuccess": "\"{{name}}\" 스킬을 프로젝트에 반영했습니다",
     "resetFromCenter": "센터 버전으로 되돌리기",
     "resetFromCenterSuccess": "\"{{name}}\" 스킬을 센터 버전으로 되돌렸습니다",
@@ -954,11 +1008,14 @@
     "batchUpdatedCenter": "스킬 {{count}}개를 스킬 센터에 반영했습니다",
     "batchUpdatedProject": "프로젝트에서 스킬 {{count}}개를 갱신했습니다",
     "batchUpdateCenterFailed": "스킬 {{count}}개를 스킬 센터에 반영하지 못했습니다",
+    "batchUpdateCenterConflict": "스킬 {{count}}개는 각각 고유한 내용을 가질 수 있는 변형이 여러 개 있어 그대로 두었습니다",
     "batchUpdateProjectFailed": "프로젝트에서 스킬 {{count}}개를 갱신하지 못했습니다",
     "skillDirectoryNotFound": "스킬 디렉터리를 찾지 못했습니다",
     "batchEditTags": "태그({{count}})",
     "batchTagsUpdated": "센터 스킬 {{count}}개의 태그를 수정했습니다",
-    "batchTagsFailed": "센터 스킬 {{count}}개의 태그를 수정하지 못했습니다"
+    "batchTagsFailed": "센터 스킬 {{count}}개의 태그를 수정하지 못했습니다",
+    "batchTagScopeNote": "태그는 중앙 라이브러리에 저장되므로 수정하면 이 스킬을 사용하는 모든 프로젝트에 적용됩니다. 이 프로젝트에만 있는 로컬 스킬은 변경되지 않습니다.",
+    "revealInFileManager": "{{app}}에서 열기"
   },
   "presetActions": {
     "button": "프리셋 적용",
@@ -1054,7 +1111,11 @@
         "localNewer": "로컬 변경됨",
         "centerNewer": "센터 변경됨",
         "diverged": "충돌"
-      }
+      },
+      "deleteLocalSelected": "{{count}}개 영구 삭제",
+      "deleteLocalBatchConfirm": "{{agent}}에서 로컬 스킬 {{count}}개를 영구 삭제할까요? 이 스킬은 이 에이전트의 폴더에만 있어 복구할 수 없습니다.",
+      "deletedLocalBatch": "로컬 스킬 {{count}}개를 삭제했습니다",
+      "deleteLocalBatchFailed": "로컬 스킬 {{count}}개를 삭제하지 못했습니다"
     }
   }
 }
