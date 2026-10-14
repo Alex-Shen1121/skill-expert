@@ -52,6 +52,7 @@ import type {
   SkillToolToggle,
 } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
+import { normalizeSkillSearch, skillSearchMatches } from "../lib/skillSearch";
 import {
   DndContext,
   closestCenter,
@@ -132,10 +133,6 @@ function getToolDisplayName(toolKey: string, tools: ToolInfo[]) {
 
 function centralDirName(skill: ManagedSkill) {
   return skill.central_path.split(/[\\/]/).filter(Boolean).pop() || skill.name;
-}
-
-function normalizeSkillSearch(value: string) {
-  return value.toLowerCase().trim().replace(/[-_\s]+/g, " ");
 }
 
 export function MySkills() {
@@ -291,12 +288,12 @@ export function MySkills() {
     const query = normalizeSkillSearch(search);
     const result = skills.filter((skill) => {
       const displayName = skillDisplayNames.get(skill.id) || skill.name;
-      const matchesSearch = [
+      const matchesSearch = skillSearchMatches(query, [
         skill.name,
         displayName,
         centralDirName(skill),
-        skill.description || "",
-      ].some((value) => normalizeSkillSearch(value).includes(query));
+        skill.description,
+      ]);
       if (!matchesSearch) return false;
 
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
