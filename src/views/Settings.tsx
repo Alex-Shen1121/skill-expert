@@ -102,7 +102,7 @@ function SortableAgentCard({ agentKey, dragLabel, children }: SortableAgentCardP
       ref={setActivatorNodeRef}
       {...listeners}
       onClick={(e) => e.stopPropagation()}
-      className="mt-0.5 flex shrink-0 cursor-grab items-center justify-center rounded text-faint outline-none transition-colors hover:text-muted active:cursor-grabbing"
+      className="mt-0.5 flex shrink-0 cursor-grab items-center justify-center rounded-md text-faint outline-none transition-colors hover:text-muted active:cursor-grabbing"
       title={dragLabel}
       aria-label={dragLabel}
     >
@@ -915,7 +915,7 @@ export function Settings() {
               type="text"
               value={editingPathValue}
               onChange={(e) => setEditingPathValue(e.target.value)}
-              className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+              className="h-7 min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSavePath();
@@ -980,7 +980,7 @@ export function Settings() {
                 value={editingProjectPathValue}
                 onChange={(e) => setEditingProjectPathValue(e.target.value)}
                 placeholder={t("settings.projectSkillsPathPlaceholder")}
-                className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+                className="h-7 min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveProjectPath();
