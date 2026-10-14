@@ -45,6 +45,7 @@ function detectLanguage(): SupportedLanguage {
     }
     if (isPrimary(lower, "en")) return "en";
     if (isPrimary(lower, "es")) return "es";
+    if (isPrimary(lower, "ko")) return "ko";
   }
 
   return "en";

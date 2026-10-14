@@ -1441,27 +1441,27 @@ export function Settings() {
               <div className="min-w-0 flex-1">
                 <h3 className="text-[14px] font-semibold text-primary">{t("settings.language")}</h3>
               </div>
-              <div className="app-segmented flex-wrap bg-background">
-                {([
-                  { value: "zh", label: "简体中文" },
-                  { value: "zh-TW", label: "繁體中文" },
-                  { value: "en", label: "English" },
-                  { value: "es", label: "Español" },
-                  { value: "ko", label: "한국어" },
-                ] as const).map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => handleLanguageChange(opt.value)}
-                    className={cn(
-                      segmentedButtonClass,
-                      i18n.language === opt.value
-                        ? "bg-surface-active text-secondary"
-                        : "text-muted hover:text-tertiary"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+              {/* More languages than a segmented control holds, so a select. */}
+              <div className="relative">
+                <select
+                  value={i18n.language}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  aria-label={t("settings.language")}
+                  className="app-input h-[34px] cursor-pointer appearance-none bg-background pr-8 dark:[color-scheme:dark]"
+                >
+                  {[
+                    { value: "zh", label: "简体中文" },
+                    { value: "zh-TW", label: "繁體中文" },
+                    { value: "en", label: "English" },
+                    { value: "es", label: "Español" },
+                    { value: "ko", label: "한국어" },
+                  ].map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               </div>
             </div>
 
