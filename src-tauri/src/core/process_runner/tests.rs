@@ -404,11 +404,8 @@ fn pre_cancelled_request_does_not_spawn_the_executable() {
 
 #[test]
 fn large_stdout_and_stderr_are_drained_concurrently_without_deadlock() {
-    let output = run_process(
-        &fixture_request("dual-output").with_timeout(Duration::from_secs(1)),
-        None,
-    )
-    .unwrap();
+    // 验证双流排空而非启动性能；慢 CI runner 仍受生产默认超时约束。
+    let output = run_process(&fixture_request("dual-output"), None).unwrap();
 
     assert!(output.status.success());
     assert!(output

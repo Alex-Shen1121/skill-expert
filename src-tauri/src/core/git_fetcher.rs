@@ -2357,6 +2357,8 @@ mod tests {
         fs::create_dir_all(source.join("skills/find-skills")).unwrap();
         let contents = "---\nname: find-skills\ndescription: Cache recovery fixture\n---\n";
         fs::write(source.join("skills/find-skills/SKILL.md"), contents).unwrap();
+        // 固定 fixture 的检出字节，避免宿主 core.autocrlf 改写断言输入。
+        fs::write(source.join(".gitattributes"), "* text eol=lf\n").unwrap();
         let repo = Repository::init_opts(
             &source,
             git2::RepositoryInitOptions::new().initial_head("main"),
@@ -2367,6 +2369,7 @@ mod tests {
             .set_bool("uploadpack.allowFilter", true)
             .unwrap();
         let mut index = repo.index().unwrap();
+        index.add_path(Path::new(".gitattributes")).unwrap();
         index
             .add_path(Path::new("skills/find-skills/SKILL.md"))
             .unwrap();
