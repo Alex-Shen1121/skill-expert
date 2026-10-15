@@ -171,6 +171,30 @@ impl SkillStore {
 
     pub fn upsert_skill(&self, skill: &SkillRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        Self::upsert_skill_on(&conn, skill)
+    }
+
+    pub fn store_website_snapshot(
+        &self,
+        skill: &SkillRecord,
+        scenario: Option<&str>,
+        write_metadata: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        Self::upsert_skill_on(&tx, skill)?;
+        if let Some(scenario) = scenario {
+            tx.execute(
+                "INSERT OR IGNORE INTO scenario_skills (scenario_id, skill_id, added_at) VALUES (?1, ?2, ?3)",
+                params![scenario, skill.id, skill.updated_at],
+            )?;
+        }
+        write_metadata()?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn upsert_skill_on(conn: &Connection, skill: &SkillRecord) -> Result<()> {
         conn.execute(
             "INSERT INTO skills (
                 id, name, description, source_type, source_ref, source_ref_resolved, source_subpath,

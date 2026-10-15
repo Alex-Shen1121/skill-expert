@@ -149,18 +149,19 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
   return <DetailSheet open title={<span className="flex min-w-0 items-center gap-3"><BookOpen className="shrink-0 text-accent" size={25} /><span className="truncate" title={skill.name}>{skill.name}</span><button type="button" aria-expanded={infoExpanded} aria-controls="skill-detail-info" onClick={() => setInfoExpanded(value => !value)} className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[12px] font-normal text-muted focus-visible:outline-accent"><Info size={14} />{t("skillBrowser.skillInfo")}<ChevronDown size={12} /></button></span>}
     description={skill.description ? <p className="line-clamp-1 text-[12px] text-muted">{skill.description}</p> : undefined} meta={meta} onClose={onClose} workbench>
     <nav className="flex shrink-0 items-center gap-1 px-6 pb-2" aria-label={t("skillBrowser.modules")}>
-      {(["local", "diff", "source"] as const).map(tab => <button key={tab} type="button" aria-pressed={contentTab === tab} onClick={() => { setContentTab(tab); if (tab !== "local") setSourceWanted(true); }}
+      {(["local", "diff", "source"] as const).filter(tab => skill.source_type !== "well-known" || tab === "local").map(tab => <button key={tab} type="button" aria-pressed={contentTab === tab} onClick={() => { setContentTab(tab); if (tab !== "local") setSourceWanted(true); }}
         className={cn("rounded-md px-3 py-2 text-[12px] font-medium focus-visible:outline-accent", contentTab === tab ? "bg-accent-bg text-accent" : "text-muted hover:bg-surface-hover")}>
         {tab === "local" ? t("skillBrowser.localFiles") : t(`mySkills.docTabs.${tab}`)}
       </button>)}
     </nav>
+    {skill.source_type === "well-known" && <p className="px-6 pb-3 text-[12px] text-muted">{t("install.websiteSnapshot")}</p>}
     {source && contentTab !== "local" && <p className="shrink-0 break-all border-t border-border-subtle px-6 py-2 text-[11px] text-muted" title={source.revision}>{source.location} · {source.revision === "workspace" ? t("skillBrowser.workspaceSnapshot") : source.revision.slice(0, 12)}</p>}
     <div className={(contentTab === "local" || (contentTab === "source" && source) || (contentTab === "diff" && sourceDiff && !diffError)) ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
       {index ? <SkillFileBrowser side={contentTab} diff={contentTab === "diff" ? sourceDiff : null} sourcePreview={previewFor("source")} sourceError={errorFor("source")} index={activeIndex ?? index} selected={selected} onSelect={chooseFile} preview={currentPreview} loading={!!selected && !currentPreview && !currentPreviewError} error={currentPreviewError} onRetry={retry} />
         : <div className="skill-file-message" role={browseError ? "alert" : "status"}>{browseError ?? t("common.loading")}{browseError && <button onClick={retry}>{t("skillBrowser.reload")}</button>}</div>}
     </div>
     {contentTab !== "local" && (!source || (contentTab === "diff" && (!sourceDiff || diffError))) && <div className="min-h-0 flex-1 overflow-auto border-t border-border-subtle p-6">
-      {!supportsSource ? <p className="skill-file-message">{t("skillBrowser.noSource")}</p>
+      {!supportsSource ? <p className="skill-file-message">{t(skill.source_type === "well-known" ? "install.websiteSnapshot" : "skillBrowser.noSource")}</p>
         : sourceError || diffError || browseError ? <div role="alert" className="skill-file-message"><p>{sourceError ?? diffError ?? browseError}</p><button onClick={retry}>{t("skillBrowser.retrySource")}</button></div>
         : <p role="status" className="skill-file-message">{t("common.loading")}</p>}
     </div>}

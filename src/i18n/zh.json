@@ -640,7 +640,8 @@
       "local": "本地",
       "import": "导入",
       "git": "Git",
-      "skillssh": "skills.sh"
+      "skillssh": "skills.sh",
+      "well-known": "网站快照"
     },
     "tags": {
       "filter": "标签",
@@ -706,7 +707,7 @@
     "title": "安装 Skills",
     "browseMarket": "浏览榜单",
     "localInstall": "本地安装",
-    "gitInstall": "Git 安装",
+    "gitInstall": "Git / 网站安装",
     "hot": "热门",
     "trending": "趋势",
     "all": "全部",
@@ -747,7 +748,8 @@
       "done": "完成",
       "cancelled": "安装已取消",
       "timeout": "安装超时 — 请检查网络连接",
-      "view": "查看"
+      "view": "查看",
+      "downloading": "正在下载网站快照..."
     },
     "local": {
       "title": "导入本地 Skill 源",
@@ -762,16 +764,16 @@
       "batchErrors": "{{count}} 个 Skill 导入失败"
     },
     "selectLocal": "选择本地文件...",
-    "gitTitle": "从 Git 仓库安装",
-    "gitDesc": "输入公共或私有 Git 仓库地址。私有仓库请确保本地已配置对应的 SSH 密钥。",
-    "repoUrl": "仓库地址",
+    "gitTitle": "从 Git 或网站安装",
+    "gitDesc": "支持 Git 仓库链接和 https://skills.sh/site/<域名>/<技能> 网站技能链接。",
+    "repoUrl": "来源链接",
     "repoUrlPlaceholder": "https://github.com/user/repo.git 或 git@github.com...",
     "gitAlreadyInstalled": "\"{{name}}\" 已安装，重新安装将会更新。",
     "onlyThisContributor": "仅看该贡献者",
-    "installClone": "克隆并预览",
+    "installClone": "获取并预览",
     "gitPreview": {
       "title": "选择要导入的技能",
-      "description": "从仓库中发现了以下技能，可自定义名称后导入。",
+      "description": "从来源中发现了以下技能，可自定义名称后导入。",
       "selectAll": "全选",
       "deselectAll": "取消全选",
       "namePlaceholder": "技能名称",
@@ -800,7 +802,10 @@
         "pending": "待导入",
         "imported": "已导入"
       }
-    }
+    },
+    "websiteSnapshot": "这是网站发布的技能快照，不参与 Git 更新检查或来源差异比较。再次安装可获取新快照。",
+    "websiteReplace": "确认后将用此次下载的快照替换已安装版本及其中的本地修改。",
+    "gitReinstall": "重新安装"
   },
   "settings": {
     "title": "设置",

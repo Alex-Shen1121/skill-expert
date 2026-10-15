@@ -1272,7 +1272,7 @@ export function MySkills() {
   }, [skills, selectedIds, viewedPreset, anyDisabled]);
 
   const sourceTypeLabel = (skill: ManagedSkill) =>
-    skill.source_type === "skillssh" ? "skills.sh" : skill.source_type;
+    t(`mySkills.sourceFilter.${skill.source_type}`, { defaultValue: skill.source_type });
 
   const refreshLabel = (skill: ManagedSkill) =>
     skill.source_type === "local" || skill.source_type === "import"
@@ -1490,7 +1490,7 @@ export function MySkills() {
           {t("mySkills.updateFilter.available")}
         </button>
         <span className="mx-0.5 h-3 w-px bg-border-subtle" />
-        {(["local", "import", "git", "skillssh"] as const).map((src) => (
+        {(["local", "import", "git", "skillssh", "well-known"] as const).map((src) => (
           <button
             key={src}
             type="button"

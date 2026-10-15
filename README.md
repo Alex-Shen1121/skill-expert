@@ -123,6 +123,8 @@ npm run cli:install
 
 当 `--skills-root` 指向外部检出目录时，CLI 的数据库和缓存等状态保存在 `~/.skill-expert/external/` 下，外部检出目录本身不会被污染。
 
+Website skills: `skill-expert-cli skills install https://skills.sh/site/open.feishu.cn/lark-im`. These are snapshots, excluded from Git updates and source comparisons. Reinstall with `--replace` to confirm replacing the existing snapshot and local changes. Desktop users can paste the same link under Install from Git or a website; the preview asks for confirmation.
+
 An update replaces the Skill folder. If upstream removed paths that still exist locally, the CLI applies nothing and reports `held_back_removals`; a person must confirm that loss in the desktop app.
 
 The CLI and desktop app share the same repository lock. If the app was suspended while a command ran, trigger one manual refresh.

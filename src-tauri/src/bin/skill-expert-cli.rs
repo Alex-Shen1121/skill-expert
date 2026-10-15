@@ -8,6 +8,7 @@ use app_lib::core::{
     app_state, audit_log::AuditDraft, central_repo, error::AppError, git_backup, git_fetcher,
     installer, merge, repo_lock::RepoLock, scenario_service, skill_metadata,
     skill_store::SkillStore, skillssh_api, sync_engine, sync_metadata, tool_adapters, tool_service,
+    well_known,
 };
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -104,7 +105,7 @@ enum SkillsCommand {
         force: bool,
     },
     Install {
-        /// Ref: local path, git URL, or owner/repo[@skill] / owner/repo/skill
+        /// Ref: local path, git URL, owner/repo[@skill], or https://skills.sh/site/domain/skill
         reference: String,
         #[arg(long, conflicts_with_all = ["git", "skillssh"])]
         local: bool,
@@ -114,6 +115,9 @@ enum SkillsCommand {
         skillssh: bool,
         #[arg(long)]
         name: Option<String>,
+        /// Confirm replacing an existing website snapshot with a fresh download
+        #[arg(long)]
+        replace: bool,
         /// Add to current active preset and sync agents
         #[arg(long, conflicts_with = "sync_preset")]
         sync: bool,
@@ -641,6 +645,7 @@ enum InstallKind {
     Local,
     Git,
     Skillssh,
+    Website,
 }
 
 enum SyncTarget {
@@ -840,6 +845,7 @@ fn run_skills(args: SkillsArgs, store: &SkillStore, json: bool) -> anyhow::Resul
             name,
             sync,
             sync_preset,
+            replace,
         } => {
             let kind = classify_ref(&reference, local, git, skillssh)?;
             let sync_target = if let Some(ref s) = sync_preset {
@@ -849,7 +855,14 @@ fn run_skills(args: SkillsArgs, store: &SkillStore, json: bool) -> anyhow::Resul
             } else {
                 SyncTarget::None
             };
-            let report = run_install(store, &reference, name.as_deref(), kind, sync_target)?;
+            let report = run_install(
+                store,
+                &reference,
+                name.as_deref(),
+                kind,
+                sync_target,
+                replace,
+            )?;
             print_json(&report, json);
         }
         SkillsCommand::Update { reference, all } => {
@@ -1436,6 +1449,10 @@ fn classify_ref(
     if force_local {
         return Ok(InstallKind::Local);
     }
+    if well_known::is_site_ref(reference) {
+        well_known::parse_site_ref(reference)?;
+        return Ok(InstallKind::Website);
+    }
     if force_git {
         return Ok(InstallKind::Git);
     }
@@ -1498,11 +1515,29 @@ fn run_install(
     name: Option<&str>,
     kind: InstallKind,
     sync: SyncTarget,
+    replace: bool,
 ) -> anyhow::Result<InstallReport> {
     let preset_id = resolve_sync_target(store, &sync)?;
     let synced = preset_id.is_some();
 
     let (skill_id, install_name, central_path, source_type) = match kind {
+        InstallKind::Website => {
+            let record = app_lib::commands::website::download_and_install(
+                store,
+                reference,
+                name,
+                replace,
+                preset_id.as_deref(),
+                &AtomicBool::new(false),
+            )
+            .map_err(map_app_err)?;
+            (
+                record.id,
+                record.name,
+                record.central_path,
+                record.source_type,
+            )
+        }
         InstallKind::Local => install_local_action(store, reference, name, preset_id.as_deref())?,
         InstallKind::Git => install_git_action(store, reference, name, preset_id.as_deref())?,
         InstallKind::Skillssh => install_skillssh_action(store, reference, preset_id.as_deref())?,
@@ -1997,21 +2032,24 @@ fn run_search(
     let proxy_url = store.proxy_url();
     let bounded = limit.unwrap_or(60).clamp(1, 300);
     let hits = skillssh_api::search_skills(query, bounded, proxy_url.as_deref())?;
-    Ok(hits
-        .into_iter()
+    hits.into_iter()
         .map(|s| {
-            let install_ref = format!("{}/{}", s.source, s.skill_id);
-            let skills_sh_url = format!("https://skills.sh/{}/{}", s.source, s.skill_id);
-            SearchHit {
+            let install_ref = well_known::market_install_ref(&s.source, &s.skill_id)?;
+            let skills_sh_url = if well_known::is_site_ref(&install_ref) {
+                install_ref.clone()
+            } else {
+                format!("https://skills.sh/{}/{}", s.source, s.skill_id)
+            };
+            Ok(SearchHit {
                 install_ref,
                 name: s.name,
                 source: s.source,
                 skill_id: s.skill_id,
                 installs: s.installs,
                 skills_sh_url,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 // ── adopt ─────────────────────────────────────────────────────────────────
@@ -3050,6 +3088,63 @@ fn print_json<T: Serialize>(value: &T, json: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn website_search_refs_install_and_existing_classification_is_unchanged() {
+        let reference = well_known::market_install_ref("site/EXAMPLE.COM", "demo").unwrap();
+        assert_eq!(
+            reference,
+            well_known::market_install_ref("example.com", "demo").unwrap()
+        );
+        assert_eq!(reference, "https://skills.sh/site/example.com/demo");
+        assert!(matches!(
+            classify_ref(&reference, false, false, false).unwrap(),
+            InstallKind::Website
+        ));
+        assert!(matches!(
+            classify_ref(
+                "https://www.skills.sh/site/example.com/demo",
+                false,
+                true,
+                false
+            )
+            .unwrap(),
+            InstallKind::Website
+        ));
+        assert!(classify_ref(
+            "http://skills.sh/site/example.com/demo",
+            false,
+            false,
+            false
+        )
+        .is_err());
+        assert!(matches!(
+            classify_ref("https://github.com/owner/repo", false, false, false).unwrap(),
+            InstallKind::Git
+        ));
+        assert!(matches!(
+            classify_ref("owner/repo/demo", false, false, false).unwrap(),
+            InstallKind::Skillssh
+        ));
+        assert!(matches!(
+            classify_ref("./demo", false, false, false).unwrap(),
+            InstallKind::Local
+        ));
+        let cli = Cli::try_parse_from([
+            "skill-expert-cli",
+            "skills",
+            "install",
+            &reference,
+            "--replace",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Skills(SkillsArgs {
+                command: SkillsCommand::Install { replace: true, .. }
+            })
+        ));
+    }
+
     #[test]
     fn deployment_refusal_keeps_paths_in_json_envelope() {
         let err = map_app_err(AppError::target_conflict(

@@ -963,3 +963,11 @@ it.each(["local", "source"] as const)("%s 祖先目录读取失败时，差异�
     await i18n.changeLanguage("zh");
   }
 });
+
+it("网站快照可以浏览安装文件，但不提供 Git 来源比较入口", async () => {
+  render(<SkillDetailPanel skill={{ ...skill, source_type: "well-known", source_ref: "https://skills.sh/site/example.com/demo", can_check_update: false }} onClose={vi.fn()} />);
+  await screen.findByText("阅读入口");
+  expect(screen.getByText(i18n.t("install.websiteSnapshot"))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "差异" })).toBeNull();
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "prepare_skill_browser_source")).toBe(false);
+});
