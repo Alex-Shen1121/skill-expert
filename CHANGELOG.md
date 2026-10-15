@@ -15,7 +15,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
--
+- Make release regression fixtures portable across slow runners and Git automatic line-ending conversion while retaining bounded process execution and exact cache-content assertions.
 
 ## [1.0.19] - 2026-10-15
 
