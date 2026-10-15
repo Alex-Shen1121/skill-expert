@@ -15,6 +15,19 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
+-
+
+## [1.0.20] - 2026-10-15
+
+### Release Overview
+- Publish the website-skill and cache-recovery changes held in the unpublished v1.0.19 Draft after correcting cross-platform release test fixtures.
+- Install website skills from the market, skills.sh/site links and skill-expert-cli with a shared source identity, bounded HTTPS downloads, verified archives and confirmed snapshot replacement.
+
+### User-facing
+- Recover Git skill installs after an interrupted clone by rebuilding only the cache slot with an invalid HEAD, preserving other caches and installed skills.
+- Website installs now reject missing or invalid v2 digests and unsupported discovery schemas, and safely extract both tar.gz and ZIP snapshots. Legacy v1 file lists remain supported without digests.
+
+### Developer & Governance
 - Make release regression fixtures portable across slow runners and Git automatic line-ending conversion while retaining bounded process execution and exact cache-content assertions.
 
 ## [1.0.19] - 2026-10-15
