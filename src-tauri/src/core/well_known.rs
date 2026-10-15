@@ -11,13 +11,14 @@ pub const TEMP_DIR_PREFIX: &str = "skill-expert-well-known-";
 const MAX_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 4096;
-// Bound implicit directories too, not just ZIP records. Canonical bundles use
+// Bound implicit directories too, not just archive records. Canonical bundles use
 // shallow reference/ paths; Unicode names remain supported.
 const MAX_PATH_BYTES: usize = 512;
 const MAX_PATH_DEPTH: usize = 16;
 const MAX_TOTAL_PATH_BYTES: usize = 64 * 1024;
 const MAX_TOTAL_COMPONENTS: usize = 16 * 1024;
 const SITE_HOSTS: &[&str] = &["skills.sh", "www.skills.sh"];
+const V2_SCHEMA: &str = "https://schemas.agentskills.io/discovery/0.2.0/schema.json";
 
 #[derive(Debug, Clone)]
 pub struct SiteRef {
@@ -45,6 +46,19 @@ pub struct DownloadedSkill {
 struct DiscoveryIndex {
     url: reqwest::Url,
     payload: Value,
+}
+
+enum IndexVersion {
+    V1,
+    V2,
+}
+
+fn index_version(payload: &Value) -> Result<IndexVersion> {
+    match payload.get("$schema") {
+        None => Ok(IndexVersion::V1),
+        Some(Value::String(schema)) if schema == V2_SCHEMA => Ok(IndexVersion::V2),
+        Some(schema) => bail!("Unsupported skills index schema: {schema}"),
+    }
 }
 
 pub fn parse_site_ref(input: &str) -> Result<SiteRef> {
@@ -138,11 +152,13 @@ pub fn download_site_skill(
     let skill_dir = temp.path().join("skill");
     std::fs::create_dir_all(&skill_dir)?;
 
-    let (resolved_url, revision) = if index.payload.get("$schema").is_some() {
-        download_v2_entry(&client, &index, entry, &skill_dir, cancel)?
-    } else {
-        download_v1_entry(&client, &index, entry, &site.skill_name, &skill_dir, cancel)?
+    let (resolved_url, revision) = match index_version(&index.payload)? {
+        IndexVersion::V2 => download_v2_entry(&client, &index, entry, &skill_dir, cancel)?,
+        IndexVersion::V1 => {
+            download_v1_entry(&client, &index, entry, &site.skill_name, &skill_dir, cancel)?
+        }
     };
+    check_cancel(cancel)?;
 
     std::fs::write(
         temp.path().join("snapshot.json"),
@@ -214,6 +230,7 @@ fn fetch_index(
         let Ok(payload) = serde_json::from_slice::<Value>(&bytes) else {
             continue;
         };
+        index_version(&payload)?;
         if payload.get("skills").and_then(Value::as_array).is_some() {
             return Ok(DiscoveryIndex { url, payload });
         }
@@ -291,27 +308,25 @@ fn download_v2_entry(
         .ok_or_else(|| anyhow::anyhow!("skills index entry is missing url"))?;
     let url = index.url.join(artifact)?;
     let bytes = get_bytes(client, &url, cancel)?;
-    let digest = match entry.get("digest") {
-        None => None,
-        Some(Value::String(digest)) => Some(digest.as_str()),
-        Some(_) => bail!("Invalid skills index digest"),
-    };
-    if let Some(digest) = digest {
-        verify_digest(&bytes, digest)?;
-    }
+    let digest = entry
+        .get("digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Missing or invalid skills index digest"))?;
+    verify_digest(&bytes, digest)?;
+    check_cancel(cancel)?;
 
     match kind {
         "skill-md" => {
             std::fs::write(skill_dir.join("SKILL.md"), bytes)?;
         }
-        "archive" => extract_zip(&bytes, skill_dir)?,
+        "archive" => extract_archive(&bytes, skill_dir, cancel)?,
         other => bail!("Unsupported skills index entry type: {other}"),
     }
 
     if !skill_dir.join("SKILL.md").is_file() {
         bail!("Downloaded skill is missing SKILL.md");
     }
-    Ok((url.to_string(), digest.map(str::to_string)))
+    Ok((url.to_string(), Some(digest.to_string())))
 }
 
 fn get_bytes(client: &Client, url: &reqwest::Url, cancel: Option<&AtomicBool>) -> Result<Vec<u8>> {
@@ -376,8 +391,36 @@ fn verify_digest(bytes: &[u8], expected: &str) -> Result<()> {
     Ok(())
 }
 
+fn extract_archive(bytes: &[u8], destination: &Path, cancel: Option<&AtomicBool>) -> Result<()> {
+    // Sniff verified bytes: URLs and Content-Type may be generic or misleading.
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        extract_tar_gz_with_limits(
+            bytes,
+            destination,
+            MAX_EXTRACTED_BYTES,
+            MAX_ARCHIVE_ENTRIES,
+            cancel,
+        )
+    } else {
+        extract_zip_with_limits(
+            bytes,
+            destination,
+            MAX_EXTRACTED_BYTES,
+            MAX_ARCHIVE_ENTRIES,
+            cancel,
+        )
+    }
+}
+
+#[cfg(test)]
 fn extract_zip(bytes: &[u8], destination: &Path) -> Result<()> {
-    extract_zip_with_limits(bytes, destination, MAX_EXTRACTED_BYTES, MAX_ARCHIVE_ENTRIES)
+    extract_zip_with_limits(
+        bytes,
+        destination,
+        MAX_EXTRACTED_BYTES,
+        MAX_ARCHIVE_ENTRIES,
+        None,
+    )
 }
 
 fn extract_zip_with_limits(
@@ -385,7 +428,9 @@ fn extract_zip_with_limits(
     destination: &Path,
     max_bytes: u64,
     max_entries: usize,
+    cancel: Option<&AtomicBool>,
 ) -> Result<()> {
+    check_cancel(cancel)?;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
     if archive.len() > max_entries {
         bail!("Archive contains too many entries");
@@ -393,10 +438,11 @@ fn extract_zip_with_limits(
     // Validate every header before creating any files. Never materialize links or
     // special files, and apply the same path rules on Unix and Windows.
     let mut declared_bytes = 0u64;
-    let mut paths = PathBudget::default();
+    let mut paths = ArchivePaths::default();
     for index in 0..archive.len() {
+        check_cancel(cancel)?;
         let entry = archive.by_index(index)?;
-        paths.add(entry.name().trim_end_matches('/'))?;
+        paths.add(entry.name().trim_end_matches('/'), entry.is_dir())?;
         if let Some(mode) = entry.unix_mode() {
             let kind = mode & 0o170000;
             if kind != 0 && kind != 0o100000 && kind != 0o040000 {
@@ -412,6 +458,7 @@ fn extract_zip_with_limits(
     }
     let mut remaining = max_bytes;
     for index in 0..archive.len() {
+        check_cancel(cancel)?;
         let mut entry = archive.by_index(index)?;
         let relative = safe_relative_path(entry.name().trim_end_matches('/'))?;
         let target = destination.join(relative);
@@ -428,12 +475,7 @@ fn extract_zip_with_limits(
             .write(true)
             .create_new(true)
             .open(target)?;
-        let written = std::io::copy(&mut (&mut entry).take(remaining), &mut file)?;
-        remaining -= written;
-        let mut extra = [0u8; 1];
-        if entry.read(&mut extra)? != 0 {
-            bail!("Archive exceeds extraction size limit");
-        }
+        copy_archive_entry(&mut entry, &mut file, &mut remaining, cancel)?;
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
@@ -441,6 +483,142 @@ fn extract_zip_with_limits(
         }
     }
     Ok(())
+}
+
+fn extract_tar_gz_with_limits(
+    bytes: &[u8],
+    destination: &Path,
+    max_bytes: u64,
+    max_entries: usize,
+    cancel: Option<&AtomicBool>,
+) -> Result<()> {
+    // Bound all decoded bytes, including padding and GNU/PAX metadata, and
+    // read to EOF so a truncated gzip or a bad CRC cannot bypass verification.
+    let tar_bytes = read_limited(
+        flate2::read::MultiGzDecoder::new(bytes),
+        max_bytes + (max_entries as u64 + 1) * 1024,
+        cancel,
+    )?;
+    let mut archive = tar::Archive::new(Cursor::new(&tar_bytes));
+    let mut paths = ArchivePaths::default();
+    let mut declared_bytes = 0u64;
+    for (index, entry) in archive.entries()?.enumerate() {
+        check_cancel(cancel)?;
+        if index >= max_entries {
+            bail!("Archive contains too many entries");
+        }
+        let entry = entry?;
+        let kind = entry.header().entry_type();
+        if !kind.is_file() && !kind.is_dir() {
+            bail!("Archive contains a link or special file");
+        }
+        let path = entry.path_bytes();
+        paths.add(
+            std::str::from_utf8(&path)?.trim_end_matches('/'),
+            kind.is_dir(),
+        )?;
+        declared_bytes = declared_bytes
+            .checked_add(entry.size())
+            .ok_or_else(|| anyhow::anyhow!("Archive size overflow"))?;
+        if declared_bytes > max_bytes {
+            bail!("Archive exceeds extraction size limit");
+        }
+    }
+    let end = archive.into_inner().position() as usize;
+    if tar_bytes.len() % 512 != 0
+        || tar_bytes.len().saturating_sub(end) < 512
+        || tar_bytes[end..].iter().any(|byte| *byte != 0)
+    {
+        bail!("Invalid tar end-of-archive blocks");
+    }
+    let mut archive = tar::Archive::new(Cursor::new(&tar_bytes));
+    let mut remaining = max_bytes;
+    for entry in archive.entries()? {
+        check_cancel(cancel)?;
+        let mut entry = entry?;
+        let path = entry.path_bytes();
+        let target = destination.join(safe_relative_path(
+            std::str::from_utf8(&path)?.trim_end_matches('/'),
+        )?);
+        if entry.header().entry_type().is_dir() {
+            std::fs::create_dir_all(target)?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(target)?;
+        copy_archive_entry(&mut entry, &mut file, &mut remaining, cancel)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(
+                entry.header().mode()? & 0o777,
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_archive_entry(
+    mut reader: impl Read,
+    writer: &mut impl std::io::Write,
+    remaining: &mut u64,
+    cancel: Option<&AtomicBool>,
+) -> Result<()> {
+    let mut buffer = [0; 16 * 1024];
+    loop {
+        check_cancel(cancel)?;
+        let limit = (*remaining + 1).min(buffer.len() as u64) as usize;
+        let read = reader.read(&mut buffer[..limit])?;
+        if read == 0 {
+            return Ok(());
+        }
+        if read as u64 > *remaining {
+            bail!("Archive exceeds extraction size limit");
+        }
+        writer.write_all(&buffer[..read])?;
+        *remaining -= read as u64;
+    }
+}
+
+#[derive(Default)]
+struct ArchivePaths {
+    budget: PathBudget,
+    explicit: std::collections::HashSet<PathBuf>,
+    directories: std::collections::HashMap<PathBuf, bool>,
+}
+
+impl ArchivePaths {
+    fn add(&mut self, name: &str, is_dir: bool) -> Result<()> {
+        self.budget.add(name)?;
+        let path = Path::new(name);
+        if !self.explicit.insert(path.to_path_buf()) {
+            bail!("Archive contains duplicate paths");
+        }
+        if self
+            .directories
+            .get(path)
+            .is_some_and(|was_dir| !was_dir || !is_dir)
+        {
+            bail!("Archive contains conflicting paths");
+        }
+        for parent in path
+            .ancestors()
+            .skip(1)
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            if self.directories.get(parent) == Some(&false) {
+                bail!("Archive contains conflicting paths");
+            }
+            self.directories.insert(parent.to_path_buf(), true);
+        }
+        self.directories.insert(path.to_path_buf(), is_dir);
+        Ok(())
+    }
 }
 
 fn safe_relative_path(path: &str) -> Result<&Path> {
@@ -560,7 +738,7 @@ mod tests {
     fn extracts_valid_bundle_at_exact_byte_limit() {
         let bytes = archive(&[("SKILL.md", b"skill"), ("references/guide.md", b"guide")]);
         let temp = tempfile::tempdir().unwrap();
-        extract_zip_with_limits(&bytes, temp.path(), 10, 2).unwrap();
+        extract_zip_with_limits(&bytes, temp.path(), 10, 2, None).unwrap();
         assert_eq!(
             std::fs::read(temp.path().join("references/guide.md")).unwrap(),
             b"guide"
@@ -604,7 +782,9 @@ mod tests {
         ]);
         for (max_bytes, max_entries) in [(8191, 2), (8192, 1)] {
             let temp = tempfile::tempdir().unwrap();
-            assert!(extract_zip_with_limits(&bytes, temp.path(), max_bytes, max_entries).is_err());
+            assert!(
+                extract_zip_with_limits(&bytes, temp.path(), max_bytes, max_entries, None).is_err()
+            );
             assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
         }
     }
@@ -859,12 +1039,13 @@ mod tests {
         corrupt[offset] ^= 1; // Preserve the original CRC in both headers.
         let truncated = original[..original.len() - 20].to_vec();
         for bytes in [corrupt, truncated] {
+            let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
             let (url, server) = serve_chunked(bytes);
             let index = DiscoveryIndex {
                 url: url.clone(),
                 payload: Value::Null,
             };
-            let entry = serde_json::json!({"type":"archive","url":url.as_str()});
+            let entry = serde_json::json!({"type":"archive","url":url.as_str(),"digest":digest});
             let temp_path;
             {
                 let temp = tempfile::tempdir().unwrap();
@@ -928,7 +1109,7 @@ mod tests {
         let central = bytes.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
         bytes[central + 24..central + 28].copy_from_slice(&10u32.to_le_bytes());
         let temp = tempfile::tempdir().unwrap();
-        assert!(extract_zip_with_limits(&bytes, temp.path(), 100, 10).is_err());
+        assert!(extract_zip_with_limits(&bytes, temp.path(), 100, 10, None).is_err());
         let written = std::fs::metadata(temp.path().join("SKILL.md"))
             .map(|m| m.len())
             .unwrap_or(0);
@@ -1103,7 +1284,7 @@ mod tests {
     fn v2_index_downloads_archive_and_checks_the_advertised_digest() {
         let bundle = archive(&[("SKILL.md", b"skill"), ("references/guide.md", b"guide")]);
         let digest = format!("sha256:{:x}", Sha256::digest(&bundle));
-        let index = serde_json::to_vec(&serde_json::json!({"$schema":"v2", "skills":[{"name":"demo", "type":"archive", "url":"demo.zip", "digest":digest}]})).unwrap();
+        let index = serde_json::to_vec(&serde_json::json!({"$schema":V2_SCHEMA, "skills":[{"name":"demo", "type":"archive", "url":"demo.zip", "digest":digest}]})).unwrap();
         let (url, server) = serve_responses(vec![
             ("/.well-known/agent-skills/index.json", index),
             ("/.well-known/agent-skills/demo.zip", bundle),
@@ -1162,6 +1343,371 @@ mod tests {
             let rejected = tempfile::tempdir().unwrap();
             assert!(extract_zip(&special, rejected.path()).is_err());
             assert_eq!(std::fs::read_dir(rejected.path()).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn v2_requires_a_valid_digest_for_both_artifact_types_before_any_write() {
+        for kind in ["skill-md", "archive"] {
+            let bytes = if kind == "skill-md" {
+                b"skill".to_vec()
+            } else {
+                archive(&[("SKILL.md", b"skill")])
+            };
+            for digest in [
+                None,
+                Some(Value::Null),
+                Some(serde_json::json!(123)),
+                Some(serde_json::json!("")),
+                Some(serde_json::json!("   ")),
+                Some(serde_json::json!("sha256:bad")),
+                Some(serde_json::json!(format!("sha256:{}", "z".repeat(64)))),
+                Some(serde_json::json!(format!("sha512:{}", "0".repeat(64)))),
+                Some(serde_json::json!(format!("sha256:{}", "0".repeat(64)))),
+                Some(serde_json::json!(format!(
+                    "sha256:{:x}",
+                    Sha256::digest(&bytes)
+                ))),
+            ] {
+                let valid = digest
+                    == Some(serde_json::json!(format!(
+                        "sha256:{:x}",
+                        Sha256::digest(&bytes)
+                    )));
+                let (url, server) = serve_chunked(bytes.clone());
+                let index = DiscoveryIndex {
+                    url: url.clone(),
+                    payload: Value::Null,
+                };
+                let mut entry = serde_json::json!({"type":kind,"url":url.as_str()});
+                if let Some(digest) = digest {
+                    entry["digest"] = digest;
+                }
+                let path;
+                {
+                    let temp = tempfile::tempdir().unwrap();
+                    path = temp.path().to_path_buf();
+                    let result =
+                        download_v2_entry(&Client::new(), &index, &entry, temp.path(), None);
+                    assert_eq!(result.is_ok(), valid, "{entry}: {result:?}");
+                    assert_eq!(
+                        std::fs::read_dir(temp.path()).unwrap().count(),
+                        usize::from(valid)
+                    );
+                    if !valid {
+                        assert!(result
+                            .unwrap_err()
+                            .to_string()
+                            .to_lowercase()
+                            .contains("digest"));
+                    }
+                }
+                assert!(!path.exists());
+                server.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn index_rejects_unknown_or_malformed_schema_instead_of_guessing_v2() {
+        for schema in [
+            serde_json::json!("v2"),
+            serde_json::json!("https://example.test/unknown-v99"),
+            Value::Null,
+            serde_json::json!(2),
+        ] {
+            let (url, server) = serve_responses(vec![(
+                "/.well-known/agent-skills/index.json",
+                serde_json::to_vec(&serde_json::json!({"$schema":schema,"skills":[]})).unwrap(),
+            )]);
+            let error = fetch_index(&Client::new(), &url, None).err().unwrap();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Unsupported skills index schema"),
+                "{error}"
+            );
+            server.join().unwrap();
+        }
+    }
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn tar_bytes(entries: &[(&str, u8, &[u8])]) -> Vec<u8> {
+        let mut builder = tar::Builder::new(Vec::new());
+        for (name, kind, bytes) in entries {
+            let mut header = tar::Header::new_gnu();
+            // Raw names deliberately bypass the builder's own traversal protection.
+            assert!(name.len() <= 100);
+            header.as_mut_bytes()[..name.len()].copy_from_slice(name.as_bytes());
+            header.set_entry_type(tar::EntryType::new(*kind));
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            if *kind == b'1' || *kind == b'2' {
+                header.set_link_name("../outside").unwrap();
+            }
+            header.set_cksum();
+            builder.append(&header, *bytes).unwrap();
+        }
+        builder.into_inner().unwrap()
+    }
+
+    #[test]
+    fn tar_gz_download_uses_raw_digest_and_v2_html_fallback() {
+        let raw = tar_bytes(&[
+            ("SKILL.md", b'0', b"skill"),
+            ("references/", b'5', b""),
+            ("references/guide.md", b'0', b"guide"),
+        ]);
+        let bundle = gzip(&raw);
+        for digest_bytes in [&bundle, &raw] {
+            let digest = format!("sha256:{:x}", Sha256::digest(digest_bytes));
+            let index = serde_json::to_vec(&serde_json::json!({"$schema":V2_SCHEMA,"skills":[{"name":"demo","type":"archive","url":"artifact","digest":digest}]})).unwrap();
+            let (url, server) = serve_responses(vec![
+                (
+                    "/.well-known/agent-skills/index.json",
+                    b"<html>app shell</html>".to_vec(),
+                ),
+                ("/.well-known/skills/index.json", index),
+                ("/.well-known/skills/artifact", bundle.clone()),
+            ]);
+            let index = fetch_index(&Client::new(), &url, None).unwrap();
+            assert!(matches!(
+                index_version(&index.payload).unwrap(),
+                IndexVersion::V2
+            ));
+            let temp = tempfile::tempdir().unwrap();
+            let result = download_v2_entry(
+                &Client::new(),
+                &index,
+                &index.payload["skills"][0],
+                temp.path(),
+                None,
+            );
+            if digest_bytes == &bundle {
+                assert_eq!(result.unwrap().1.as_deref(), Some(digest.as_str()));
+                assert_eq!(
+                    std::fs::read(temp.path().join("references/guide.md")).unwrap(),
+                    b"guide"
+                );
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    assert_eq!(
+                        std::fs::metadata(temp.path().join("SKILL.md"))
+                            .unwrap()
+                            .permissions()
+                            .mode()
+                            & 0o777,
+                        0o755
+                    );
+                }
+            } else {
+                assert!(result.unwrap_err().to_string().contains("digest"));
+                assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn tar_rejects_unsafe_paths_links_special_files_and_collisions_before_writes() {
+        let mut cases = Vec::new();
+        for name in [
+            "../escaped",
+            "/tmp/escaped",
+            "a/../escaped",
+            "C:/escaped",
+            "a\\escaped",
+            "NUL.txt",
+            "a./escaped",
+            "a /escaped",
+            "a//b",
+            "a/./b",
+        ] {
+            cases.push(tar_bytes(&[
+                ("SKILL.md", b'0', b"skill"),
+                (name, b'0', b"bad"),
+            ]));
+        }
+        for kind in *b"123467S" {
+            cases.push(tar_bytes(&[
+                ("SKILL.md", b'0', b"skill"),
+                ("unsafe", kind, b""),
+            ]));
+        }
+        for entries in [
+            vec![
+                ("SKILL.md", b'0', b"skill".as_slice()),
+                ("SKILL.md", b'0', b"again"),
+            ],
+            vec![("dir/", b'5', b"".as_slice()), ("dir/", b'5', b"")],
+            vec![("a", b'0', b"a".as_slice()), ("a/b", b'0', b"b")],
+            vec![("a/b", b'0', b"a".as_slice()), ("a", b'0', b"b")],
+            vec![("a/", b'5', b"".as_slice()), ("a", b'0', b"b")],
+        ] {
+            cases.push(tar_bytes(&entries));
+        }
+        for raw in cases {
+            let temp = tempfile::tempdir().unwrap();
+            assert!(extract_archive(&gzip(&raw), temp.path(), None).is_err());
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn tar_rejects_corrupt_gzip_headers_truncated_payload_and_end_blocks() {
+        let raw = tar_bytes(&[("SKILL.md", b'0', b"skill")]);
+        let valid = gzip(&raw);
+        let mut crc = valid.clone();
+        let end = crc.len();
+        crc[end - 8] ^= 1;
+        let mut header = raw.clone();
+        header[0] ^= 1;
+        let mut trailing = raw.clone();
+        trailing.extend_from_slice(&[1; 512]);
+        for bytes in [
+            crc,
+            valid[..valid.len() - 6].to_vec(),
+            gzip(&header),
+            gzip(&raw[..514]),
+            gzip(&raw[..1024]),
+            gzip(&raw[..1536]),
+            gzip(&trailing),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            assert!(extract_archive(&bytes, temp.path(), None).is_err());
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn tar_validates_effective_gnu_and_pax_paths_before_writes() {
+        let long_name = format!("references/{}.md", "a".repeat(120));
+        for name in [&long_name, "../escaped", "/tmp/escaped"] {
+            for pax in [false, true] {
+                let mut builder = tar::Builder::new(Vec::new());
+                let mut header = tar::Header::new_gnu();
+                header.set_size(5);
+                header.set_mode(0o644);
+                if pax {
+                    builder
+                        .append_pax_extensions([("path", name.as_bytes())])
+                        .unwrap();
+                    builder
+                        .append_data(&mut header, "SKILL.md", b"skill".as_slice())
+                        .unwrap();
+                } else if name == long_name {
+                    builder
+                        .append_data(&mut header, name, b"skill".as_slice())
+                        .unwrap();
+                } else {
+                    // Exercise GNU longname overrides, not just the visible file header.
+                    let mut extension = tar::Header::new_gnu();
+                    extension.set_entry_type(tar::EntryType::new(b'L'));
+                    let path = format!("{name}\0");
+                    extension.set_size(path.len() as u64);
+                    extension.set_cksum();
+                    builder.append(&extension, path.as_bytes()).unwrap();
+                    builder
+                        .append_data(&mut header, "SKILL.md", b"skill".as_slice())
+                        .unwrap();
+                }
+                let temp = tempfile::tempdir().unwrap();
+                let result =
+                    extract_archive(&gzip(&builder.into_inner().unwrap()), temp.path(), None);
+                assert_eq!(
+                    result.is_ok(),
+                    name == long_name,
+                    "{name}, pax={pax}: {result:?}"
+                );
+                if name == long_name {
+                    assert_eq!(std::fs::read(temp.path().join(name)).unwrap(), b"skill");
+                } else {
+                    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tar_enforces_exact_size_entry_and_path_budgets() {
+        let bundle = gzip(&tar_bytes(&[
+            ("SKILL.md", b'0', b"skill"),
+            ("references/guide.md", b'0', b"guide"),
+        ]));
+        let temp = tempfile::tempdir().unwrap();
+        extract_tar_gz_with_limits(&bundle, temp.path(), 10, 2, None).unwrap();
+        for (size, count) in [(9, 2), (10_000, 1)] {
+            let rejected = tempfile::tempdir().unwrap();
+            assert!(
+                extract_tar_gz_with_limits(&bundle, rejected.path(), size, count, None).is_err()
+            );
+            assert_eq!(std::fs::read_dir(rejected.path()).unwrap().count(), 0);
+        }
+        let names: Vec<_> = (0..800)
+            .map(|i| format!("{i:04}{}", "a".repeat(80)))
+            .collect();
+        let entries: Vec<_> = names
+            .iter()
+            .map(|name| (name.as_str(), b'0', b"".as_slice()))
+            .collect();
+        let rejected = tempfile::tempdir().unwrap();
+        assert!(
+            extract_archive(&gzip(&tar_bytes(&entries)), rejected.path(), None)
+                .unwrap_err()
+                .to_string()
+                .contains("path budget")
+        );
+        assert_eq!(std::fs::read_dir(rejected.path()).unwrap().count(), 0);
+        // Gzip padding/metadata must also be bounded, independently of declared file sizes.
+        assert!(
+            extract_tar_gz_with_limits(&gzip(&vec![0; 10_000]), rejected.path(), 10, 2, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn archive_copy_cancels_between_chunks_and_can_retry() {
+        let cancel = AtomicBool::new(false);
+        struct CancelWriter<'a>(&'a AtomicBool, Vec<u8>);
+        impl Write for CancelWriter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.1.extend_from_slice(bytes);
+                self.0.store(true, Ordering::SeqCst);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut output = CancelWriter(&cancel, Vec::new());
+        assert!(copy_archive_entry(
+            Cursor::new(vec![1; 32768]),
+            &mut output,
+            &mut 32768,
+            Some(&cancel)
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("cancelled"));
+        assert_eq!(output.1.len(), 16384);
+        let zip = archive(&[("SKILL.md", b"skill")]);
+        let tar = gzip(&tar_bytes(&[("SKILL.md", b'0', b"skill")]));
+        for bytes in [zip, tar] {
+            let temp = tempfile::tempdir().unwrap();
+            cancel.store(true, Ordering::SeqCst);
+            assert!(extract_archive(&bytes, temp.path(), Some(&cancel))
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled"));
+            assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+            cancel.store(false, Ordering::SeqCst);
+            extract_archive(&bytes, temp.path(), Some(&cancel)).unwrap();
         }
     }
 }

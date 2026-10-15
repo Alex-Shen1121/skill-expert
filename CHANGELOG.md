@@ -12,7 +12,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 - Install website skills from the market, skills.sh/site links and skill-expert-cli with a shared source identity, bounded HTTPS downloads, verified archives and confirmed snapshot replacement.
 
 ### User-facing
--
+- Website installs now reject missing or invalid v2 digests and unsupported discovery schemas, and safely extract both tar.gz and ZIP snapshots. Legacy v1 file lists remain supported without digests.
 
 ### Developer & Governance
 -
