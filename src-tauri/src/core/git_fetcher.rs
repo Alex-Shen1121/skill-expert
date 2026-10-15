@@ -198,7 +198,8 @@ struct RepoCacheLock {
 
 /// Delete least-recently-used cache slots until the cache is back under the limit.
 ///
-/// Called only where a slot is about to be cloned fresh. Refreshing an existing
+/// Called only for a new slot; repairing a slot must preserve other caches.
+/// Refreshing an existing
 /// slot adds a delta; a new repository adds a whole checkout, so that is where the
 /// growth comes from — and it keeps a batch update from paying for the walk once
 /// per repository (the walk is ~0.8s over a 569 MB cache).
@@ -775,12 +776,15 @@ fn clone_repo_sparse(
     // One slot serves every skill from this repo: the objects are what is
     // expensive, and they are shared. The lock holds until this call's copy is
     // taken, so a later install re-scoping the worktree cannot disturb it.
-    let reusable = cached_dir.exists()
+    let existing_slot = cached_dir.exists();
+    let reusable = existing_slot
         && try_update_cached_repo(&cached_dir, url, branch, proxy_url, cancel, on_progress)?;
 
     if !reusable {
         let _ = std::fs::remove_dir_all(&cached_dir);
-        prune_repo_cache(&cached_dir);
+        if !existing_slot {
+            prune_repo_cache(&cached_dir);
+        }
         sparse_clone_into(&cached_dir, url, branch, cancel, proxy_url, on_progress).inspect_err(
             |_| {
                 let _ = std::fs::remove_dir_all(&cached_dir);
@@ -1061,7 +1065,8 @@ fn clone_repo_full(
     let _cache_lock = lock_repo_cache(&cached_dir, &on_progress, cancel)?;
 
     // Try cached repo first.
-    if cached_dir.exists() {
+    let existing_slot = cached_dir.exists();
+    if existing_slot {
         match try_update_cached_repo(&cached_dir, url, branch, proxy_url, cancel, &on_progress) {
             Ok(true) => return materialize_cached_repo(&cached_dir, cancel),
             Ok(false) => { /* cache invalid, fall through to clone */ }
@@ -1077,7 +1082,9 @@ fn clone_repo_full(
 
     // Remove any leftover partial clone.
     let _ = std::fs::remove_dir_all(&cached_dir);
-    prune_repo_cache(&cached_dir);
+    if !existing_slot {
+        prune_repo_cache(&cached_dir);
+    }
 
     let timeout = Duration::from_secs(CLONE_TIMEOUT_SECS);
     let mut system_git_stderr: Option<String> = None;
@@ -2379,6 +2386,12 @@ mod tests {
         let sparse = repo_cache_dir_for(&url, true);
         let sparse_head = fs::read(sparse.join(".git/HEAD")).unwrap();
         fs::write(sparse.join(".git/keep"), "valid sparse cache").unwrap();
+        // Unix sparse files exercise the capacity limit without allocating a GiB.
+        #[cfg(unix)]
+        File::create(sparse.join(".git/capacity-probe"))
+            .unwrap()
+            .set_len(REPO_CACHE_LIMIT_BYTES + 1)
+            .unwrap();
         let installed = central_repo::skills_dir().join("existing/SKILL.md");
         fs::create_dir_all(installed.parent().unwrap()).unwrap();
         fs::write(&installed, "existing installation").unwrap();
@@ -2423,6 +2436,31 @@ mod tests {
             );
             cleanup_temp(&checkout);
         }
+        #[cfg(unix)]
+        File::create(cached.join(".git/capacity-probe"))
+            .unwrap()
+            .set_len(REPO_CACHE_LIMIT_BYTES + 1)
+            .unwrap();
+        fs::write(sparse.join(".git/HEAD"), "ref: refs/heads/.invalid\n").unwrap();
+        let checkout =
+            clone_repo_ref_scoped(&url, None, Some("skills/find-skills"), None, None, None)
+                .unwrap();
+        assert!(find_skill_dir(&checkout, Some("find-skills")).is_ok());
+        assert_eq!(
+            Repository::open(&sparse)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id(),
+            commit
+        );
+        assert_eq!(
+            fs::read_to_string(cached.join(".git/keep")).unwrap(),
+            "valid full cache"
+        );
+        cleanup_temp(&checkout);
         central_repo::set_test_base_dir_override(None);
     }
 
