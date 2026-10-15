@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.19] - 2026-10-15
+
+### Release Overview
 - Install website skills from the market, skills.sh/site links and skill-expert-cli with a shared source identity, bounded HTTPS downloads, verified archives and confirmed snapshot replacement.
 
 ### User-facing
