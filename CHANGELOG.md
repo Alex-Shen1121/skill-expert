@@ -15,7 +15,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
--
+- Restore blocking reads with a bounded timeout on accepted HTTP test connections so Windows socket inheritance cannot abort website-skill release regression tests.
 
 ## [1.0.20] - 2026-10-15
 

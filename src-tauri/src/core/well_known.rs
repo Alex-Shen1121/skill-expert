@@ -1221,6 +1221,8 @@ mod tests {
                         Err(error) => panic!("{error}"),
                     }
                 };
+                // Windows 接受的连接会继承 listener 的非阻塞模式。
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                     .unwrap();
