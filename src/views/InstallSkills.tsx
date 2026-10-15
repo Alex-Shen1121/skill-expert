@@ -3,6 +3,7 @@ import {
   DownloadCloud,
   UploadCloud,
   Github,
+  Globe,
   Box,
   Star,
   TrendingUp,
@@ -35,6 +36,8 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { StatusBanner } from "../components/StatusBanner";
 import { getErrorMessage, getErrorKind } from "../lib/error";
+
+import { websiteSourceRef, marketSourceRef, isWebsiteMarketSource } from "../lib/website-source";
 
 const MARKET_PAGE_SIZE = 24;
 const MARKET_SEARCH_STEP = 60;
@@ -136,17 +139,19 @@ export function InstallSkills() {
   const installedSourceRefs = useMemo(() => {
     const set = new Set<string>();
     for (const skill of managedSkills) {
-      if (skill.source_type === "skillssh" && skill.source_ref) {
-        set.add(skill.source_ref);
+      if (skill.source_ref && ["skillssh", "well-known"].includes(skill.source_type)) {
+        set.add(websiteSourceRef(skill.source_ref) ?? skill.source_ref);
       }
     }
     return set;
   }, [managedSkills]);
 
   const findInstalledByGitUrl = useCallback((url: string) => {
+    const website = websiteSourceRef(url);
+    if (website) return managedSkills.find((skill) => skill.source_type === "well-known" && skill.source_ref === website);
     const trimmed = url.trim().replace(/\.git$/, "").toLowerCase();
     return managedSkills.find((s) => {
-      if (!s.source_ref) return false;
+      if (!s.source_ref || s.source_type === "well-known") return false;
       const ref = s.source_ref.replace(/\.git$/, "").toLowerCase();
       return ref === trimmed || ref.endsWith("/" + trimmed.split("/").slice(-2).join("/"));
     });
@@ -416,7 +421,8 @@ export function InstallSkills() {
     const cancelKey = `${skill.source}/${skill.skill_id}`;
     setInstalling(skill.id);
 
-    const toastId = toast.loading(t("install.toast.cloning"));
+    const fetchingMessage = t(isWebsiteMarketSource(skill.source) ? "install.toast.downloading" : "install.toast.cloning");
+    const toastId = toast.loading(fetchingMessage);
     let unlisten: (() => void) | null = null;
 
     try {
@@ -427,8 +433,8 @@ export function InstallSkills() {
           if (event.payload.phase === "cloning") {
             const detail = event.payload.detail?.trim();
             const msg = detail
-              ? `${t("install.toast.cloning")}\n${detail}`
-              : t("install.toast.cloning");
+              ? `${fetchingMessage}\n${detail}`
+              : fetchingMessage;
             toast.loading(msg, { id: toastId });
           } else if (event.payload.phase === "installing") {
             toast.loading(t("install.toast.installing", { name: displayName }), { id: toastId });
@@ -436,12 +442,12 @@ export function InstallSkills() {
         }
       );
       await api.installFromSkillssh(skill.source, skill.skill_id);
-      await Promise.all([refreshPresets(), refreshManagedSkills()]);
+      warnRejected(await Promise.allSettled([refreshPresets(), refreshManagedSkills()]), "post-install refresh");
       toast.success(t("install.toast.success", { name: displayName }), {
         id: toastId,
         action: {
           label: t("install.toast.view"),
-          onClick: () => goToSkill(displayName),
+          onClick: () => goToSkill(marketSourceRef(skill.source, skill.skill_id)),
         },
       });
     } catch (error: unknown) {
@@ -468,7 +474,8 @@ export function InstallSkills() {
     const url = gitUrl.trim();
     setGitCancelKey(url);
 
-    const toastId = toast.loading(t("install.toast.cloning"));
+    const fetchingMessage = t(websiteSourceRef(url) ? "install.toast.downloading" : "install.toast.cloning");
+    const toastId = toast.loading(fetchingMessage);
     let unlisten: (() => void) | null = null;
 
     try {
@@ -479,8 +486,8 @@ export function InstallSkills() {
           if (event.payload.phase === "cloning") {
             const detail = event.payload.detail?.trim();
             const msg = detail
-              ? `${t("install.toast.cloning")}\n${detail}`
-              : t("install.toast.cloning");
+              ? `${fetchingMessage}\n${detail}`
+              : fetchingMessage;
             toast.loading(msg, { id: toastId });
           }
         }
@@ -529,16 +536,23 @@ export function InstallSkills() {
       await api.confirmGitInstall(
         repoUrl,
         gitPreview.temp_dir,
-        selected.map((s) => ({ rel_path: s.rel_path, name: s.name }))
+        selected.map((s) => ({ rel_path: s.rel_path, name: s.name })),
+        !!websiteSourceRef(repoUrl) && !!findInstalledByGitUrl(repoUrl)
       );
-      await Promise.all([refreshPresets(), refreshManagedSkills()]);
+      warnRejected(await Promise.allSettled([refreshPresets(), refreshManagedSkills()]), "post-install refresh");
       toast.success(t("install.toast.success", { name: selected.map((s) => s.name).join(", ") }));
       setGitUrl("");
       setGitPreview(null);
       setGitPreviewRepoUrl(null);
       setGitSelections([]);
     } catch (error: unknown) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      if (getErrorKind(error) === "cancelled") toast.info(t("install.toast.cancelled"));
+      else toast.error(getErrorMessage(error, t("common.error")));
+      if (websiteSourceRef(repoUrl)) {
+        setGitPreview(null);
+        setGitPreviewRepoUrl(null);
+        setGitSelections([]);
+      }
     } finally {
       setGitConfirmLoading(false);
     }
@@ -1018,7 +1032,7 @@ export function InstallSkills() {
                       const showSkillId = skill.skill_id.trim() !== displayName.trim();
                       const owner = skill.source.split("/")[0];
                       const avatarUrl = `https://github.com/${owner}.png?size=32`;
-                      const sourceRef = `${skill.source}/${skill.skill_id}`;
+                      const sourceRef = marketSourceRef(skill.source, skill.skill_id);
                       const isInstalled = installedSourceRefs.has(sourceRef);
 
                       return (
@@ -1028,12 +1042,12 @@ export function InstallSkills() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <img
+                            {isWebsiteMarketSource(skill.source) ? <Globe className="h-7 w-7 shrink-0 text-muted" aria-label={t("mySkills.sourceFilter.well-known")} /> : <img
                               src={avatarUrl}
                               alt={owner}
                               className="h-6 w-6 shrink-0 rounded-full border border-border-subtle"
                               loading="lazy"
-                            />
+                            />}
                             <div className="min-w-0">
                               <h3 className="truncate text-[13px] font-semibold text-secondary">
                                 {displayName}
@@ -1046,7 +1060,7 @@ export function InstallSkills() {
 
                           <div className="flex shrink-0 items-center gap-1">
                             <button
-                              onClick={() => openUrl(`https://skills.sh/${skill.source}/${skill.skill_id}`)}
+                              onClick={() => openUrl(websiteSourceRef(sourceRef) ?? `https://skills.sh/${sourceRef}`)}
                               className="rounded-[5px] p-1 text-muted transition-colors hover:bg-surface-hover hover:text-secondary"
                               title={t("install.viewOnWeb")}
                             >
@@ -1099,6 +1113,7 @@ export function InstallSkills() {
                           >
                             @{skill.source}
                           </button>
+                          {isWebsiteMarketSource(skill.source) && <span className="text-[12px] text-muted" title={t("install.websiteSnapshot")}>{t("mySkills.sourceFilter.well-known")}</span>}
                           {marketTab === "alltime" && skill.installs > 0 && (
                             <span className="inline-flex items-center gap-1 rounded-[5px] border border-border-subtle bg-background px-1.5 py-0.5 text-[13px] leading-4 text-muted">
                               <DownloadCloud className="h-3 w-3" />
@@ -1453,6 +1468,7 @@ export function InstallSkills() {
             </div>
             <h2 className="mb-1 text-[14px] font-semibold text-primary">{t("install.gitTitle")}</h2>
             <p className="mb-4 text-[13px] text-muted">{t("install.gitDesc")}</p>
+            {websiteSourceRef(gitUrl) && <p className="mb-4 text-[13px] text-muted">{t("install.websiteSnapshot")}</p>}
 
             <div className="space-y-3">
               <div>
@@ -1529,6 +1545,11 @@ export function InstallSkills() {
               </button>
             </div>
             <p className="mb-3 text-[13px] text-muted">{t("install.gitPreview.description")}</p>
+            {websiteSourceRef(gitPreviewRepoUrl ?? "") && (
+              <p className="mb-3 text-[13px] text-muted">
+                {findInstalledByGitUrl(gitPreviewRepoUrl ?? "") ? t("install.websiteReplace") : t("install.websiteSnapshot")}
+              </p>
+            )}
 
             {/* Select all / deselect all */}
             <div className="mb-2 flex gap-2">
@@ -1601,8 +1622,7 @@ export function InstallSkills() {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={handleGitPreviewClose}
-                disabled={gitConfirmLoading}
+                onClick={() => gitConfirmLoading && gitPreviewRepoUrl ? handleCancelInstall(gitPreviewRepoUrl) : handleGitPreviewClose()}
                 className="px-3 py-1.5 text-[13px] font-medium text-muted hover:text-secondary transition-colors"
               >
                 {t("common.cancel")}

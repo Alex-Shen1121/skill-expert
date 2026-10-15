@@ -23,6 +23,7 @@ use crate::core::{
     skill_store::{SkillRecord, SkillStore, SkillTargetRecord},
     sync_engine, sync_metadata,
     timing::should_log_first_or_slow,
+    well_known,
 };
 
 #[derive(Debug, Serialize)]
@@ -682,6 +683,23 @@ pub async fn install_git(
                 .ok();
         };
 
+        if well_known::is_site_ref(&repo_url) {
+            emit_progress("cloning");
+            let outcome = super::website::download_and_install(
+                &store,
+                &repo_url,
+                name.as_deref(),
+                false,
+                None,
+                &cancel,
+            )
+            .map(|record| (record.id, record.name));
+            log_install_outcome(&store, "well-known", outcome.as_ref());
+            outcome?;
+            emit_progress("done");
+            return Ok(());
+        }
+
         let outcome = (|| -> Result<(String, String), AppError> {
             git_fetcher::validate_git_url(&repo_url).map_err(AppError::git)?;
             emit_progress("cloning");
@@ -775,6 +793,25 @@ pub async fn install_from_skillssh(
                 )
                 .ok();
         };
+
+        let install_ref = well_known::market_install_ref(&source, &skill_id)
+            .map_err(|error| AppError::invalid_input(error.to_string()))?;
+        if well_known::is_site_ref(&install_ref) {
+            emit_progress("cloning");
+            let outcome = super::website::download_and_install(
+                &store,
+                &install_ref,
+                None,
+                false,
+                None,
+                &cancel,
+            )
+            .map(|record| (record.id, record.name));
+            log_install_outcome(&store, "well-known", outcome.as_ref());
+            outcome?;
+            emit_progress("done");
+            return Ok(());
+        }
 
         let outcome = (|| -> Result<(String, String), AppError> {
             emit_progress("cloning");
@@ -873,6 +910,32 @@ pub async fn preview_git_install(
             )
             .ok();
 
+        if well_known::is_site_ref(&repo_url) {
+            let site = well_known::parse_site_ref(&repo_url)
+                .map_err(|error| AppError::invalid_input(error.to_string()))?;
+            super::website::check_cancel(&cancel)?;
+            let downloaded = super::website::download(&store, &repo_url, &cancel)?;
+            let result = (|| {
+                super::website::check_cancel(&cancel)?;
+                let existing = store
+                    .get_skill_by_source_ref("well-known", &site.canonical_url())
+                    .map_err(AppError::db)?;
+                Ok(GitPreviewResult {
+                    temp_dir: downloaded.temp_dir.to_string_lossy().into_owned(),
+                    skills: vec![GitSkillPreview {
+                        rel_path: "skill".into(),
+                        name: existing.map_or(site.skill_name, |skill| skill.name),
+                        description: skill_metadata::parse_skill_md(&downloaded.skill_dir)
+                            .description,
+                    }],
+                })
+            })();
+            if result.is_err() {
+                well_known::cleanup_temp(&downloaded.temp_dir);
+            }
+            return result;
+        }
+
         let parsed = git_fetcher::parse_git_source_resolved(&repo_url, proxy_url.as_deref());
         let app_for_progress = app_handle.clone();
         let url_for_progress = repo_url.clone();
@@ -942,16 +1005,46 @@ pub async fn confirm_git_install(
     repo_url: String,
     temp_dir: String,
     items: Vec<SkillInstallItem>,
+    replace: Option<bool>,
+    cancel_registry: State<'_, Arc<InstallCancelRegistry>>,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     let proxy_url = store.proxy_url();
+    let registry = cancel_registry.inner().clone();
+    let cancel = registry.register(&repo_url);
+    let _cancel_guard = CancelRegistrationGuard::new(registry, repo_url.clone());
     tauri::async_runtime::spawn_blocking(move || {
         let temp_path = validate_clone_temp_path(&temp_dir)?;
 
         let result: Result<(), AppError> = (|| {
             if items.is_empty() {
                 return Ok(());
+            }
+
+            if well_known::is_site_ref(&repo_url) {
+                if items.len() != 1 || items[0].rel_path != "skill" {
+                    return Err(AppError::invalid_input("Invalid website skill selection"));
+                }
+                let downloaded = super::website::read_preview(&repo_url, &temp_path)?;
+                super::website::install_snapshot(
+                    &store,
+                    &repo_url,
+                    &downloaded,
+                    Some(&items[0].name),
+                    replace.unwrap_or(false),
+                    None,
+                    &cancel,
+                )?;
+                return Ok(());
+            }
+            if temp_path.file_name().is_some_and(|name| {
+                name.to_string_lossy()
+                    .starts_with(well_known::TEMP_DIR_PREFIX)
+            }) {
+                return Err(AppError::invalid_input(
+                    "Website preview requires its original source",
+                ));
             }
 
             let parsed = git_fetcher::parse_git_source_resolved(&repo_url, proxy_url.as_deref());
@@ -2551,6 +2644,7 @@ pub fn check_skill_update_internal_with_remote(
                     .map_err(AppError::db)?;
             }
         }
+        "well-known" => {}
         _ => {
             store
                 .update_skill_check_state(&skill.id, None, "unknown", None)
@@ -2589,6 +2683,11 @@ pub(crate) fn should_skip_update_check(
 }
 
 pub fn git_source_from_skill(skill: &SkillRecord) -> Result<GitSkillSource, AppError> {
+    if !matches!(skill.source_type.as_str(), "git" | "skillssh") {
+        return Err(AppError::invalid_input(
+            "This source is not a Git repository",
+        ));
+    }
     if let Some(resolved) = &skill.source_ref_resolved {
         return Ok(GitSkillSource {
             clone_url: resolved.clone(),
@@ -2695,7 +2794,10 @@ pub fn validate_clone_temp_path(temp_dir: &str) -> Result<PathBuf, AppError> {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        if dir_name_str.starts_with(git_fetcher::CLONE_TEMP_PREFIX) {
+        if temp_path.parent() == Some(expected_prefix.as_path())
+            && (dir_name_str.starts_with(git_fetcher::CLONE_TEMP_PREFIX)
+                || dir_name_str.starts_with(well_known::TEMP_DIR_PREFIX))
+        {
             return Ok(temp_path);
         }
     }

@@ -12,7 +12,7 @@ use super::repo_lock::RepoLock;
 use super::skill_metadata;
 use super::skill_store::{ScenarioRecord, SkillRecord, SkillStore};
 
-const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 1;
 const APP_MIN_VERSION: &str = "2.0.0";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -396,7 +396,7 @@ fn remove_stale_json_files(dir: &Path, expected_stems: &HashSet<String>) -> Resu
     Ok(())
 }
 
-fn write_skill_file(skill: &SkillRecord, tags: &[String]) -> Result<()> {
+pub(crate) fn write_skill_file(skill: &SkillRecord, tags: &[String]) -> Result<()> {
     let path = relative_skill_path(&skill.central_path)?;
     let tags = sorted_tags(tags);
     let source_ref = match skill.source_type.as_str() {
@@ -442,7 +442,7 @@ fn write_scenario_file(scenario: &ScenarioRecord) -> Result<()> {
     )
 }
 
-fn write_membership_file(member: &ScenarioSkillMetaFile) -> Result<()> {
+pub(crate) fn write_membership_file(member: &ScenarioSkillMetaFile) -> Result<()> {
     atomic_write_json(
         &metadata_dir()
             .join("scenario-skills")

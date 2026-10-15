@@ -9,7 +9,7 @@ Agent 技能管家的所有显著变更都将记录在此文件中。
 ## [Unreleased]
 
 ### 发布概览
--
+- 支持从市场、skills.sh/site 链接及 skill-expert-cli 安装网站技能，统一来源身份，校验 HTTPS 下载与归档，并在确认后替换快照。
 
 ### 用户可见更新
 -

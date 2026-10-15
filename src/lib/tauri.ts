@@ -317,8 +317,8 @@ export interface SkillInstallItem {
 export const previewGitInstall = (repoUrl: string) =>
   invoke<GitPreviewResult>("preview_git_install", { repoUrl });
 
-export const confirmGitInstall = (repoUrl: string, tempDir: string, items: SkillInstallItem[]) =>
-  invoke<void>("confirm_git_install", { repoUrl, tempDir, items });
+export const confirmGitInstall = (repoUrl: string, tempDir: string, items: SkillInstallItem[], replace = false) =>
+  invoke<void>("confirm_git_install", { repoUrl, tempDir, items, replace });
 
 export const cancelGitPreview = (tempDir: string) =>
   invoke<void>("cancel_git_preview", { tempDir });

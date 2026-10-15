@@ -123,6 +123,8 @@ npm run cli:install
 
 当 `--skills-root` 指向外部检出目录时，CLI 的数据库和缓存等状态保存在 `~/.skill-expert/external/` 下，外部检出目录本身不会被污染。
 
+网站技能：`skill-expert-cli skills install https://skills.sh/site/open.feishu.cn/lark-im`。网站技能是快照，不参与 Git 更新检查或来源差异比较；重装时使用 `--replace` 确认替换旧快照和本地修改。桌面端在「从 Git 或网站安装」粘贴同一链接，经预览确认后安装。
+
 更新会替换整个 Skill 目录。如果上游删除了本地仍存在的路径，CLI 不会应用更新，而是报告 `held_back_removals`；这类内容损失必须由人在桌面应用中确认。
 
 CLI 与桌面应用共用同一个仓库锁。如果运行命令时应用处于休眠状态，手动刷新一次即可。

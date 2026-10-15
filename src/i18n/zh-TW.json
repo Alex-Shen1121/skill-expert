@@ -610,7 +610,8 @@
       "local": "本機",
       "import": "匯入",
       "git": "Git",
-      "skillssh": "skills.sh"
+      "skillssh": "skills.sh",
+      "well-known": "網站快照"
     },
     "tags": {
       "filter": "標籤",
@@ -663,7 +664,7 @@
     "title": "安裝 Skills",
     "browseMarket": "瀏覽排行榜",
     "localInstall": "本機安裝",
-    "gitInstall": "Git 安裝",
+    "gitInstall": "Git / 網站安裝",
     "hot": "熱門",
     "trending": "趨勢",
     "all": "全部",
@@ -704,7 +705,8 @@
       "done": "完成",
       "cancelled": "安裝已取消",
       "timeout": "安裝逾時 — 請檢查網路連線",
-      "view": "檢視"
+      "view": "檢視",
+      "downloading": "正在下載網站快照..."
     },
     "local": {
       "title": "匯入本機 Skill 來源",
@@ -719,17 +721,17 @@
       "batchErrors": "{{count}} 個 Skill 匯入失敗"
     },
     "selectLocal": "選擇本機檔案...",
-    "gitTitle": "從 Git 倉庫安裝",
-    "gitDesc": "輸入公開或私有 Git 倉庫位址。私有倉庫請確保本機已設定對應的 SSH 金鑰。",
-    "repoUrl": "倉庫位址",
+    "gitTitle": "從 Git 或網站安裝",
+    "gitDesc": "支援 Git 儲存庫連結和 https://skills.sh/site/<網域>/<技能> 網站技能連結。",
+    "repoUrl": "來源連結",
     "repoUrlPlaceholder": "https://github.com/user/repo.git 或 git@github.com...",
     "customName": "自訂名稱",
     "customNameOptional": "選填",
     "customNamePlaceholder": "留空則使用倉庫名稱",
     "gitAlreadyInstalled": "「{{name}}」已安裝，重新安裝將會更新。",
     "onlyThisContributor": "僅看該貢獻者",
-    "gitReinstall": "重新安裝並更新",
-    "installClone": "安裝並複製",
+    "gitReinstall": "重新安裝",
+    "installClone": "取得並預覽",
     "scan": {
       "title": "掃描本機 Skills 並匯入",
       "initial": "掃描當前電腦上各 Agent 已安裝的 Skills。",
@@ -752,6 +754,17 @@
         "pending": "待匯入",
         "imported": "已匯入"
       }
+    },
+    "websiteSnapshot": "這是網站發佈的技能快照，不參與 Git 更新檢查或來源差異比較。再次安裝可取得新快照。",
+    "websiteReplace": "確認後將以此次下載的快照替換已安裝版本及其中的本機修改。",
+    "gitPreview": {
+      "title": "選擇要匯入的技能",
+      "description": "從來源中發現了以下技能，可自訂名稱後匯入。",
+      "selectAll": "全選",
+      "deselectAll": "取消全選",
+      "namePlaceholder": "技能名稱",
+      "confirm": "匯入選中項",
+      "empty": "未發現可匯入的技能"
     }
   },
   "settings": {

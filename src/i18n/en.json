@@ -640,7 +640,8 @@
       "local": "Local",
       "import": "Imported",
       "git": "Git",
-      "skillssh": "skills.sh"
+      "skillssh": "skills.sh",
+      "well-known": "Website snapshot"
     },
     "tags": {
       "filter": "Tags",
@@ -706,7 +707,7 @@
     "title": "Install Skills",
     "browseMarket": "Leaderboard",
     "localInstall": "Local Install",
-    "gitInstall": "Git Install",
+    "gitInstall": "Git / Website",
     "hot": "Hot",
     "trending": "Trending",
     "all": "All Time",
@@ -747,7 +748,8 @@
       "done": "Done",
       "cancelled": "Installation cancelled",
       "timeout": "Installation timed out — check your network",
-      "view": "View"
+      "view": "View",
+      "downloading": "Downloading website snapshot..."
     },
     "local": {
       "title": "Import a local skill source",
@@ -762,16 +764,16 @@
       "batchErrors": "{{count}} skill(s) failed to import"
     },
     "selectLocal": "Select local file...",
-    "gitTitle": "Install from Git Repository",
-    "gitDesc": "Enter a public or private Git repository URL. For private repos, ensure SSH keys are configured.",
-    "repoUrl": "Repository URL",
+    "gitTitle": "Install from Git or a website",
+    "gitDesc": "Paste a Git repository URL or a website skill link: https://skills.sh/site/<domain>/<skill>.",
+    "repoUrl": "Source URL",
     "repoUrlPlaceholder": "https://github.com/user/repo.git or git@github.com...",
     "gitAlreadyInstalled": "\"{{name}}\" is already installed. Reinstalling will update it.",
     "onlyThisContributor": "Only this contributor",
-    "installClone": "Clone & Preview",
+    "installClone": "Fetch & Preview",
     "gitPreview": {
       "title": "Select Skills to Import",
-      "description": "The following skills were found in the repository. Rename them if needed, then confirm.",
+      "description": "The following skills were found at this source. Customize names before importing.",
       "selectAll": "Select All",
       "deselectAll": "Deselect All",
       "namePlaceholder": "Skill name",
@@ -800,7 +802,10 @@
         "pending": "Pending",
         "imported": "Imported"
       }
-    }
+    },
+    "websiteSnapshot": "This is a website snapshot. Git update checks and source comparisons are unavailable. Reinstall to download a fresh snapshot.",
+    "websiteReplace": "Confirming replaces the installed snapshot and its local changes with this download.",
+    "gitReinstall": "Reinstall"
   },
   "settings": {
     "title": "Settings",
