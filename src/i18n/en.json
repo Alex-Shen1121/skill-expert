@@ -1557,6 +1557,7 @@
     "sharedRoot": "This project root is shared or its users are unknown. Destructive operations are blocked; files and state are preserved.",
     "projectImpact": "Workspace: {{workspace}}\nPhysical target: {{path}}\nKnown Agents: {{agents}}\nOther external users may exist.",
     "refresh": "Refresh",
-    "removalScope": "Global target removal; preservation reasons are listed per target. Project directories are unaffected."
+    "removalScope": "Global target removal; preservation reasons are listed per target. Project directories are unaffected.",
+    "resetDuo": "Restore default target {{path}}? This may trigger global reconciliation. Windows or custom configuration roots may still need a manual override."
   }
 }

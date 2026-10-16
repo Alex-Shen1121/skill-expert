@@ -1557,6 +1557,7 @@
     "sharedRoot": "此项目根共享或影响未知，无法执行破坏性操作。文件与状态已保留。",
     "projectImpact": "工作区：{{workspace}}\n物理目标：{{path}}\n已知 Agent：{{agents}}\n可能还有其他外部使用者。",
     "refresh": "刷新",
-    "removalScope": "本次全局目标撤销；保留原因逐项列出，项目目录不受影响"
+    "removalScope": "本次全局目标撤销；保留原因逐项列出，项目目录不受影响",
+    "resetDuo": "恢复默认目标 {{path}}？这可能触发全局协调；Windows 或自定义配置根仍可能需要手动覆盖。"
   }
 }

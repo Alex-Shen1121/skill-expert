@@ -365,8 +365,9 @@ it("keeps registration receipt when refresh fails and never registers again on r
   await user.click(screen.getByRole("button", { name: "新增 Agent" }));
   await user.type(screen.getByRole("textbox", { name: "Agent 名称" }), "Demo");
   await user.type(screen.getByRole("textbox", { name: "Skills 路径" }), "/tmp/demo");
-  await user.click(screen.getByRole("button", { name: "添加" }));
+  await user.keyboard("{Enter}");
   await screen.findByText(/Agent 已注册/);
+  expect(document.activeElement).toBe(screen.getByRole("region", { name: "Agent 操作回执" }));
   expect(screen.getByText(/列表刷新失败/)).toBeTruthy();
   refreshToolsMock.mockResolvedValue(true);
   await user.click(screen.getAllByRole("button", { name: "刷新" })[0]);
@@ -387,4 +388,14 @@ it("pins the key after an unknown save and does not retry when the original requ
   expect(apiMocks.queryCustomTool).toHaveBeenCalledWith({ key: "demo", display_name: "Demo", skills_dir: "/tmp/demo", project_relative_skills_dir: null });
   expect(screen.getByRole<HTMLButtonElement>("button", { name: "添加" }).disabled).toBe(true);
   expect(apiMocks.addCustomTool).toHaveBeenCalledTimes(1);
+});
+
+it("focuses the custom name on opening and returns to its trigger on Escape", async () => {
+  const user = userEvent.setup(); renderSettings("/settings?tab=agents");
+  const trigger = screen.getByRole("button", { name: "新增 Agent" });
+  await user.click(trigger);
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Agent 名称" }));
+  await user.keyboard("{Escape}");
+  expect(document.activeElement).toBe(trigger);
+  expect(apiMocks.addCustomTool).not.toHaveBeenCalled();
 });

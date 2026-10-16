@@ -1,3 +1,5 @@
+import type { DeploymentReport } from "./tauri";
+
 /** Error kinds matching the Rust `AppError` enum. */
 export const ERROR_KINDS = [
   "database",
@@ -9,6 +11,8 @@ export const ERROR_KINDS = [
   "cancelled",
   "internal",
   "target_conflict",
+  "deployment_incomplete",
+  "commit_unknown",
   "stale_snapshot",
   "unknown_presence",
 ] as const;
@@ -23,6 +27,8 @@ export interface TargetConflictDetail {
 
 export interface TargetConflictDetails {
   conflicts: TargetConflictDetail[];
+  deployment?: DeploymentReport;
+  configuration?: { setting: string; code: string };
 }
 
 /** Structured error returned by Tauri commands. */

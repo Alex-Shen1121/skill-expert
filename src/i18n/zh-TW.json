@@ -1481,6 +1481,7 @@
     "sharedRoot": "此專案根目錄共用或影響未知，無法執行破壞性操作。檔案與狀態已保留。",
     "projectImpact": "工作區：{{workspace}}\n實體目標：{{path}}\n已知 Agent：{{agents}}\n可能還有其他外部使用者。",
     "refresh": "重新整理",
-    "removalScope": "本次全域目標撤銷；保留原因逐項列出，專案目錄不受影響"
+    "removalScope": "本次全域目標撤銷；保留原因逐項列出，專案目錄不受影響",
+    "resetDuo": "還原預設目標 {{path}}？這可能觸發全域協調；Windows 或自訂設定根目錄仍可能需要手動覆寫。"
   }
 }
