@@ -89,7 +89,7 @@ SKILL_EXPERT_ACCEPTANCE_ROOT="$ACCEPTANCE_RUN/runtime"   "src-tauri/target/debug
 | --- | --- |
 | DB / 中央库 / 应用缓存 / 审计 | `<runtime>/state` 内的 `skill-expert.db`、`skills/`、`cache/`、`logs/`，具体以 `repo status` 为准；初始化也会产生 schema/secret key/元数据等，不承诺零写入 |
 | 内置 Agent / 控制配置 / 导入锁 | `<runtime>/home` 下的厂商默认路径、`.config/skill-expert`；自定义绝对路径/项目路径必须另行限定到本轮 fixture |
-| CLI 桥接 | `<runtime>/home/.skill-expert`，不会写用户真实桥接；所记录可执行文件仍在本轮构建树 |
+| CLI 桥接 | `<runtime>/home/.skill-expert/bin/skill-expert-cli` 与 `.version`，从本轮 app 内 CLI 复制并验证；不会写用户真实桥接 |
 | 库锁 | `<runtime>/state/.skill-expert.lock`；SQLite WAL/SHM 随 DB |
 | GUI 运行/应用 panic 日志 | macOS `~/Library/Logs/<本轮 bundle ID>/`；panic hook 的 `last_panic.log` 同目录，仅实际安装 hook 后适用 |
 | WebKit | 本机实际为 `~/Library/WebKit/<本轮 bundle ID>/WebsiteDataStore/13325170-8fae-cdec-0c2b-4a6988a7c6e5/`；固定 UUID 在独立 bundle namespace 下。macOS 不用 dataDirectory 重定向该存储 |

@@ -44,6 +44,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       PROMOTABLE: "false"
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:

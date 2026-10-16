@@ -30,7 +30,7 @@ def command(arguments, expected=0):
     return payload
 
 status = command(['--json', 'repo', 'status'])
-assert Path(status['base_dir']).resolve() == (root / 'state').resolve(), 'Requires the current debug build with acceptance isolation'
+assert Path(status['base_dir']).samefile(root / 'state'), 'Requires the current debug build with acceptance isolation'
 # Rust canonicalize uses the Windows extended path prefix; keep that native spelling.
 root = Path(status['base_dir']).parent
 db = Path(status['db_path'])
