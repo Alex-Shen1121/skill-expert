@@ -1025,6 +1025,7 @@
     "action": "操作",
     "addMissing": "添加缺失 Skills",
     "removeMatching": "移除匹配 Skills",
+    "removePreset": "从当前工作区移除 {{name}}",
     "agents": "Agents",
     "selectAgents": "请至少选择一个 Agent",
     "noPresets": "没有可用 Preset",
