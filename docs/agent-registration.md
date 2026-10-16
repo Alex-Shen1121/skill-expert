@@ -79,6 +79,8 @@ config['app']['windows'][0]['dataDirectory'] = str(root / 'webview')
 (root / 'app-name').write_text(config['productName'])
 PYCONFIG
 npm run tauri:build -- --debug --bundles app --config "$ACCEPTANCE_RUN/tauri.json"
+codesign --force --deep --sign - "src-tauri/target/debug/bundle/macos/$(cat "$ACCEPTANCE_RUN/app-name").app"
+codesign --verify --deep --strict "src-tauri/target/debug/bundle/macos/$(cat "$ACCEPTANCE_RUN/app-name").app"
 # 保留配置、源码 SHA 和二进制哈希；确认本轮 GUI 可交互后启动。
 SKILL_EXPERT_ACCEPTANCE_ROOT="$ACCEPTANCE_RUN/runtime"   "src-tauri/target/debug/bundle/macos/$(cat "$ACCEPTANCE_RUN/app-name").app/Contents/MacOS/skill-expert"
 ```
