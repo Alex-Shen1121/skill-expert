@@ -10,8 +10,11 @@ import type { ToolInfo } from "../lib/tauri";
 
 const appTools = vi.hoisted(() => ({ current: [] as ToolInfo[] }));
 
+const refreshToolsMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const settingsStore = vi.hoisted(() => new Map<string, string>());
 const apiMocks = vi.hoisted(() => ({
+  getToolStatus: vi.fn(async () => appTools.current),
+  queryCustomTool: vi.fn(),
   getSettings: vi.fn(async (key: string) => settingsStore.get(key) ?? null),
   setSettings: vi.fn(async (key: string, value: string) => {
     settingsStore.set(key, value);
@@ -63,7 +66,7 @@ vi.mock("../context/AppContext", () => ({
   useApp: () => ({
     tools: appTools.current,
     managedSkills: [],
-    refreshTools: vi.fn().mockResolvedValue(undefined),
+    refreshTools: refreshToolsMock,
     refreshManagedSkills: vi.fn().mockResolvedValue(undefined),
     openSkillDetailById: vi.fn(),
     openHelp: vi.fn(),
@@ -110,6 +113,7 @@ beforeEach(async () => {
   settingsStore.clear();
   appTools.current = [];
   vi.clearAllMocks();
+  refreshToolsMock.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -315,7 +319,7 @@ it("Agent 同步开关立即提交，目录展开后沿用原编辑保存", asyn
   expect(screen.getByRole("tab", { name: "同步技能到 Agent" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.queryByRole("heading", { name: "Agent 管理 Skills" })).toBeNull();
   await user.click(screen.getByRole("switch", { name: "禁用此 Agent" }));
-  expect(apiMocks.setToolEnabled).toHaveBeenCalledWith("codex", false);
+  expect(apiMocks.setToolEnabled).toHaveBeenCalledWith("codex", false, undefined);
   await user.click(screen.getByLabelText("Codex 的目录设置"));
   expect(screen.getByText("/agents/codex/skills")).toBeTruthy();
   await user.click(screen.getAllByRole("button", { name: "编辑路径" })[0]);
@@ -348,4 +352,39 @@ it("管理选择跨用途与主分类切换保留，放弃后不提交任何部�
   await user.click(screen.getByRole("button", { name: "放弃更改" }));
   expect((screen.getByRole("button", { name: "应用更改" }) as HTMLButtonElement).disabled).toBe(true);
   expect(apiMocks.setSettings).not.toHaveBeenCalled();
+});
+
+
+it("keeps registration receipt when refresh fails and never registers again on refresh", async () => {
+  const user = userEvent.setup();
+  const receipt = { registered: true, definition: { key: "demo", display_name: "Demo", skills_dir: "/tmp/demo", project_relative_skills_dir: null }, tool: null,
+    deployment: { scope: "global", state: "not_run", reason: "no_active_preset", total: 0, targets: [], issues: [] } };
+  apiMocks.addCustomTool.mockResolvedValueOnce(receipt);
+  refreshToolsMock.mockResolvedValue(false);
+  renderSettings("/settings?tab=agents");
+  await user.click(screen.getByRole("button", { name: "新增 Agent" }));
+  await user.type(screen.getByRole("textbox", { name: "Agent 名称" }), "Demo");
+  await user.type(screen.getByRole("textbox", { name: "Skills 路径" }), "/tmp/demo");
+  await user.click(screen.getByRole("button", { name: "添加" }));
+  await screen.findByText(/Agent 已注册/);
+  expect(screen.getByText(/列表刷新失败/)).toBeTruthy();
+  refreshToolsMock.mockResolvedValue(true);
+  await user.click(screen.getAllByRole("button", { name: "刷新" })[0]);
+  expect(apiMocks.addCustomTool).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/Agent 已注册/)).toBeTruthy();
+});
+
+it("pins the key after an unknown save and does not retry when the original request may still finish", async () => {
+  const user = userEvent.setup();
+  apiMocks.addCustomTool.mockRejectedValueOnce("IPC disconnected");
+  apiMocks.queryCustomTool.mockResolvedValueOnce({ state: "absent", tool: null });
+  renderSettings("/settings?tab=agents");
+  await user.click(screen.getByRole("button", { name: "新增 Agent" }));
+  await user.type(screen.getByRole("textbox", { name: "Agent 名称" }), "Demo");
+  await user.type(screen.getByRole("textbox", { name: "Skills 路径" }), "/tmp/demo");
+  await user.click(screen.getByRole("button", { name: "添加" }));
+  await user.click(await screen.findByRole("button", { name: "核对同一 Agent" }));
+  expect(apiMocks.queryCustomTool).toHaveBeenCalledWith({ key: "demo", display_name: "Demo", skills_dir: "/tmp/demo", project_relative_skills_dir: null });
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: "添加" }).disabled).toBe(true);
+  expect(apiMocks.addCustomTool).toHaveBeenCalledTimes(1);
 });

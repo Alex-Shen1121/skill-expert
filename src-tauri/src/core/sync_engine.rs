@@ -406,14 +406,17 @@ pub fn is_target_current(
         SyncMode::Symlink => symlink_points_to(target, source),
         SyncMode::Copy => match (last_synced_source_hash, current_source_hash) {
             (Some(stored), Some(current)) if stored == current => {
-                std::fs::symlink_metadata(target).is_ok()
+                std::fs::symlink_metadata(target)
+                    .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                    && crate::core::content_hash::hash_directory(target)
+                        .is_ok_and(|actual| actual == current)
             }
             _ => false,
         },
     }
 }
 
-fn symlink_points_to(target: &Path, source: &Path) -> bool {
+pub fn symlink_points_to(target: &Path, source: &Path) -> bool {
     let Ok(metadata) = std::fs::symlink_metadata(target) else {
         return false;
     };
@@ -1301,12 +1304,13 @@ mod tests {
         let src = tmp.path().join("source");
         let tgt = tmp.path().join("target");
         fs::create_dir_all(&tgt).unwrap();
+        let hash = crate::core::content_hash::hash_directory(&tgt).unwrap();
         assert!(is_target_current(
             &src,
             &tgt,
             SyncMode::Copy,
-            Some("hash-abc"),
-            Some("hash-abc"),
+            Some(&hash),
+            Some(&hash),
         ));
     }
 

@@ -117,6 +117,7 @@ export function ProjectAgentDots({
         ) : useIcon ? (
           <AgentIcon
             agentKey={dot.key}
+            isCustom={targets.find((target) => target.key === dot.key)?.is_custom}
             className="h-full w-full rounded-[4px] border-0 bg-transparent"
           />
         ) : (

@@ -1,3 +1,4 @@
+import { StartupGate } from "./components/StartupGate";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppProvider } from "./context/AppContext";
@@ -36,7 +37,7 @@ function ThemedToaster() {
 
 function App() {
   return (
-    <ThemeProvider>
+    <StartupGate><ThemeProvider>
       <AppProvider>
         <BrowserRouter>
           <ExistingInstallationImportGate>
@@ -62,7 +63,7 @@ function App() {
           </ExistingInstallationImportGate>
         </BrowserRouter>
       </AppProvider>
-    </ThemeProvider>
+    </ThemeProvider></StartupGate>
   );
 }
 

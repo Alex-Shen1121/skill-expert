@@ -41,6 +41,7 @@ docs/*
 !docs/formal-release.md
 !docs/updater-trust-root.md
 !docs/worktree-baseline.md
+!docs/agent-registration.md
 !docs/upstream-history/
 !docs/upstream-history/*.md
 !docs/agents/

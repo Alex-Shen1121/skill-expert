@@ -47,7 +47,7 @@ pub struct ToolAdapter {
 }
 
 /// Serializable custom tool definition stored in settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CustomToolDef {
     pub key: String,
     pub display_name: String,
@@ -60,18 +60,16 @@ pub struct CustomToolDef {
 
 impl ToolAdapter {
     fn home() -> PathBuf {
-        dirs::home_dir().expect("Cannot determine home directory")
+        crate::core::central_repo::runtime_home_dir()
     }
 
     fn candidate_paths(relative: &str) -> Vec<PathBuf> {
         let mut candidates = vec![Self::home().join(relative)];
 
         if let Some(suffix) = relative.strip_prefix(".config/") {
-            if let Some(config_dir) = dirs::config_dir() {
-                let config_path = config_dir.join(suffix);
-                if !candidates.contains(&config_path) {
-                    candidates.push(config_path);
-                }
+            let config_path = crate::core::central_repo::runtime_config_dir().join(suffix);
+            if !candidates.contains(&config_path) {
+                candidates.push(config_path);
             }
         }
 
@@ -146,6 +144,18 @@ impl ToolAdapter {
 
 pub fn default_tool_adapters() -> Vec<ToolAdapter> {
     vec![
+        ToolAdapter {
+            key: "gitlab_duo".into(),
+            display_name: "GitLab Duo".into(),
+            relative_skills_dir: ".gitlab/duo/skills".into(),
+            relative_detect_dir: ".gitlab/duo".into(),
+            additional_scan_dirs: vec![".agents/skills".into()],
+            override_skills_dir: None,
+            category: ToolCategory::Coding,
+            is_custom: false,
+            recursive_scan: false,
+            project_relative_skills_dir: Some(".agents/skills".into()),
+        },
         ToolAdapter {
             key: "cursor".into(),
             display_name: "Cursor".into(),
@@ -819,38 +829,23 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
     ]
 }
 
-/// Read custom tool path overrides from store.
-pub fn custom_tool_paths(store: &crate::core::skill_store::SkillStore) -> HashMap<String, String> {
-    store
-        .get_setting("custom_tool_paths")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default()
+/// Strict reads never turn damaged configuration into an empty Agent list.
+pub fn custom_tool_paths(
+    store: &crate::core::skill_store::SkillStore,
+) -> Result<HashMap<String, String>, crate::core::error::AppError> {
+    Ok(store.tool_config()?.paths)
 }
 
-/// Read per-tool project-relative skills path overrides for built-in adapters.
-/// Maps tool key -> project-relative path (e.g. `.cursor/skills`). Custom tools
-/// store their project path inside [`CustomToolDef`] instead.
 pub fn custom_tool_project_paths(
     store: &crate::core::skill_store::SkillStore,
-) -> HashMap<String, String> {
-    store
-        .get_setting("custom_tool_project_paths")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default()
+) -> Result<HashMap<String, String>, crate::core::error::AppError> {
+    Ok(store.tool_config()?.project_paths)
 }
 
-/// Read user-defined custom tools from store.
-pub fn custom_tools(store: &crate::core::skill_store::SkillStore) -> Vec<CustomToolDef> {
-    store
-        .get_setting("custom_tools")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default()
+pub fn custom_tools(
+    store: &crate::core::skill_store::SkillStore,
+) -> Result<Vec<CustomToolDef>, crate::core::error::AppError> {
+    Ok(store.tool_config()?.customs)
 }
 
 fn apply_builtin_path_overrides(
@@ -859,7 +854,10 @@ fn apply_builtin_path_overrides(
     project_overrides: &HashMap<String, String>,
 ) {
     if let Some(path) = overrides.get(&adapter.key) {
-        adapter.override_skills_dir = Some(path.clone());
+        adapter.override_skills_dir = Some(
+            crate::core::tool_service::normalize_skills_dir_input(path)
+                .unwrap_or_else(|_| path.clone()),
+        );
     }
 
     if let Some(project_path) = project_overrides.get(&adapter.key) {
@@ -874,7 +872,10 @@ fn custom_tool_adapter(ct: CustomToolDef) -> ToolAdapter {
         relative_skills_dir: ct.project_relative_skills_dir.unwrap_or_default(),
         relative_detect_dir: String::new(),
         additional_scan_dirs: vec![],
-        override_skills_dir: Some(ct.skills_dir),
+        override_skills_dir: Some(
+            crate::core::tool_service::normalize_skills_dir_input(&ct.skills_dir)
+                .unwrap_or(ct.skills_dir),
+        ),
         category: ct.category,
         is_custom: true,
         recursive_scan: false,
@@ -882,28 +883,30 @@ fn custom_tool_adapter(ct: CustomToolDef) -> ToolAdapter {
     }
 }
 
-/// Returns all tool adapters: built-in (with path overrides applied) + custom tools.
-pub fn all_tool_adapters(store: &crate::core::skill_store::SkillStore) -> Vec<ToolAdapter> {
-    let overrides = custom_tool_paths(store);
-    let project_overrides = custom_tool_project_paths(store);
-    let customs = custom_tools(store);
-
-    let mut adapters: Vec<ToolAdapter> = default_tool_adapters()
-        .into_iter()
-        .map(|mut adapter| {
-            apply_builtin_path_overrides(&mut adapter, &overrides, &project_overrides);
-            adapter
-        })
-        .collect();
-
-    for custom in customs {
-        if adapters.iter().any(|adapter| adapter.key == custom.key) {
-            continue;
+/// Resolve list and single-key requests from the same configuration snapshot.
+pub fn adapters_from_config(config: &crate::core::tool_config::ToolConfig) -> Vec<ToolAdapter> {
+    let mut adapters = default_tool_adapters();
+    for adapter in &mut adapters {
+        if adapter.key == "gitlab_duo" {
+            if let Some(custom) = config.customs.iter().find(|c| c.key == adapter.key) {
+                *adapter = custom_tool_adapter(custom.clone());
+                continue;
+            }
         }
-        adapters.push(custom_tool_adapter(custom));
+        apply_builtin_path_overrides(adapter, &config.paths, &config.project_paths);
     }
-
+    for custom in &config.customs {
+        if !adapters.iter().any(|adapter| adapter.key == custom.key) {
+            adapters.push(custom_tool_adapter(custom.clone()));
+        }
+    }
     adapters
+}
+
+pub fn all_tool_adapters(
+    store: &crate::core::skill_store::SkillStore,
+) -> Result<Vec<ToolAdapter>, crate::core::error::AppError> {
+    Ok(adapters_from_config(&store.tool_config()?))
 }
 
 #[allow(dead_code)]
@@ -911,40 +914,21 @@ pub fn find_adapter(key: &str) -> Option<ToolAdapter> {
     default_tool_adapters().into_iter().find(|a| a.key == key)
 }
 
-/// Find an adapter by key, considering custom tools and path overrides.
 pub fn find_adapter_with_store(
     store: &crate::core::skill_store::SkillStore,
     key: &str,
-) -> Option<ToolAdapter> {
-    let overrides = custom_tool_paths(store);
-    let project_overrides = custom_tool_project_paths(store);
-    let customs = custom_tools(store);
-
-    if let Some(mut adapter) = default_tool_adapters().into_iter().find(|a| a.key == key) {
-        apply_builtin_path_overrides(&mut adapter, &overrides, &project_overrides);
-        return Some(adapter);
-    }
-
-    customs
-        .into_iter()
-        .find(|ct| ct.key == key)
-        .map(custom_tool_adapter)
+) -> Result<Option<ToolAdapter>, crate::core::error::AppError> {
+    Ok(all_tool_adapters(store)?.into_iter().find(|a| a.key == key))
 }
 
-/// Returns adapters that are installed and not in the disabled list.
 pub fn enabled_installed_adapters(
     store: &crate::core::skill_store::SkillStore,
-) -> Vec<ToolAdapter> {
-    let disabled: Vec<String> = store
-        .get_setting("disabled_tools")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default();
-    all_tool_adapters(store)
+) -> Result<Vec<ToolAdapter>, crate::core::error::AppError> {
+    let config = store.tool_config()?;
+    Ok(adapters_from_config(&config)
         .into_iter()
-        .filter(|a| a.is_installed() && !disabled.contains(&a.key))
-        .collect()
+        .filter(|a| a.is_installed() && !config.disabled.contains(&a.key))
+        .collect())
 }
 
 #[cfg(test)]
@@ -1031,7 +1015,7 @@ mod tests {
             )
             .unwrap();
 
-        let adapters = all_tool_adapters(&store);
+        let adapters = all_tool_adapters(&store).unwrap();
         let matching_adapters: Vec<_> = adapters
             .iter()
             .filter(|adapter| adapter.key == "omp_agent")
@@ -1059,7 +1043,9 @@ mod tests {
             custom_project_path
         );
 
-        let found = find_adapter_with_store(&store, "omp_agent").unwrap();
+        let found = find_adapter_with_store(&store, "omp_agent")
+            .unwrap()
+            .unwrap();
         assert_eq!(found.display_name, "OMP Agent");
         assert!(!found.is_custom);
         assert_eq!(found.category, ToolCategory::Coding);

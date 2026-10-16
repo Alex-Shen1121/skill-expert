@@ -161,7 +161,7 @@ pub(crate) fn configure_debug_acceptance_root(root: Option<PathBuf>) -> Result<(
 }
 
 #[cfg(debug_assertions)]
-pub(crate) fn configure_debug_acceptance_root_from_environment() -> Result<()> {
+pub fn configure_debug_acceptance_root_from_environment() -> Result<()> {
     let Some(root) = std::env::var_os("SKILL_EXPERT_ACCEPTANCE_ROOT") else {
         return Ok(());
     };

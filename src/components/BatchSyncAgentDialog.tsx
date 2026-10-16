@@ -128,6 +128,7 @@ export function BatchSyncAgentDialog({ open, skills, tools, onClose, onApply }: 
                   </span>
                   <AgentIcon
                     agentKey={row.key}
+                    isCustom={tools.find((tool) => tool.key === row.key)?.is_custom}
                     displayName={row.displayName}
                     className="h-5 w-5 rounded-[4px]"
                   />

@@ -12,6 +12,7 @@ const SENSITIVE_KEYS: &[&str] = &["proxy_url", "git_backup_remote_url"];
 
 pub struct SkillStore {
     conn: Mutex<Connection>,
+    db_path: PathBuf,
     secret_key: [u8; 32],
 }
 
@@ -128,6 +129,7 @@ impl SkillStore {
         let secret_key = crypto::load_or_create_key(&key_path)?;
 
         Ok(Self {
+            db_path: db_path.clone(),
             conn: Mutex::new(conn),
             secret_key,
         })
@@ -737,6 +739,45 @@ impl SkillStore {
 
     // ── Settings ──
 
+    pub fn deployment_lock(
+        &self,
+        operation: &str,
+    ) -> std::result::Result<super::repo_lock::RepoLock, super::error::AppError> {
+        let base = self
+            .db_path
+            .parent()
+            .ok_or_else(|| super::error::AppError::internal("Missing database directory"))?;
+        super::repo_lock::RepoLock::for_library(base, operation).map_err(super::error::AppError::io)
+    }
+
+    pub fn tool_config(
+        &self,
+    ) -> std::result::Result<super::tool_config::ToolConfig, super::error::AppError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(super::error::AppError::db)?;
+        super::tool_config::ToolConfig::read(&tx)
+    }
+
+    pub fn update_tool_config<T>(
+        &self,
+        update: impl FnOnce(
+            &mut super::tool_config::ToolConfig,
+        ) -> std::result::Result<T, super::error::AppError>,
+    ) -> std::result::Result<T, super::error::AppError> {
+        let _deployment = self.deployment_lock("update Agent configuration")?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(super::error::AppError::db)?;
+        let mut config = super::tool_config::ToolConfig::read(&tx)?;
+        let before = config.clone();
+        let result = update(&mut config)?;
+        config.save_changes(&before, &tx)?;
+        tx.commit()
+            .map_err(|_| super::error::AppError::commit_unknown())?;
+        Ok(result)
+    }
+
     pub fn proxy_url(&self) -> Option<String> {
         self.get_setting("proxy_url")
             .ok()
@@ -751,7 +792,7 @@ impl SkillStore {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
             let mut rows = stmt.query_map(params![key], |row| row.get::<_, String>(0))?;
-            rows.next().and_then(|r| r.ok())
+            rows.next().transpose()?
         };
 
         let value = match raw {

@@ -151,16 +151,16 @@ fn self_write_muted() -> bool {
     muted_at(now_ms(), mute_state().lock().unwrap().deadline_ms)
 }
 
-fn collect_watch_paths(store: &SkillStore) -> Vec<PathBuf> {
+fn collect_watch_paths(store: &SkillStore) -> Result<Vec<PathBuf>, super::error::AppError> {
     let mut paths = vec![central_repo::skills_dir(), central_repo::scenarios_dir()];
 
-    for adapter in tool_adapters::all_tool_adapters(store) {
+    for adapter in tool_adapters::all_tool_adapters(store)? {
         paths.push(adapter.skills_dir());
         paths.extend(adapter.all_scan_dirs());
     }
 
     if let Ok(projects) = store.get_all_projects() {
-        let adapters = tool_adapters::all_tool_adapters(store);
+        let adapters = tool_adapters::all_tool_adapters(store)?;
         let mut seen_dirs = std::collections::HashSet::new();
         for project in projects {
             if project.workspace_type == "linked" {
@@ -202,7 +202,7 @@ fn collect_watch_paths(store: &SkillStore) -> Vec<PathBuf> {
 
     paths.sort();
     paths.dedup();
-    paths
+    Ok(paths)
 }
 
 fn watch_target(path: &Path) -> Option<PathBuf> {
@@ -224,7 +224,14 @@ fn sync_watch_set(
     watched: &mut HashSet<PathBuf>,
     store: &SkillStore,
 ) -> bool {
-    let desired: HashSet<PathBuf> = collect_watch_paths(store)
+    let paths = match collect_watch_paths(store) {
+        Ok(paths) => paths,
+        Err(error) => {
+            log::warn!("Watch roots unchanged: {error}");
+            return false;
+        }
+    };
+    let desired: HashSet<PathBuf> = paths
         .into_iter()
         .filter_map(|path| watch_target(&path))
         .collect();
@@ -467,7 +474,7 @@ mod tests {
             })
             .unwrap();
 
-        let paths = collect_watch_paths(&store);
+        let paths = collect_watch_paths(&store).unwrap();
         assert!(paths.contains(&skills_root));
         assert!(paths.contains(&disabled_root));
         assert!(!paths.contains(&skills_root.parent().unwrap().to_path_buf()));
@@ -505,7 +512,7 @@ mod tests {
         let store = SkillStore::new(&db_path).unwrap();
         insert_non_linked_project(&store, &project_path);
 
-        let paths = collect_watch_paths(&store);
+        let paths = collect_watch_paths(&store).unwrap();
         assert!(!paths.contains(&skills_dir), "empty skills dir watched");
         assert!(!paths.contains(&disabled_dir), "empty disabled dir watched");
         assert!(!paths.contains(&agent_dir), "agent parent dir watched");
@@ -523,7 +530,7 @@ mod tests {
         let store = SkillStore::new(&db_path).unwrap();
         insert_non_linked_project(&store, &project_path);
 
-        let paths = collect_watch_paths(&store);
+        let paths = collect_watch_paths(&store).unwrap();
         assert!(!paths.contains(&skills_dir));
         assert!(!paths.contains(&agent_dir));
     }
@@ -545,7 +552,7 @@ mod tests {
         let store = SkillStore::new(&db_path).unwrap();
         insert_non_linked_project(&store, &project_path);
 
-        let paths = collect_watch_paths(&store);
+        let paths = collect_watch_paths(&store).unwrap();
         assert!(
             paths.contains(&skills_dir),
             "non-empty skills dir not watched"

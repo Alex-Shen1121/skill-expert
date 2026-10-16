@@ -221,16 +221,16 @@ export interface ProjectSkillDocument {
 
 export const getToolStatus = () => invoke<ToolInfo[]>("get_tool_status");
 
-export const setToolEnabled = (key: string, enabled: boolean) =>
-  invoke<void>("set_tool_enabled", { key, enabled });
+export const setToolEnabled = (key: string, enabled: boolean, expectedDuo?: ToolInfo) =>
+  invoke<void>("set_tool_enabled", { key, enabled, expectedDuo: expectedDuo ?? null });
 
-export const setAllToolsEnabled = (enabled: boolean) =>
-  invoke<void>("set_all_tools_enabled", { enabled });
+export const setAllToolsEnabled = (enabled: boolean, expectedDuo?: ToolInfo) =>
+  invoke<void>("set_all_tools_enabled", { enabled, expectedDuo: expectedDuo ?? null });
 
 export const getToolOrder = () => invoke<string[]>("get_tool_order_cmd");
 
-export const setToolOrder = (order: string[]) =>
-  invoke<void>("set_tool_order_cmd", { order });
+export const setToolOrder = (order: string[], expected: string[]) =>
+  invoke<void>("set_tool_order_cmd", { order, expected });
 
 export const setCustomToolPath = (key: string, path: string) =>
   invoke<void>("set_custom_tool_path", { key, path });
@@ -256,7 +256,7 @@ export const addCustomTool = (
   skillsDir: string,
   projectRelativeSkillsDir?: string,
 ) =>
-  invoke<void>("add_custom_tool", {
+  invoke<RegistrationReceipt>("add_custom_tool", {
     key,
     displayName,
     skillsDir,
@@ -264,7 +264,7 @@ export const addCustomTool = (
   });
 
 export const removeCustomTool = (key: string) =>
-  invoke<void>("remove_custom_tool", { key });
+  invoke<{ removed: true; next_tool: ToolInfo | null; deployment: DeploymentReport }>("remove_custom_tool", { key });
 
 // ── Skills ──
 
@@ -949,3 +949,24 @@ export const updateGlobalLocalSkillFromCenter = (agent: string, skillRelativePat
 
 export const deleteGlobalLocalSkill = (agent: string, skillRelativePath: string) =>
   invoke<void>("delete_global_local_skill", { agent, skillRelativePath });
+
+export interface StartupFailure {
+  stage: string; code: string; setting: string | null; retryable: boolean; diagnostics: string;
+}
+export const getStartupFailure = () => invoke<StartupFailure | null>("get_startup_failure");
+export interface DeploymentReport {
+  scope: "global"; operation?: "sync" | "remove"; state: "complete" | "not_run" | "partial" | "failed" | "unknown";
+  reason: string | null; total: number | null;
+  targets: { skill_id: string; tool: string; target_path: string; outcome: string; message: string | null }[];
+  issues: { stage: string; code: string; tool: string | null; target_path: string | null; message: string }[];
+}
+export interface CustomDefinition {
+  key: string; display_name: string; skills_dir: string; project_relative_skills_dir: string | null;
+}
+export interface RegistrationReceipt {
+  registered: true; definition: CustomDefinition; tool: ToolInfo | null; deployment: DeploymentReport;
+}
+export const queryCustomTool = (definition: CustomDefinition) => invoke<{ state: "matches" | "conflict" | "absent"; tool: ToolInfo | null }>("query_custom_tool", { definition });
+export const getProjectRootImpact = (projectId: string, agent: string) => invoke<{
+  workspace: string; physical_path: string | null; known_agents: string[]; shared: boolean; unknown: boolean;
+}>("get_project_root_impact", { projectId, agent });

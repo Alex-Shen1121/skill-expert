@@ -44,13 +44,39 @@ pub fn log_startup_event(label: String, elapsed_ms: u64) {
     log::info!("frontend startup: {display} {elapsed_ms} ms");
 }
 
+fn validate_settings_request(body: &tauri::ipc::InvokeBody, key: &str) -> Result<(), AppError> {
+    let tauri::ipc::InvokeBody::Json(value) = body else {
+        return Err(AppError::invalid_input(
+            "Expected one setting key and value",
+        ));
+    };
+    let valid = value.as_object().is_some_and(|object| {
+        object.len() == 2
+            && object.get("key").is_some_and(|v| v.is_string())
+            && object.get("value").is_some_and(|v| v.is_string())
+    });
+    if !valid {
+        return Err(AppError::invalid_input(
+            "Expected one setting key and value",
+        ));
+    }
+    if crate::core::tool_config::PROTECTED_KEYS.contains(&key) {
+        return Err(AppError::invalid_input(
+            "Use the corresponding Agent settings operation",
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_settings(
     app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
     key: String,
     value: String,
     store: State<'_, Arc<SkillStore>>,
 ) -> Result<(), AppError> {
+    validate_settings_request(request.body(), &key)?;
     let store = store.inner().clone();
     let key_for_store = key.clone();
     let value_for_store = value.clone();
@@ -785,4 +811,26 @@ fn version_gt(a: &str, b: &str) -> bool {
     // Fallback for non-SemVer tags.
     let parse = |s: &str| -> Vec<u64> { s.split('.').filter_map(|p| p.parse().ok()).collect() };
     parse(a) > parse(b)
+}
+
+#[cfg(test)]
+mod agent_settings_boundary_tests {
+    use super::*;
+    #[test]
+    fn rejects_all_protected_keys_and_mixed_payloads_before_any_write() {
+        for key in crate::core::tool_config::PROTECTED_KEYS {
+            let body = tauri::ipc::InvokeBody::Json(
+                serde_json::json!({"key": key, "value": "secret-value"}),
+            );
+            let error = validate_settings_request(&body, key).unwrap_err();
+            assert!(!error.to_string().contains("secret-value"));
+        }
+        let mixed = tauri::ipc::InvokeBody::Json(
+            serde_json::json!({"key": "language", "value": "en", "custom_tools": []}),
+        );
+        assert!(validate_settings_request(&mixed, "language").is_err());
+        let normal =
+            tauri::ipc::InvokeBody::Json(serde_json::json!({"key": "language", "value": "en"}));
+        assert!(validate_settings_request(&normal, "language").is_ok());
+    }
 }

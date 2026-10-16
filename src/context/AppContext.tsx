@@ -26,7 +26,7 @@ interface AppState {
   refreshAppUpdate: () => Promise<AppUpdateInfo>;
   refreshAppData: () => Promise<void>;
   refreshPresets: () => Promise<void>;
-  refreshTools: () => Promise<void>;
+  refreshTools: () => Promise<boolean>;
   refreshManagedSkills: () => Promise<void>;
   refreshProjects: () => Promise<void>;
   setViewedPresetId: (id: string) => void;
@@ -113,9 +113,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const t = await api.getToolStatus();
       setTools(t);
       setAppError(null);
+      return true;
     } catch (e) {
       console.error("Failed to load tools:", e);
       setTranslatedError("common.agents");
+      return false;
     }
   }, [setTranslatedError]);
 

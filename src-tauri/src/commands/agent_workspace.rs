@@ -30,7 +30,7 @@ fn adapter_for_agent(
     store: &SkillStore,
     agent: &str,
 ) -> Result<tool_adapters::ToolAdapter, AppError> {
-    tool_adapters::all_tool_adapters(store)
+    tool_adapters::all_tool_adapters(store)?
         .into_iter()
         .find(|adapter| adapter.key == agent)
         .ok_or_else(|| AppError::not_found(format!("Unknown agent: {}", agent)))
@@ -233,6 +233,7 @@ fn import_agent_local_skill_to_center(
     agent: &str,
     skill_relative_path: &str,
 ) -> Result<(), AppError> {
+    let _deployment = store.deployment_lock("import_agent_local_skill_to_center")?;
     let adapter = adapter_for_agent(store, agent)?;
     let skill = find_agent_skill(&adapter, skill_relative_path)?;
 
@@ -240,8 +241,8 @@ fn import_agent_local_skill_to_center(
     let source_path = PathBuf::from(&skill.path);
     ensure_agent_skill_path(&source_path, &skills_root)?;
 
-    let all_managed = store.get_all_skills().unwrap_or_default();
-    let all_targets = store.get_all_targets().unwrap_or_default();
+    let all_managed = store.get_all_skills().map_err(AppError::db)?;
+    let all_targets = store.get_all_targets().map_err(AppError::db)?;
     if let Some(existing) = find_verified_center_match(&skill, &all_managed, &all_targets) {
         let result = installer::install_from_local_to_destination(
             &source_path,
@@ -433,12 +434,13 @@ fn stranded_candidate_signature(
     Some(hex::encode(hasher.finalize()))
 }
 
-pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
-    let all_managed = store.get_all_skills().unwrap_or_default();
-    let all_targets = store.get_all_targets().unwrap_or_default();
+pub fn backfill_stranded_agent_targets(store: &SkillStore) -> Result<usize, AppError> {
+    let _deployment = store.deployment_lock("backfill_stranded_agent_targets")?;
+    let all_managed = store.get_all_skills().map_err(AppError::db)?;
+    let all_targets = store.get_all_targets().map_err(AppError::db)?;
 
-    let disabled = tool_service::get_disabled_tools(store);
-    let adapters = tool_adapters::all_tool_adapters(store);
+    let disabled = tool_service::get_disabled_tools(store)?;
+    let adapters = tool_adapters::all_tool_adapters(store)?;
     let available_tools: Vec<String> = adapters
         .iter()
         .filter(|adapter| adapter.is_installed() && !disabled.contains(&adapter.key))
@@ -451,7 +453,7 @@ pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
     let Some(signature) =
         stranded_candidate_signature(&all_managed, &all_targets, &available_tools)
     else {
-        return 0;
+        return Ok(0);
     };
 
     // Second gate (#248): the scan below reads and hashes every agent's local
@@ -469,7 +471,7 @@ pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
         .as_deref()
         == Some(signature.as_str())
     {
-        return 0;
+        return Ok(0);
     }
 
     let mut repaired = 0usize;
@@ -478,7 +480,7 @@ pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
         if !adapter.is_installed() || disabled.contains(&adapter.key) {
             continue;
         }
-        let targets = store.get_all_targets().unwrap_or_default();
+        let targets = store.get_all_targets().map_err(AppError::db)?;
 
         for skill in read_agent_local_skills(adapter) {
             let canonical = std::fs::canonicalize(&skill.path).ok();
@@ -573,7 +575,7 @@ pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
     // targets (repairs above added rows) so it converges in a single launch:
     // repaired skills drop out, and only the genuinely un-repairable ones seed
     // the gate. Best-effort: a failed write just means we re-scan next time.
-    let post_targets = store.get_all_targets().unwrap_or_default();
+    let post_targets = store.get_all_targets().map_err(AppError::db)?;
     match stranded_candidate_signature(&all_managed, &post_targets, &available_tools) {
         Some(remaining_sig) => {
             let _ = store.set_setting(BACKFILL_SIG_KEY, &remaining_sig);
@@ -585,7 +587,7 @@ pub fn backfill_stranded_agent_targets(store: &SkillStore) -> usize {
         }
     }
 
-    repaired
+    Ok(repaired)
 }
 
 #[tauri::command]
@@ -606,10 +608,11 @@ fn update_agent_local_skill_from_center(
     agent: &str,
     skill_relative_path: &str,
 ) -> Result<(), AppError> {
+    let _deployment = store.deployment_lock("update_agent_local_skill_from_center")?;
     let adapter = adapter_for_agent(store, agent)?;
     let skill = find_agent_skill(&adapter, skill_relative_path)?;
-    let all_managed = store.get_all_skills().unwrap_or_default();
-    let all_targets = store.get_all_targets().unwrap_or_default();
+    let all_managed = store.get_all_skills().map_err(AppError::db)?;
+    let all_targets = store.get_all_targets().map_err(AppError::db)?;
     let managed = find_verified_center_match(&skill, &all_managed, &all_targets)
         .ok_or_else(|| AppError::not_found("No matching managed skill in center"))?;
 
@@ -657,11 +660,12 @@ fn delete_agent_local_skill(
     agent: &str,
     skill_relative_path: &str,
 ) -> Result<(), AppError> {
+    let _deployment = store.deployment_lock("delete_agent_local_skill")?;
     let adapter = adapter_for_agent(store, agent)?;
     let skill = find_agent_skill(&adapter, skill_relative_path)?;
 
-    let all_managed = store.get_all_skills().unwrap_or_default();
-    let all_targets = store.get_all_targets().unwrap_or_default();
+    let all_managed = store.get_all_skills().map_err(AppError::db)?;
+    let all_targets = store.get_all_targets().map_err(AppError::db)?;
     if let Some(managed) = find_verified_center_match(&skill, &all_managed, &all_targets) {
         let still_linked = all_targets.iter().any(|t| {
             t.skill_id == managed.id && target_path_equals_skill(&t.target_path, &skill.path)
@@ -1050,7 +1054,7 @@ mod tests {
         // Stranded precondition: no targets at all.
         assert!(store.get_all_targets().unwrap().is_empty());
 
-        let repaired = backfill_stranded_agent_targets(&store);
+        let repaired = backfill_stranded_agent_targets(&store).unwrap();
         assert_eq!(repaired, 1);
 
         let targets = store.get_all_targets().unwrap();
@@ -1060,7 +1064,7 @@ mod tests {
         assert_eq!(targets[0].target_path, skill_dir.to_string_lossy());
 
         // Idempotent: a second run sees the target and repairs nothing.
-        assert_eq!(backfill_stranded_agent_targets(&store), 0);
+        assert_eq!(backfill_stranded_agent_targets(&store).unwrap(), 0);
         assert_eq!(store.get_all_targets().unwrap().len(), 1);
 
         // After a full repair the gate is cleared (empty), not left pointing at
@@ -1212,8 +1216,9 @@ mod tests {
         // Pre-seed the gate with the CURRENT stranded set's signature, as if a
         // previous launch already attempted (and could not finish repairing) it.
         // Computed exactly the way backfill computes it (same adapter set).
-        let disabled = tool_service::get_disabled_tools(&store);
+        let disabled = tool_service::get_disabled_tools(&store).unwrap();
         let available: Vec<String> = tool_adapters::all_tool_adapters(&store)
+            .unwrap()
             .iter()
             .filter(|a| a.is_installed() && !disabled.contains(&a.key))
             .map(|a| a.key.clone())
@@ -1228,7 +1233,7 @@ mod tests {
 
         // The skill IS repairable, but the matching gate short-circuits the
         // expensive filesystem scan (#248): nothing is scanned or repaired.
-        assert_eq!(backfill_stranded_agent_targets(&store), 0);
+        assert_eq!(backfill_stranded_agent_targets(&store).unwrap(), 0);
         assert!(store.get_all_targets().unwrap().is_empty());
 
         // Divergence changes the candidate's content fingerprint → the gate
@@ -1242,14 +1247,14 @@ mod tests {
             "---\nname: local-tool\ndescription: Agent copy\n---\nedited locally\n",
         )
         .unwrap();
-        assert_eq!(backfill_stranded_agent_targets(&store), 0);
+        assert_eq!(backfill_stranded_agent_targets(&store).unwrap(), 0);
         assert!(store.get_all_targets().unwrap().is_empty());
 
         // Restoring the local copy to match center must re-arm once more and
         // now complete the repair — "candidate set unchanged" is not
         // "repairability unchanged".
         std::fs::write(&skill_md, original).unwrap();
-        assert_eq!(backfill_stranded_agent_targets(&store), 1);
+        assert_eq!(backfill_stranded_agent_targets(&store).unwrap(), 1);
         assert_eq!(store.get_all_targets().unwrap().len(), 1);
 
         central_repo::set_test_base_dir_override(None);
@@ -1302,8 +1307,9 @@ mod tests {
         // Seed the gate exactly as the previous launch's backfill would have,
         // BEFORE the matching agent is configured (its key absent from the
         // available set).
-        let disabled = tool_service::get_disabled_tools(&store);
+        let disabled = tool_service::get_disabled_tools(&store).unwrap();
         let available: Vec<String> = tool_adapters::all_tool_adapters(&store)
+            .unwrap()
             .iter()
             .filter(|a| a.is_installed() && !disabled.contains(&a.key))
             .map(|a| a.key.clone())
@@ -1333,7 +1339,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(backfill_stranded_agent_targets(&store), 1);
+        assert_eq!(backfill_stranded_agent_targets(&store).unwrap(), 1);
         assert_eq!(store.get_all_targets().unwrap().len(), 1);
 
         central_repo::set_test_base_dir_override(None);

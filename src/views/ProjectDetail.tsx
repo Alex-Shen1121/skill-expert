@@ -167,6 +167,8 @@ export function ProjectDetail() {
   const [togglingSkill, setTogglingSkill] = useState<string | null>(null);
   const [togglingAgentTarget, setTogglingAgentTarget] = useState<{ skillKey: string; agent: string } | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [projectActionResults, setProjectActionResults] = useState<{ target: string; ok: boolean; message: string }[]>([]);
+  const [deleteImpact, setDeleteImpact] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSkillGroup | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
@@ -560,15 +562,39 @@ export function ProjectDetail() {
     }
   };
 
+  const performProjectActions = async (skill: ProjectSkillGroup, action: (variant: ProjectSkillGroup["variants"][number]) => Promise<void>) => {
+    let failed = false;
+    for (const variant of skill.variants) {
+      try {
+        await action(variant);
+        setProjectActionResults((previous) => [...previous, { target: `${variant.agent}: ${variant.relative_path}`, ok: true, message: t("common.success") }]);
+      } catch (error) {
+        failed = true;
+        setProjectActionResults((previous) => [...previous, { target: `${variant.agent}: ${variant.relative_path}`, ok: false, message: getErrorMessage(error, t("common.error")) }]);
+      }
+    }
+    if (failed) throw new Error(t("agentRegistration.partial"));
+  };
+
+  const prepareProjectDelete = async (skills: ProjectSkillGroup[], batch: boolean) => {
+    if (!id) return;
+    const details: string[] = [];
+    try {
+      for (const skill of skills) for (const variant of skill.variants) {
+        const impact = await api.getProjectRootImpact(id, variant.agent);
+        details.push(t("agentRegistration.projectImpact", { workspace: impact.workspace,
+          path: `${impact.physical_path ?? "?"}/${variant.relative_path}`, agents: impact.known_agents.join(", ") }));
+      }
+      setDeleteImpact(details);
+      if (batch) setBatchDeleteConfirm(true); else setDeleteTarget(skills[0]);
+    } catch (error) { toast.error(getErrorMessage(error, t("common.error"))); }
+  };
+
   const handleUpdateProject = async (skill: ProjectSkillGroup) => {
     if (!id) return;
     setUpdatingProjectSkill(getSkillKey(skill));
     try {
-      await Promise.all(
-        skill.variants.map((variant) =>
-          api.updateProjectSkillFromCenter(id, variant.relative_path, variant.agent)
-        )
-      );
+      await performProjectActions(skill, (variant) => api.updateProjectSkillFromCenter(id, variant.relative_path, variant.agent));
       if (skill.status === "project_newer") {
         toast.success(t("project.resetFromCenterSuccess", { name: skill.name }));
       } else {
@@ -587,11 +613,7 @@ export function ProjectDetail() {
     setTogglingSkill(getSkillKey(skill));
     try {
       const nextEnabled = skill.enabledCount !== skill.totalCount;
-      await Promise.all(
-        skill.variants.map((variant) =>
-          api.toggleProjectSkill(id, variant.relative_path, variant.agent, nextEnabled)
-        )
-      );
+      await performProjectActions(skill, (variant) => api.toggleProjectSkill(id, variant.relative_path, variant.agent, nextEnabled));
       if (skill.enabledCount === skill.totalCount) {
         toast.success(t("project.skillDisabled", { name: skill.name }));
       } else {
@@ -638,11 +660,7 @@ export function ProjectDetail() {
   const handleDeleteSkill = async () => {
     if (!id || !deleteTarget) return;
     try {
-      await Promise.all(
-        deleteTarget.variants.map((variant) =>
-          api.deleteProjectSkill(id, variant.relative_path, variant.agent)
-        )
-      );
+      await performProjectActions(deleteTarget, (variant) => api.deleteProjectSkill(id, variant.relative_path, variant.agent));
       toast.success(t("project.skillDeleted", { name: deleteTarget.name }));
       await Promise.all([loadSkills(), refreshProjects()]);
     } catch (error: unknown) {
@@ -656,11 +674,7 @@ export function ProjectDetail() {
     let failed = 0;
     for (const skill of selectedSkills) {
       try {
-        await Promise.all(
-          skill.variants.map((variant) =>
-            api.deleteProjectSkill(id, variant.relative_path, variant.agent)
-          )
-        );
+        await performProjectActions(skill, (variant) => api.deleteProjectSkill(id, variant.relative_path, variant.agent));
         deleted++;
       } catch {
         failed++;
@@ -688,18 +702,10 @@ export function ProjectDetail() {
       for (const skill of selectedSkills) {
         try {
           if (enabling && skill.enabledCount !== skill.totalCount) {
-            await Promise.all(
-              skill.variants.map((variant) =>
-                api.toggleProjectSkill(id, variant.relative_path, variant.agent, true)
-              )
-            );
+            await performProjectActions(skill, (variant) => api.toggleProjectSkill(id, variant.relative_path, variant.agent, true));
             count++;
           } else if (!enabling && skill.enabledCount > 0) {
-            await Promise.all(
-              skill.variants.map((variant) =>
-                api.toggleProjectSkill(id, variant.relative_path, variant.agent, false)
-              )
-            );
+            await performProjectActions(skill, (variant) => api.toggleProjectSkill(id, variant.relative_path, variant.agent, false));
             count++;
           }
         } catch {
@@ -779,11 +785,7 @@ export function ProjectDetail() {
           skill.status === "diverged";
         if (!canUpdateProject) continue;
         try {
-          await Promise.all(
-            skill.variants.map((variant) =>
-              api.updateProjectSkillFromCenter(id, variant.relative_path, variant.agent)
-            )
-          );
+          await performProjectActions(skill, (variant) => api.updateProjectSkillFromCenter(id, variant.relative_path, variant.agent));
           updated++;
         } catch {
           failed++;
@@ -1109,7 +1111,7 @@ export function ProjectDetail() {
               tone: "danger" as const,
               label: t("project.deleteSelected", { count: selectedIds.size }),
               icon: <Trash2 className="h-3.5 w-3.5" />,
-              onSelect: () => setBatchDeleteConfirm(true),
+              onSelect: () => { void prepareProjectDelete(selectedSkills, true); },
             },
           ]}
           labels={{
@@ -1317,7 +1319,7 @@ export function ProjectDetail() {
                           />
                         ) : null}
                         <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
+                          onClick={(e) => { e.stopPropagation(); void prepareProjectDelete([skill], false); }}
                           className="rounded px-2 py-1 text-muted transition-colors outline-none hover:bg-red-500/10 hover:text-red-500"
                           title={t("project.deleteSkill")}
                         >
@@ -1472,7 +1474,7 @@ export function ProjectDetail() {
                       />
                     ) : null}
                     <button
-                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(skill); }}
+                      onClick={(e) => { e.stopPropagation(); void prepareProjectDelete([skill], false); }}
                       className="shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500"
                       title={t("project.deleteSkill")}
                     >
@@ -1506,10 +1508,15 @@ export function ProjectDetail() {
       )}
 
       {/* Delete Confirm Dialog */}
+      {projectActionResults.length > 0 && <section className="app-panel my-3 p-4 space-y-2" aria-label={t("agentRegistration.receipt")}>
+        <button onClick={() => setProjectActionResults([])}>{t("common.close")}</button>
+        {projectActionResults.map((result, index) => <p role={result.ok ? "status" : "alert"} className="break-all" key={index}>{result.target} — {result.message}</p>)}
+      </section>}
       <ConfirmDialog
         open={!!deleteTarget}
         title={t("project.deleteSkill")}
         message={t("project.deleteSkillConfirm", { name: deleteTarget?.name })}
+        details={deleteImpact}
         tone="danger"
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteSkill}
@@ -1520,6 +1527,7 @@ export function ProjectDetail() {
         open={batchDeleteConfirm}
         title={t("project.deleteSkill")}
         message={t("project.batchDeleteConfirm", { count: selectedIds.size })}
+        details={deleteImpact}
         tone="danger"
         onClose={() => setBatchDeleteConfirm(false)}
         onConfirm={handleBatchDeleteProject}

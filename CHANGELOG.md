@@ -9,13 +9,13 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- Add built-in GitLab Duo and shared GUI/CLI custom Agent registration.
 
 ### User-facing
--
+- Report registration, deployment and refresh separately; preserve legacy Duo identity and shared or unverified files. Add safe startup recovery and shared project-root guards.
 
 ### Developer & Governance
--
+- Use strict Agent configuration snapshots and transactional updates; keep the stable source version unchanged.
 
 ## [1.0.21] - 2026-10-15
 

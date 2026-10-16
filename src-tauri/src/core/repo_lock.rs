@@ -3,6 +3,12 @@ use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::{Path, PathBuf},
+    rc::{Rc, Weak},
+};
 
 use super::central_repo;
 
@@ -30,8 +36,12 @@ pub const FOREGROUND_WAIT: Duration = Duration::from_secs(20);
 /// window instead of being starved by the background re-acquiring immediately.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+thread_local! {
+    static HELD: RefCell<HashMap<PathBuf, Weak<File>>> = RefCell::new(HashMap::new());
+}
+
 pub struct RepoLock {
-    file: File,
+    file: Rc<File>,
 }
 
 impl RepoLock {
@@ -42,7 +52,7 @@ impl RepoLock {
         let file = open_lock_file()?;
         file.try_lock_exclusive()
             .with_context(|| format!("skills repository is busy: {operation}"))?;
-        Self::stamp(file, operation)
+        Self::stamp(file, operation, &central_repo::base_dir())
     }
 
     /// Acquire the lock, waiting up to `timeout` for a concurrent holder to
@@ -54,7 +64,7 @@ impl RepoLock {
         let start = Instant::now();
         loop {
             match file.try_lock_exclusive() {
-                Ok(()) => return Self::stamp(file, operation),
+                Ok(()) => return Self::stamp(file, operation, &central_repo::base_dir()),
                 // Retry on any error (not just `WouldBlock`): on Windows
                 // `LockFileEx` reports contention as `ERROR_LOCK_VIOLATION`,
                 // which does not map to `ErrorKind::WouldBlock`, so gating on
@@ -73,10 +83,36 @@ impl RepoLock {
 
     /// Convenience for user-initiated operations: wait up to [`FOREGROUND_WAIT`].
     pub fn acquire_foreground(operation: &str) -> Result<Self> {
-        Self::acquire_blocking(operation, FOREGROUND_WAIT)
+        Self::for_library(&central_repo::base_dir(), operation)
     }
 
-    fn stamp(mut file: File, operation: &str) -> Result<Self> {
+    /// Nested deployment calls reuse only this thread's guard for this exact
+    /// library. Independent operations and other processes still take the file lock.
+    pub(crate) fn for_library(base: &Path, operation: &str) -> Result<Self> {
+        std::fs::create_dir_all(base)?;
+        let key = base.canonicalize()?.join(LOCK_FILE_NAME);
+        if let Some(file) = HELD.with(|held| held.borrow().get(&key).and_then(Weak::upgrade)) {
+            return Ok(Self { file });
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&key)?;
+        let start = Instant::now();
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Self::stamp(file, operation, base),
+                Err(error) if start.elapsed() >= FOREGROUND_WAIT => {
+                    return Err(error).context("Skills repository is busy")
+                }
+                Err(_) => std::thread::sleep(POLL_INTERVAL),
+            }
+        }
+    }
+
+    fn stamp(mut file: File, operation: &str, base: &Path) -> Result<Self> {
         file.set_len(0)?;
         file.seek(SeekFrom::Start(0))?;
         writeln!(
@@ -90,6 +126,11 @@ impl RepoLock {
             chrono::Utc::now().to_rfc3339()
         )?;
         file.sync_all()?;
+        let file = Rc::new(file);
+        let key = base.canonicalize()?.join(LOCK_FILE_NAME);
+        HELD.with(|held| {
+            held.borrow_mut().insert(key, Rc::downgrade(&file));
+        });
         Ok(Self { file })
     }
 }
@@ -109,7 +150,9 @@ fn open_lock_file() -> Result<File> {
 
 impl Drop for RepoLock {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
+        if Rc::strong_count(&self.file) == 1 {
+            let _ = FileExt::unlock(&*self.file);
+        }
     }
 }
 
@@ -176,5 +219,33 @@ mod tests {
         drop(recovered);
 
         central_repo::set_test_base_dir_override(None);
+    }
+    #[test]
+    fn nested_library_guard_keeps_the_cross_thread_lock_until_the_last_guard_drops() {
+        let dir = tempdir().unwrap();
+        let outer = RepoLock::for_library(dir.path(), "outer").unwrap();
+        let inner = RepoLock::for_library(dir.path(), "inner").unwrap();
+        drop(outer);
+        let path = dir.path().join(LOCK_FILE_NAME);
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let file = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(&path)
+                        .unwrap();
+                    assert!(file.try_lock_exclusive().is_err());
+                })
+                .join()
+                .unwrap();
+        });
+        drop(inner);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        file.try_lock_exclusive().unwrap();
     }
 }

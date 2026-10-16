@@ -119,7 +119,7 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
   const chooseFile = (path: string) => { if (path === selected) return; setSelected(path); setPreviews({}); setPreviewErrors({}); };
   const retry = () => { setIndex(null); setSource(null); setSourceDiff(null); setSourceError(null); setDiffError(null); setPreviews({}); setBrowseError(null); setPreviewErrors({}); setReload(current => current + 1); };
   const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map(toggle => ({
-    key: toggle.tool, displayName: toggle.display_name, enabled: toggle.enabled,
+    key: toggle.tool, isCustom: tools?.find((tool) => tool.key === toggle.tool)?.is_custom, displayName: toggle.display_name, enabled: toggle.enabled,
     isAvailable: toggle.installed && toggle.globally_enabled, disabled: !toggle.installed || !toggle.globally_enabled,
     badgeLabel: !toggle.installed ? t("mySkills.agentToggleNotInstalled") : !toggle.globally_enabled ? t("mySkills.agentToggleDisabledGlobally") : null,
   }));

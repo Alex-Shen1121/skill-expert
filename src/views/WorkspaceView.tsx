@@ -869,6 +869,7 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
               >
                 <AgentIcon
                   agentKey={tool.key}
+            isCustom={tool.is_custom}
                   displayName={tool.display_name}
                   className="h-9 w-9 rounded-lg transition-colors group-hover:border-border"
                 />
@@ -894,6 +895,7 @@ export function WorkspaceView({ config }: { config: WorkspaceConfig }) {
             <h1 className="app-page-title flex items-center gap-2.5">
               <AgentIcon
                 agentKey={currentTool.key}
+            isCustom={currentTool.is_custom}
                 displayName={currentTool.display_name}
                 className="h-7 w-7 rounded-lg"
               />
