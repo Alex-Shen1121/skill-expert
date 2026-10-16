@@ -277,6 +277,36 @@ mod tests {
     }
 
     #[test]
+    fn global_paths_follow_native_absolute_semantics() {
+        let temp = tempdir().unwrap();
+        let path = temp
+            .path()
+            .join("nonexistent skills")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            tool_service::normalize_skills_dir_input(&path).unwrap(),
+            path
+        );
+        assert!(!std::path::Path::new(&path).exists());
+        for value in ["", "relative/skills"] {
+            assert!(tool_service::normalize_skills_dir_input(value).is_err());
+        }
+        #[cfg(windows)]
+        {
+            for value in [r"C:\skills", r"\\server\share\skills", r"\\?\C:\skills"] {
+                assert_eq!(
+                    tool_service::normalize_skills_dir_input(value).unwrap(),
+                    value
+                );
+            }
+            for value in ["C:skills", r"\skills"] {
+                assert!(tool_service::normalize_skills_dir_input(value).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn project_paths_reject_parent_and_empty_root() {
         for value in [".", "./", "../skills", ".a/../skills", "/tmp/skills"] {
             assert!(

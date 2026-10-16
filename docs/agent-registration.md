@@ -58,15 +58,55 @@ python3 scripts/verify-agent-registration.py --binary src-tauri/target/debug/ski
 
 脚本为每次运行创建新子目录，使用 debug 专用 `SKILL_EXPERT_ACCEPTANCE_ROOT`，先核对 repo status 的真实状态根，再测试默认/JSON/tools 别名、输入错误、进程并发、旧 Duo 两次读取及坏配置零覆盖。结果 JSON 留在打印的隔离子目录。此环境变量不在 release 构建中启用；不修改 HOME、用户真实库、厂商目录或共享参考树。
 
-macOS 原生应用复用现有验收配置，仅用于本地自测：
+### macOS 原生验收隔离
+
+每轮新建状态根和唯一包标识；同一轮正常/故障重启复用该身份，不能只换状态根而复用历史包。以下仅构建，控制台可交互后才执行最后的启动命令：
 
 ```sh
-npm run tauri:build -- --debug --bundles app --config src-tauri/tauri.acceptance.conf.json
-SKILL_EXPERT_ACCEPTANCE_ROOT=/absolute/disposable-fixtures/gui \
-  'src-tauri/target/debug/bundle/macos/Agent 技能管家 · 插件验收.app/Contents/MacOS/skill-expert'
+ACCEPTANCE_RUN=$(mktemp -d /tmp/grjngj92.XXXXXX)
+export ACCEPTANCE_RUN
+python3 - <<'PYCONFIG'
+import json, os, uuid
+from pathlib import Path
+root = Path(os.environ['ACCEPTANCE_RUN']).resolve()
+config = json.loads(Path('src-tauri/tauri.acceptance.conf.json').read_text())
+identity = 'grjngj92.' + uuid.uuid4().hex[:12]
+config['identifier'] = 'com.codingshen.skill-expert.acceptance.' + identity
+config['productName'] = 'Agent 技能管家 · ' + identity
+config['app']['windows'][0]['title'] = config['productName']
+config['app']['windows'][0]['dataDirectory'] = str(root / 'webview')
+(root / 'tauri.json').write_text(json.dumps(config, ensure_ascii=False))
+(root / 'app-name').write_text(config['productName'])
+PYCONFIG
+npm run tauri:build -- --debug --bundles app --config "$ACCEPTANCE_RUN/tauri.json"
+# 保留配置、源码 SHA 和二进制哈希；确认本轮 GUI 可交互后启动。
+SKILL_EXPERT_ACCEPTANCE_ROOT="$ACCEPTANCE_RUN/runtime"   "src-tauri/target/debug/bundle/macos/$(cat "$ACCEPTANCE_RUN/app-name").app/Contents/MacOS/skill-expert"
 ```
 
-这是既有独立验收身份的调试构建，不是发布包；构建配置沿用“插件验收”标题。测试 GUI 与 CLI 同库时两进程使用相同验收根；测试坏配置先在进程退出后修改该隔离库，随后验证启动失败窗口。
+此环境变量只在 debug 入口生效，不是 OS sandbox。只使用本轮创建的库/Agent/项目绝对路径；禁止把自定义路径、中央库迁移、导入/导出或打开文件操作指向用户数据。不要进入插件页或触发外部厂商 CLI；它们沿原有厂商环境运行，不受应用状态根完全约束。GUI 与 CLI 同库时都传同一 `runtime` 根；坏配置须先退出相关进程再写隔离库。不能用启动日志证明交互通过。
+
+| I/O | 位置及边界 |
+| --- | --- |
+| DB / 中央库 / 应用缓存 / 审计 | `<runtime>/state` 内的 `skill-expert.db`、`skills/`、`cache/`、`logs/`，具体以 `repo status` 为准；初始化也会产生 schema/secret key/元数据等，不承诺零写入 |
+| 内置 Agent / 控制配置 / 导入锁 | `<runtime>/home` 下的厂商默认路径、`.config/skill-expert`；自定义绝对路径/项目路径必须另行限定到本轮 fixture |
+| CLI 桥接 | `<runtime>/home/.skill-expert`，不会写用户真实桥接；所记录可执行文件仍在本轮构建树 |
+| 库锁 | `<runtime>/state/.skill-expert.lock`；SQLite WAL/SHM 随 DB |
+| GUI 运行/应用 panic 日志 | macOS `~/Library/Logs/<本轮 bundle ID>/`；panic hook 的 `last_panic.log` 同目录，仅实际安装 hook 后适用 |
+| WebKit | 本机实际为 `~/Library/WebKit/<本轮 bundle ID>/WebsiteDataStore/13325170-8fae-cdec-0c2b-4a6988a7c6e5/`；固定 UUID 在独立 bundle namespace 下。macOS 不用 dataDirectory 重定向该存储 |
+| 系统缓存 / 偏好 / OS crash | 系统可能在 Library/Caches、Preferences、DiagnosticReports 或临时目录写入；不是全部位于 runtime。按 bundle/进程归属区分，不声称本轮触发并验证了 OS crash |
+| 单实例 socket | macOS `/tmp/<bundle ID 中点和连字符替换为下划线>_si.sock`，需短于 100 字节；遗留 socket 归属于该唯一包，不删除其他包的 socket |
+
+GRJNGJ-95 对旧候选 `52b5a8b` 的真实包 `com.codingshen.skill-expert.acceptance.grjngj92` 核验到独立日志与 WebKit 目录（创建于 2026-10-16T20:25:24Z），不同于 `.plugins` 与生产身份；没有发现需要生产修复的跨包共用证据。该身份已用于本需求前轮自测，新的独立验收必须采用上述新 namespace。原生进程未在本轮重启；锁屏因果、OS crash 与完整 GUI 操作仍未验证。
+
+### Windows/Linux 手工行为验证
+
+复用已有手工入口；只验证、不打包，不增加普通 PR/main 检查或改版本：
+
+```sh
+gh workflow run manual-test-package.yml --ref codex/grjngj-92-duo-custom   -f validation_only=true -f agent_registration=true -f macos_arm64=false
+```
+
+必须核对运行的 `headSha` 等于待验 SHA。Windows runner 与 Ubuntu 22.04 分别执行 `tool_config::tests`（含原生绝对/项目路径、事务和线程并发）、`duo_removal_tests`、`shared_root_tests`、CLI 二进制单测，并构建 debug CLI 后运行上述 Python 真实跨进程 fixture。Windows 额外运行 drive/UNC/rooted/verbatim 项目路径拒绝；UNC 正向只验证原生语法，不访问网络共享。日志保留 OS、源码 SHA、完整 JSON 回执。此模式 `promotable: false`，不创建安装包/tag/Release；原 `validation_only=true, agent_registration=false` 仍只做受控进程专项。不能代替 GUI、实际 Duo 加载或所有 AC 验收。
 
 必要命令：`npm run lint`、`npm run typecheck`、`npm run test:frontend`、`npm run build`、版本/身份/工作流检查；Rust `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、lib 与 CLI 行为测试。宿主注入的 GIT_AUTHOR_NAME 会干扰仓库既有设备身份测试，仅对测试进程取消此覆盖，不改 Git 配置。
 

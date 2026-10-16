@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import platform
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -20,7 +21,7 @@ environment = dict(os.environ, SKILL_EXPERT_ACCEPTANCE_ROOT=str(root))
 results = []
 
 def command(arguments, expected=0):
-    process = subprocess.run([str(binary), *arguments], env=environment, text=True, capture_output=True, timeout=45)
+    process = subprocess.run([str(binary), *arguments], env=environment, encoding="utf-8", capture_output=True, timeout=45)
     stream = process.stdout if process.returncode == 0 else process.stderr
     assert process.returncode == expected, (arguments, process.returncode, process.stdout, process.stderr)
     assert not (process.stderr if process.returncode == 0 else process.stdout), (arguments, 'unexpected second output stream')
@@ -29,13 +30,15 @@ def command(arguments, expected=0):
     return payload
 
 status = command(['--json', 'repo', 'status'])
-assert Path(status['base_dir']) == root / 'state', 'Requires the current debug build with acceptance isolation'
+assert Path(status['base_dir']).resolve() == (root / 'state').resolve(), 'Requires the current debug build with acceptance isolation'
+# Rust canonicalize uses the Windows extended path prefix; keep that native spelling.
+root = Path(status['base_dir']).parent
 db = Path(status['db_path'])
 assert db.is_relative_to(root)
 agents = command(['agents', 'list'])
 duo = [agent for agent in agents if agent['key'] == 'gitlab_duo']
 assert len(duo) == 1 and not duo[0]['is_custom'] and duo[0]['project_relative_skills_dir'] == '.agents/skills'
-assert duo[0]['skills_dir'] == str(root / 'home/.gitlab/duo/skills')
+assert duo[0]['skills_dir'] == str(root / 'home' / '.gitlab' / 'duo' / 'skills')
 with sqlite3.connect(db) as connection:
     connection.execute('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)', ('disabled_tools', json.dumps([a['key'] for a in agents])))
 
@@ -45,21 +48,25 @@ assert first['definition']['display_name'] == 'first' and first['definition']['p
 assert first['deployment']['state'] == 'not_run'
 second = command(['--json', 'tools', 'add-custom', 'second', '--path', str(root / 'second'), '--name', ' Second ', '--project-path', ' .second/skills '])
 assert second['tool']['display_name'] == 'Second' and second['tool']['project_relative_skills_dir'] == '.second/skills'
-for arguments in [
+invalid_inputs = [
     ['first', '--path', str(root / 'replacement')],
     ['gitlab_duo', '--path', str(root / 'duo')],
     ['blank-name', '--path', str(root / 'blank'), '--name', '   '],
     ['bad-global', '--path', 'relative'],
     ['root-project', '--path', str(root / 'root'), '--project-path', './'],
     ['parent-project', '--path', str(root / 'parent'), '--project-path', '.a/../skills'],
-]:
+]
+if os.name == 'nt':
+    invalid_inputs.extend([f'windows-project-{i}', '--path', str(root / f'win-{i}'), '--project-path', value]
+                          for i, value in enumerate([r'C:\skills', 'C:skills', r'\skills', r'\\server\share\skills', r'\\?\C:\skills', r'..\skills']))
+for arguments in invalid_inputs:
     error = command(['agents', 'add-custom', *arguments], 1)
     assert error['registered'] is False
 command(['--json', 'agents', 'add-custom', 'missing-path'], 2)
 
 # Independent processes, not threads sharing a store mutex.
 def register(key):
-    process = subprocess.run([str(binary), '--json', 'agents', 'add-custom', key, '--path', str(root / key)], env=environment, text=True, capture_output=True, timeout=45)
+    process = subprocess.run([str(binary), '--json', 'agents', 'add-custom', key, '--path', str(root / key)], env=environment, encoding="utf-8", capture_output=True, timeout=45)
     return process.returncode, json.loads(process.stdout or process.stderr)
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
     distinct = list(pool.map(register, ['parallel-a', 'parallel-b']))
@@ -116,6 +123,6 @@ with sqlite3.connect(db) as connection:
     assert connection.execute("SELECT value FROM settings WHERE key='custom_tools'").fetchone()[0] == '{'
     connection.execute("UPDATE settings SET value=? WHERE key='custom_tools'", (legacy,))
 
-output = {'root': str(root), 'binary': str(binary), 'status': 'passed', 'checks': len(results), 'results': results}
-(root / 'results.json').write_text(json.dumps(output, ensure_ascii=False, indent=2))
+output = {'root': str(root), 'binary': str(binary), 'platform': platform.platform(), 'source_sha': os.environ.get('GITHUB_SHA'), 'status': 'passed', 'checks': len(results), 'results': results}
+(root / 'results.json').write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps({'status': 'passed', 'checks': len(results), 'evidence': str(root / 'results.json')}, ensure_ascii=False))
