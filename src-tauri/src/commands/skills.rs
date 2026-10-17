@@ -4277,7 +4277,8 @@ mod tests {
 
     fn commit_file(dir: &Path, rel: &str, body: &str) -> String {
         fs::write(dir.join(rel), body).unwrap();
-        git_in(dir, &["commit", "-qam", rel]);
+        git_in(dir, &["add", rel]);
+        git_in(dir, &["commit", "-qm", rel]);
         git_in(dir, &["rev-parse", "HEAD"])
     }
 
@@ -4320,6 +4321,13 @@ mod tests {
         assert_eq!(b.remote_revision.as_deref(), Some(head.as_str()));
         let a = repo.store.get_skill_by_id("a").unwrap().unwrap();
         assert_eq!(a.source_revision.as_deref(), Some(first.as_str()));
+
+        // A `.gitattributes` above the directory changes the bytes an update
+        // writes into it — here every line ending — while its tree stays put.
+        commit_file(&dir, ".gitattributes", "skills/b/** text eol=crlf\n");
+        assert_eq!(check("b").update_status, "update_available");
+        let b = repo.store.get_skill_by_id("b").unwrap().unwrap();
+        assert_eq!(b.source_revision.as_deref(), Some(head.as_str()));
     }
 
     /// An installed revision the server no longer has (a force-push, say) cannot

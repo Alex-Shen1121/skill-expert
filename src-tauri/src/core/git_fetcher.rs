@@ -1,5 +1,6 @@
 use crate::core::central_repo;
 use crate::core::git_credentials;
+use crate::core::log_sanitize;
 use crate::core::skill_metadata;
 use anyhow::{bail, Context, Result};
 use fs2::FileExt;
@@ -1228,8 +1229,11 @@ pub fn resolve_remote_revision(
 /// Which `(revision, subpath)` pairs hold exactly the same directory at `head`.
 ///
 /// A skill installed from a subdirectory of a monorepo would otherwise be
-/// "out of date" after every commit anywhere in that repository (#561). Equal
-/// tree ids mean identical content, so an update would change nothing.
+/// "out of date" after every commit anywhere in that repository (#561). An equal
+/// tree id is not enough on its own: a `.gitattributes` in any directory above
+/// the subpath (line endings, filters) changes the bytes checked out into it
+/// without touching its tree. Only when those match too would an update write
+/// exactly what is already there.
 ///
 /// One blobless, depth-1 fetch of `head` and every old revision serves all the
 /// pairs — trees and commits only, measured at ~400 KB for heygen-com/hyperframes.
@@ -1269,23 +1273,45 @@ pub fn unchanged_subtrees(
         run_git_watched_at(&temp, &args, proxy_url, None, &None)?;
 
         let repo = Repository::open_bare(&temp)?;
-        let tree_at = |rev: &str, subpath: &str| -> Option<git2::Oid> {
+        // The directory's tree, then the `.gitattributes` entry (or its absence)
+        // of every directory above it, root included. The trees on that path are
+        // all present once the subpath itself resolved, so absent means absent.
+        let checkout_inputs = |rev: &str, subpath: &str| {
             let commit = repo.find_commit(git2::Oid::from_str(rev).ok()?).ok()?;
-            let entry = commit.tree().ok()?.get_path(Path::new(subpath)).ok()?;
-            (entry.kind() == Some(git2::ObjectType::Tree)).then(|| entry.id())
+            let root = commit.tree().ok()?;
+            let entry = root.get_path(Path::new(subpath)).ok()?;
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                return None;
+            }
+            let attributes: Vec<Option<git2::Oid>> = Path::new(subpath)
+                .ancestors()
+                .skip(1)
+                .map(|dir| {
+                    root.get_path(&dir.join(".gitattributes"))
+                        .ok()
+                        .map(|e| e.id())
+                })
+                .collect();
+            Some((entry.id(), attributes))
         };
         Ok(pairs
             .into_iter()
             .filter(|(rev, subpath)| {
-                let now = tree_at(head, subpath);
-                now.is_some() && now == tree_at(rev, subpath)
+                let now = checkout_inputs(head, subpath);
+                now.is_some() && now == checkout_inputs(rev, subpath)
             })
             .cloned()
             .collect())
     })();
     let _ = std::fs::remove_dir_all(&temp);
     result.unwrap_or_else(|err| {
-        log::info!("subtree comparison for {url} unavailable, reporting updates as before: {err}");
+        // A URL may carry `user:token@`, and git's stderr in `err` may repeat it.
+        log::info!(
+            "{}",
+            log_sanitize::sanitize(&format!(
+                "subtree comparison for {url} unavailable, reporting updates as before: {err}"
+            ))
+        );
         HashSet::new()
     })
 }
