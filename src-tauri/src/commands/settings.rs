@@ -701,18 +701,96 @@ pub async fn app_exit(app: tauri::AppHandle) {
     }
 }
 
-/// Relaunch the app so a freshly installed update takes effect. Only ever
-/// invoked from an explicit user confirmation — the updater never restarts on
-/// its own.
-///
-/// Scheduled onto the main thread for the same reason `app_exit` is: the
-/// teardown destroys the main window before the process goes away.
+#[cfg(target_os = "macos")]
+fn restart_binary_path(path: &std::path::Path) -> std::path::PathBuf {
+    if let Some(macos) = path.parent().filter(|dir| dir.ends_with("Contents/MacOS")) {
+        // 与 Tauri 一样重新读取更新后的包信息，不复用运行中进程缓存的旧文件名。
+        if let Ok(info) =
+            plist::from_file::<_, plist::Dictionary>(macos.parent().unwrap().join("Info.plist"))
+        {
+            if let Some(name) = info.get("CFBundleExecutable").and_then(|v| v.as_string()) {
+                return macos.join(name);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+fn validate_restart_binary(path: &std::path::Path) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    let resolved = restart_binary_path(path);
+    #[cfg(target_os = "macos")]
+    let path = resolved.as_path();
+    if !std::fs::metadata(path).map_err(AppError::io)?.is_file() {
+        return Err(AppError::invalid_input("应用重启目标不是普通文件"));
+    }
+    #[cfg(unix)]
+    nix::unistd::access(path, nix::unistd::AccessFlags::X_OK).map_err(AppError::io)?;
+    // shortcut: 预检不能排除随后发生的系统启动失败，需要进程交接保证时再扩展。
+    Ok(())
+}
+
+/// 用户明确重启后，先检查目标可执行，再安排主线程关闭窗口并重启。
 #[tauri::command]
-pub async fn restart_app(app: tauri::AppHandle) {
+pub async fn restart_app(app: tauri::AppHandle) -> Result<(), AppError> {
+    let binary = tauri::process::current_binary(&app.env()).map_err(AppError::io)?;
+    validate_restart_binary(&binary)?;
     let app_for_main = app.clone();
-    if let Err(err) = app.run_on_main_thread(move || crate::restart_app(&app_for_main)) {
-        log::error!("Failed to schedule restart_app on main thread: {err}");
-        crate::restart_app(&app);
+    app.run_on_main_thread(move || crate::restart_app(&app_for_main))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::validate_restart_binary;
+
+    #[test]
+    fn missing_or_directory_restart_target_is_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(validate_restart_binary(&root.path().join("missing")).is_err());
+        assert!(validate_restart_binary(root.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_permission_failure_is_recoverable_after_permissions_are_restored() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("app");
+        std::fs::write(&binary, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(validate_restart_binary(&binary).is_err());
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        validate_restart_binary(&binary).unwrap();
+    }
+
+    #[test]
+    fn current_test_executable_is_accepted() {
+        validate_restart_binary(&std::env::current_exe().unwrap()).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_restart_checks_the_updated_bundle_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let macos = root.path().join("App.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        let old = macos.join("old");
+        let updated = macos.join("updated");
+        let plist = macos.parent().unwrap().join("Info.plist");
+        std::fs::write(&plist, br#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>updated</string></dict></plist>"#).unwrap();
+        std::fs::write(&updated, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&updated, std::fs::Permissions::from_mode(0o755)).unwrap();
+        validate_restart_binary(&old).unwrap();
+
+        std::fs::rename(&updated, &old).unwrap();
+        assert!(validate_restart_binary(&old).is_err());
+
+        std::fs::write(&plist, b"invalid").unwrap();
+        validate_restart_binary(&old).unwrap();
     }
 }
 

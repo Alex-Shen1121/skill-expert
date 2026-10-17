@@ -36,3 +36,19 @@ it("mounts normal application only after confirmed successful initialization", a
   render(<StartupGate><div>normal app</div></StartupGate>);
   await waitFor(() => expect(screen.getByText("normal app")).toBeTruthy());
 });
+
+it("重启失败时保留错误页并允许再次重试", async () => {
+  mocks.getStartupFailure.mockResolvedValue({ stage: "agent_configuration", code: "invalid JSON", setting: "custom_tools", retryable: false, diagnostics: "version=1.0.21" });
+  mocks.restartApp.mockRejectedValueOnce({ kind: "io", message: "应用文件不可执行" }).mockResolvedValueOnce(undefined);
+  render(<StartupGate><div>正常应用</div></StartupGate>);
+  const restart = await screen.findByRole<HTMLButtonElement>("button", { name: "Restart application" });
+  const user = userEvent.setup();
+  await user.click(restart);
+  expect(await screen.findByText(i18n.t("agentRegistration.actionFailed"))).toBeTruthy();
+  expect(restart.disabled).toBe(false);
+  expect(screen.queryByText("正常应用")).toBeNull();
+  expect(screen.getByRole("button", { name: "Exit" })).toBeTruthy();
+  await user.click(restart);
+  expect(mocks.restartApp).toHaveBeenCalledTimes(2);
+  expect(restart.disabled).toBe(true);
+});
