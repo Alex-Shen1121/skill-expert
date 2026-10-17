@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   FolderOpen,
@@ -153,6 +154,10 @@ export function ProjectDetail() {
   const [togglingAgentTarget, setTogglingAgentTarget] = useState<{ skillKey: string; agent: string } | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ProjectSkillGroup | null>(null);
+  const [unsyncedRemoval, setUnsyncedRemoval] = useState<{
+    details: string[];
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
   const [batchToggling, setBatchToggling] = useState(false);
@@ -641,12 +646,24 @@ export function ProjectDetail() {
     }
   };
 
+  // Agent toggles and preset removal delete workspace copies outright. Only
+  // in_sync proves the center holds the same bytes (see
+  // pushSkillToCenterAndAlign), so ask first when any copy is anything else.
+  const confirmUnsyncedRemoval = useCallback((variants: ProjectSkill[]) => {
+    const details = variants
+      .filter((variant) => variant.sync_status !== "in_sync")
+      .map((variant) => `${variant.name} · ${variant.agent_display_name}`);
+    if (details.length === 0) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => setUnsyncedRemoval({ details, resolve }));
+  }, []);
+
   const handleToggleDetailAgent = async (skill: ProjectSkillGroup, agentKey: string, enabled: boolean) => {
     if (!id) return;
     if (togglingAgentTarget) return;
     const target = exportTargets.find((item) => item.key === agentKey);
     const displayName = target?.display_name ?? agentKey;
     const existingVariant = skill.variants.find((variant) => variant.agent === agentKey);
+    if (!enabled && existingVariant && !(await confirmUnsyncedRemoval([existingVariant]))) return;
 
     setTogglingAgentTarget({ skillKey: getSkillKey(skill), agent: agentKey });
     try {
@@ -895,6 +912,16 @@ export function ProjectDetail() {
     [findProjectPresetVariant, id, t]
   );
 
+  const confirmPresetRemoval = useCallback(
+    (pairs: { skill: ManagedSkill; agentKey: string }[]) =>
+      confirmUnsyncedRemoval(
+        pairs
+          .map(({ skill, agentKey }) => findProjectPresetVariant(skill, agentKey))
+          .filter((variant): variant is ProjectSkill => variant !== null)
+      ),
+    [confirmUnsyncedRemoval, findProjectPresetVariant]
+  );
+
   const handlePresetActionComplete = useCallback(async () => {
     await Promise.all([loadSkills(), refreshProjects()]);
   }, [loadSkills, refreshProjects]);
@@ -1099,6 +1126,7 @@ export function ProjectDetail() {
             onAddSkill={handleAddPresetSkillToProject}
             onRemoveSkill={handleRemovePresetSkillFromProject}
             onComplete={handlePresetActionComplete}
+            confirmRemove={confirmPresetRemoval}
           />
         )}
       </div>
@@ -1560,6 +1588,25 @@ export function ProjectDetail() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteSkill}
       />
+
+      {/* Portaled so it covers the detail sheet (its agent toggles land here)
+          and the sheet's Escape handler leaves the key to it. ConfirmDialog
+          calls onClose after onConfirm too; a settled promise ignores it. */}
+      {createPortal(
+        <ConfirmDialog
+          open={!!unsyncedRemoval}
+          title={t("project.removeUnsyncedTitle")}
+          message={t("project.removeUnsyncedConfirm")}
+          details={unsyncedRemoval?.details}
+          tone="danger"
+          onClose={() => {
+            unsyncedRemoval?.resolve(false);
+            setUnsyncedRemoval(null);
+          }}
+          onConfirm={async () => unsyncedRemoval?.resolve(true)}
+        />,
+        document.body
+      )}
 
       {/* Batch Delete Confirm Dialog */}
       <ConfirmDialog

@@ -16,6 +16,8 @@ export interface PresetBarProps {
   onAddSkill: (skill: ManagedSkill, agentKey: string) => Promise<void>;
   onRemoveSkill: (skill: ManagedSkill, agentKey: string) => Promise<void>;
   onComplete: () => Promise<void>;
+  /** Asked before a preset's copies are removed; resolving false cancels. */
+  confirmRemove?: (pairs: { skill: ManagedSkill; agentKey: string }[]) => Promise<boolean>;
   /** Whether the status badge counts agent copies or logical skills. */
   statusMode?: PresetStatusMode;
 }
@@ -28,6 +30,7 @@ export function PresetBar({
   onAddSkill,
   onRemoveSkill,
   onComplete,
+  confirmRemove,
   statusMode = "agent-pair",
 }: PresetBarProps) {
   const { t } = useTranslation();
@@ -83,17 +86,21 @@ export function PresetBar({
   }, [agentKeys, existsInWorkspace, managedSkills, onAddSkill, onComplete, t]);
 
   const handleDeactivate = useCallback(async (preset: Preset) => {
+    const pairs = managedSkills
+      .filter((s) => s.preset_ids.includes(preset.id))
+      .flatMap((skill) =>
+        agentKeys
+          .filter((agentKey) => existsInWorkspace(skill, agentKey))
+          .map((agentKey) => ({ skill, agentKey }))
+      );
+    if (confirmRemove && !(await confirmRemove(pairs))) return;
     setLoadingKey(`${preset.id}-remove`);
     try {
-      const presetSkills = managedSkills.filter((s) => s.preset_ids.includes(preset.id));
       let removed = 0, failed = 0;
       const failures: string[] = [];
-      for (const skill of presetSkills) {
-        for (const agentKey of agentKeys) {
-          if (!existsInWorkspace(skill, agentKey)) continue;
-          try { await onRemoveSkill(skill, agentKey); removed++; }
-          catch (e) { failed++; failures.push(getErrorMessage(e, t("common.error"))); }
-        }
+      for (const { skill, agentKey } of pairs) {
+        try { await onRemoveSkill(skill, agentKey); removed++; }
+        catch (e) { failed++; failures.push(getErrorMessage(e, t("common.error"))); }
       }
       if (removed > 0) {
         toast.success(t("presetActions.removedToast", { removed }));
@@ -113,7 +120,7 @@ export function PresetBar({
     } finally {
       setLoadingKey(null);
     }
-  }, [agentKeys, existsInWorkspace, managedSkills, onComplete, onRemoveSkill, t]);
+  }, [agentKeys, confirmRemove, existsInWorkspace, managedSkills, onComplete, onRemoveSkill, t]);
 
   if (visiblePresets.length === 0) return null;
 

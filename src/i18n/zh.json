@@ -989,6 +989,8 @@
     "batchImportFailed": "{{count}} 个 Skill 添加失败",
     "deleteSkill": "删除 Skill",
     "deleteSkillConfirm": "确定永久删除 Skill \"{{name}}\" 吗？此操作不可恢复。",
+    "removeUnsyncedTitle": "删除未同步的副本",
+    "removeUnsyncedConfirm": "以下副本与中心不一致，可能含有只存在于本项目的内容。移除会永久删除它们，此操作不可恢复。",
     "skillDeleted": "\"{{name}}\" 已删除",
     "selectMode": "多选",
     "cancelSelect": "退出多选",
