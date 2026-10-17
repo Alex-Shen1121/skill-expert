@@ -1030,6 +1030,7 @@
     "action": "操作",
     "addMissing": "加入缺少的 Skills",
     "removeMatching": "移除符合的 Skills",
+    "removePreset": "從目前工作區移除 {{name}}",
     "agents": "Agents",
     "selectAgents": "請至少選擇一個 Agent",
     "noPresets": "沒有可用 Preset",

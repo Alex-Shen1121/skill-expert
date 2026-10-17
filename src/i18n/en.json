@@ -1030,6 +1030,7 @@
     "action": "Action",
     "addMissing": "Add missing skills",
     "removeMatching": "Remove matching skills",
+    "removePreset": "Remove {{name}} from this workspace",
     "agents": "Agents",
     "selectAgents": "Select at least one agent",
     "noPresets": "No presets available",
