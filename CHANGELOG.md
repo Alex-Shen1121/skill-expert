@@ -13,6 +13,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 
 ### User-facing
 - Report registration, deployment and refresh separately; preserve legacy Duo identity and shared or unverified files. Add safe startup recovery and shared project-root guards.
+- 项目技能的删除、启停和中心更新部分成功时，立即回读实际状态并保留逐目标回执，避免卡片继续显示已失效的分配或启停状态。
 
 ### Developer & Governance
 - Use strict Agent configuration snapshots and transactional updates; keep the stable source version unchanged.

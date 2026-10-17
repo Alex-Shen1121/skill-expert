@@ -573,7 +573,11 @@ export function ProjectDetail() {
         setProjectActionResults((previous) => [...previous, { target: `${variant.agent}: ${variant.relative_path}`, ok: false, message: getErrorMessage(error, t("common.error")) }]);
       }
     }
-    if (failed) throw new Error(t("agentRegistration.partial"));
+    if (failed) {
+      // 部分目标可能已提交，报错前仍须回读实际状态，避免卡片保留旧的分配和启停状态。
+      await Promise.all([loadSkills(), refreshProjects()]);
+      throw new Error(t("agentRegistration.partial"));
+    }
   };
 
   const prepareProjectDelete = async (skills: ProjectSkillGroup[], batch: boolean) => {
