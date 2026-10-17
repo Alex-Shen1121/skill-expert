@@ -120,6 +120,37 @@ pub(crate) fn write_all_from_db_unlocked(store: &SkillStore) -> Result<()> {
     Ok(())
 }
 
+/// Rewrite one preset member's file, which holds its per-agent toggles, for
+/// callers that change only that member. `write_all_from_db_unlocked` fsyncs
+/// every metadata file, too slow for commands that run once per (skill, agent)
+/// pair. Without a complete scenario snapshot the reindex leaves memberships
+/// to the database, so there is nothing to keep in step.
+pub(crate) fn write_scenario_skill_unlocked(
+    store: &SkillStore,
+    scenario_id: &str,
+    skill_id: &str,
+) -> Result<()> {
+    if !metadata_has_complete_scenario_snapshot() {
+        return Ok(());
+    }
+    let skill_ids = store.get_skill_ids_for_scenario(scenario_id)?;
+    let Some(index) = skill_ids.iter().position(|id| id == skill_id) else {
+        return Ok(());
+    };
+    let tools = store
+        .get_scenario_skill_tool_toggles(scenario_id, skill_id)?
+        .into_iter()
+        .map(|toggle| (toggle.tool, toggle.enabled))
+        .collect::<BTreeMap<_, _>>();
+    write_membership_file(&ScenarioSkillMetaFile {
+        schema_version: SCHEMA_VERSION,
+        scenario_id: scenario_id.to_string(),
+        skill_id: skill_id.to_string(),
+        sort_order: index as i32,
+        tools,
+    })
+}
+
 #[allow(dead_code)]
 pub fn reindex_from_metadata(store: &SkillStore) -> Result<()> {
     // Foreground wait: runs at process startup (GUI and every CLI invocation),
@@ -724,6 +755,52 @@ mod tests {
             last_checked_at: None,
             last_check_error: None,
         }
+    }
+
+    /// The single-member write must produce the file a full write would.
+    #[test]
+    fn member_write_matches_full_write() {
+        let repo = test_repo();
+        for skill_id in ["skill-1", "skill-2"] {
+            let dir = write_skill_dir(skill_id);
+            repo.store
+                .insert_skill(&sample_skill(skill_id, &dir))
+                .unwrap();
+        }
+        insert_preset_with_member(&repo.store, "p1", "skill-1");
+        repo.store.add_skill_to_scenario("p1", "skill-2").unwrap();
+        write_all_from_db_unlocked(&repo.store).unwrap();
+        // The member at index 1, so a wrong sort_order shows in the file.
+        let skill_id = repo.store.get_skill_ids_for_scenario("p1").unwrap()[1].clone();
+        repo.store
+            .set_scenario_skill_tool_enabled("p1", &skill_id, "claude_code", false)
+            .unwrap();
+        let path = metadata_dir().join(format!("scenario-skills/p1/{skill_id}.json"));
+
+        write_scenario_skill_unlocked(&repo.store, "p1", &skill_id).unwrap();
+        let member_write = fs::read_to_string(&path).unwrap();
+        write_all_from_db_unlocked(&repo.store).unwrap();
+
+        assert!(member_write.contains("claude_code"));
+        assert_eq!(member_write, fs::read_to_string(&path).unwrap());
+    }
+
+    /// Without scenarios/ the reindex leaves presets to the database, so a
+    /// member write has nothing to keep in step and writes nothing.
+    #[test]
+    fn member_write_skips_a_snapshot_without_scenario_metadata() {
+        let repo = test_repo();
+        let skill_dir = write_skill_dir("skill-1");
+        repo.store
+            .insert_skill(&sample_skill("skill-1", &skill_dir))
+            .unwrap();
+        insert_preset_with_member(&repo.store, "p1", "skill-1");
+        // Writes schema.json and skills/ only.
+        ensure_skill_metadata_unlocked(&repo.store, "skill-1").unwrap();
+
+        write_scenario_skill_unlocked(&repo.store, "p1", "skill-1").unwrap();
+
+        assert!(!metadata_dir().join("scenario-skills").exists());
     }
 
     #[test]
