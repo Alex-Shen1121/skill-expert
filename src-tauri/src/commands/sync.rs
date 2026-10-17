@@ -73,35 +73,19 @@ fn unsync_skill_for_tool_in_preset(
     store.delete_target(skill_id, tool).map_err(AppError::db)
 }
 
-/// Record a per-agent deploy or removal of an active-preset skill in that
-/// preset's per-agent toggles, which the startup sync deploys from. Every
-/// launch reindexes toggles from the sync metadata, so a database-only change
-/// is undone on restart (#549).
+/// The one-pair case of [`scenario_service::set_active_preset_tool_toggles`].
 fn set_active_preset_tool_toggle(
     store: &SkillStore,
     skill_id: &str,
     tool: &str,
     enabled: bool,
 ) -> Result<(), AppError> {
-    let Ok(Some(active_id)) = store.get_active_scenario_id() else {
-        return Ok(());
-    };
-    let skill_ids = store
-        .get_skill_ids_for_scenario(&active_id)
-        .map_err(AppError::db)?;
-    if !skill_ids.iter().any(|id| id == skill_id) {
-        return Ok(());
-    }
-    let adapter_keys: Vec<String> = tool_adapters::enabled_installed_adapters(store)
-        .iter()
-        .map(|a| a.key.clone())
-        .collect();
-    sync_metadata::with_repo_lock("set skill tool toggle", || {
-        store.ensure_scenario_skill_tool_defaults(&active_id, skill_id, &adapter_keys)?;
-        store.set_scenario_skill_tool_enabled(&active_id, skill_id, tool, enabled)?;
-        sync_metadata::write_scenario_skill_unlocked(store, &active_id, skill_id)
-    })
-    .map_err(AppError::db)
+    scenario_service::set_active_preset_tool_toggles(
+        store,
+        &[skill_id.to_string()],
+        &[tool.to_string()],
+        enabled,
+    )
 }
 
 #[tauri::command]
@@ -721,6 +705,51 @@ mod tests {
                 .unwrap(),
             vec!["test_agent".to_string()]
         );
+    }
+
+    /// The tray's remove action and the CLI's `presets undeploy` / `skills
+    /// undeploy` go through the batch remove, which left the active preset's
+    /// toggles on: the next launch deployed the skill again (#549).
+    #[test]
+    fn batch_removed_active_preset_skill_stays_removed_after_restart() {
+        let repo = deployed_active_preset_repo();
+
+        scenario_service::apply_skills_to_tools(
+            &repo.store,
+            &["s1".to_string()],
+            &["test_agent".to_string()],
+            scenario_service::BatchApplyMode::Remove,
+        )
+        .unwrap();
+        assert!(!repo.deployed.exists());
+
+        restart(&repo.store);
+
+        assert!(
+            !repo.deployed.exists(),
+            "the removed skill was deployed again on restart"
+        );
+    }
+
+    /// Removing from an agent the skill was never deployed to (the tray
+    /// removes from every coding agent) must also keep the next launch from
+    /// deploying it there.
+    #[test]
+    fn batch_remove_from_an_undeployed_agent_keeps_it_off_after_restart() {
+        let repo = deployed_active_preset_repo();
+        repo.store.delete_target("s1", "test_agent").unwrap();
+        fs::remove_dir_all(&repo.deployed).unwrap();
+
+        scenario_service::apply_skills_to_tools(
+            &repo.store,
+            &["s1".to_string()],
+            &["test_agent".to_string()],
+            scenario_service::BatchApplyMode::Remove,
+        )
+        .unwrap();
+        restart(&repo.store);
+
+        assert!(!repo.deployed.exists());
     }
 
     #[test]
