@@ -845,6 +845,8 @@
     "toastFailed": "{{count}} skill(s) failed to add",
     "toastAddedToProject": "Added \"{{skill}}\" to {{project}}",
     "toastRemovedFromProject": "Removed \"{{skill}}\" from {{project}}",
+    "removeConfirmTitle": "Remove from workspace",
+    "removeConfirm": "Permanently delete the \"{{skill}}\" folder from {{project}} ({{agent}})? This action cannot be undone.",
     "add": "Add",
     "installedShort": "Added",
     "projectsTitle": "Project Workspaces",
