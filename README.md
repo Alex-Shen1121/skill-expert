@@ -56,7 +56,7 @@ Optional: open **Backup**, sign in with GitHub once, and let versioned backup an
 
 - **Skills** — search, preview, tag, filter, multi-select, export, delete, inspect sources, and compare upstream changes.
 - **Presets** — build named Skill groups and activate them for selected Agents without losing per-Agent visibility.
-- **Agents** — use 52 built-in integrations, reorder the Agents you use, change their paths, or add custom tools.
+- **Agents** — use 53 built-in integrations, reorder the Agents you use, change their paths, or add custom tools.
 - **Workspaces** — control global, project, and linked Skills from the same interaction model.
 - **Updates** — check and update in the foreground with visible batch progress, retry, stop, and configurable concurrency.
 - **Operations** — choose symlink or copy mode, configure a proxy and theme, inspect activity history, and export logs for issue reports.
@@ -66,7 +66,7 @@ Optional: open **Backup**, sign in with GitHub once, and let versioned backup an
 
 52 integrations are built in, including:
 
-Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
+Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · GitLab Duo · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 
 Detected Agents appear first in **Settings**. Custom tools use the same library, workspace, and deployment controls.
 
@@ -81,6 +81,33 @@ The **Backup** page stores the library in a normal Git repository. The guided Gi
 - The remote remains plain Git, so it can be cloned or inspected without Agent 技能管家.
 
 ## CLI
+
+### GitLab Duo and custom Agent registration
+
+Detailed protocol and isolated self-test commands: [Agent registration](docs/agent-registration.md).
+
+GitLab Duo uses `~/.gitlab/duo/skills` for global deployment, `~/.agents/skills` for additional discovery only, and `<project>/.agents/skills` for project deployment. Shared discovery does not import Skills or grant ownership. Shared or uncertain project roots refuse moves, deletion, and replacement from the center; disabling an Agent globally does not revoke access to project files.
+
+On Windows, edit the existing Skills path setting and enter the expanded absolute `%APPDATA%\GitLab\duo\skills` path. For custom configuration roots use the `skills` subdirectory of `GLAB_CONFIG_DIR`, or `XDG_CONFIG_HOME/gitlab/duo` when GLAB is unset. Variables are not expanded automatically. Per the [GitLab Agent Skills contract](https://docs.gitlab.com/user/duo_agent_platform/customize/agent_skills/), project support requires Duo CLI ≥8.73.0 or GitLab for VS Code ≥6.71.4; global skills require Duo CLI ≥8.83.0 and `--enable-global-skills true` or `GITLAB_ENABLE_GLOBAL_SKILLS=true`. Start a new session or load skills explicitly. A configured path does not prove vendor installation, authentication or loading.
+
+```sh
+skill-expert-cli agents add-custom my-agent --path "/absolute/skills path" --name "My Agent" --project-path .my-agent/skills
+skill-expert-cli agents list
+```
+
+`tools` remains an alias of `agents`. KEY and `--path` are required; the default name is KEY. Omitted/blank project paths mean no project support. Names and paths are trimmed; global paths must be absolute or start with `~/`; project paths must be relative and cannot contain parent segments or resolve to the project root. Duplicate/reserved keys are rejected without overwrite. GUI and CLI use the same validation and configuration transaction. Refresh the desktop list after CLI changes in the same library; isolated `--skills-root` libraries and WSL installations are separate.
+
+Registration returns `registered`, the normalized `definition`, `tool` (or null if unreadable), and an actual global `deployment` report. Exit 0 means saved plus complete or a proven `not_run`; it does not mean Duo loaded the Skill. Exit 1 means failure or incomplete deployment: confirmed saved definitions remain, and `DEPLOYMENT_INCOMPLETE` includes `registered=true`. A commit with an uncertain result uses `registered=null`; query the same KEY and compare all fields before retrying. A transport failure must not be treated as proof of rollback. Parse failures exit 2. Execution results are one JSON document on stdout for success or stderr for failure, both with and without `--json`. Reports distinguish committed/current/refused/failed/unconfirmed targets; an unknown total is null. Inspect both files and records before retrying an unconfirmed result.
+
+A valid existing custom `gitlab_duo` retains its name, category, paths, project null, order and disabled state. There is no automatic conversion. Removing it leaves the built-in Agent disabled and preserves valid dormant overrides. Before explicitly enabling it, inspect the actual paths in the same library:
+
+```sh
+skill-expert-cli --skills-root /path/to/library agents list
+skill-expert-cli --skills-root /path/to/library agents enable gitlab_duo
+```
+
+These are separate steps; the CLI does not prove the list was read or bind the path snapshot between commands. List again after concurrent changes. Damaged or ambiguous configuration blocks dependent writes; the startup failure view offers full process restart, sanitized diagnostics and exit, without clearing data. Ordinary settings remain supported, while the five Agent configuration keys use dedicated Agent operations.
+
 
 The desktop app and `skill-expert-cli` use the same Rust core, SQLite database, central library, and deployment engine.
 

@@ -404,6 +404,7 @@ export function AgentSkillsManagementSettings() {
               <div key={target.key} className="flex items-center gap-3 px-4 py-2.5">
                 <AgentIcon
                   agentKey={target.key}
+                  isCustom={tools.find((tool) => tool.key === target.key)?.is_custom}
                   displayName={target.displayName}
                   className="h-7 w-7 rounded-lg"
                 />

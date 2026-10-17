@@ -58,6 +58,15 @@ struct ToolsArgs {
 #[derive(Subcommand, Debug)]
 enum ToolsCommand {
     List,
+    AddCustom {
+        key: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        project_path: Option<String>,
+    },
     Enable {
         #[arg(required = true)]
         agents: Vec<String>,
@@ -577,6 +586,7 @@ struct SyncReport {
     tool: Option<String>,
     dry_run: bool,
     targets: Vec<scenario_service::SyncPreviewTarget>,
+    deployment: Option<scenario_service::DeploymentReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -681,7 +691,27 @@ fn main() {
         }
     };
 
+    let registration = matches!(
+        &cli.command,
+        Commands::Tools(ToolsArgs {
+            command: ToolsCommand::AddCustom { .. }
+        })
+    );
     if let Err(err) = run(cli) {
+        if registration {
+            let mut envelope = error_envelope(&err);
+            envelope["registered"] = if err
+                .downcast_ref::<AppError>()
+                .is_some_and(|e| e.kind == app_lib::core::error::ErrorKind::CommitUnknown)
+            {
+                envelope["code"] = serde_json::Value::String("REGISTRATION_UNKNOWN".into());
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::Bool(false)
+            };
+            eprintln!("{}", serde_json::to_string(&envelope).unwrap());
+            std::process::exit(1);
+        }
         if json {
             eprintln!("{}", serde_json::to_string(&error_envelope(&err)).unwrap());
         } else {
@@ -692,6 +722,8 @@ fn main() {
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    #[cfg(debug_assertions)]
+    central_repo::configure_debug_acceptance_root_from_environment()?;
     if let Some(skills_root) = &cli.skills_root {
         let base = central_repo::external_base_dir(skills_root);
         central_repo::set_runtime_base_dir_override(Some(base));
@@ -744,7 +776,35 @@ fn repo_status(store: &SkillStore) -> RepoStatus {
 
 fn run_tools(args: ToolsArgs, store: &SkillStore, json: bool) -> anyhow::Result<()> {
     match args.command {
-        ToolsCommand::List => print_json(&tool_service::list_tool_info(store), json),
+        ToolsCommand::List => print_json(&tool_service::list_tool_info(store)?, json),
+        ToolsCommand::AddCustom {
+            key,
+            path,
+            name,
+            project_path,
+        } => {
+            let display_name = name.unwrap_or_else(|| key.trim().to_string());
+            let result = tool_cmd::register_custom_tool(
+                store,
+                tool_adapters::CustomToolDef {
+                    key,
+                    display_name,
+                    skills_dir: path,
+                    project_relative_skills_dir: project_path,
+                    category: Default::default(),
+                },
+            )
+            .map_err(map_app_err)?;
+            if result.deployment.complete() {
+                print_json(&result, true);
+            } else {
+                let envelope = serde_json::json!({"ok": false, "code": "DEPLOYMENT_INCOMPLETE", "registered": true,
+                    "definition": result.definition, "tool": result.tool, "deployment": result.deployment,
+                    "message": "Agent registered; skill deployment incomplete"});
+                eprintln!("{}", serde_json::to_string(&envelope).unwrap());
+                std::process::exit(1);
+            }
+        }
         ToolsCommand::Enable { agents } => {
             print_json(&run_set_agents_enabled(store, &agents, true)?, json)
         }
@@ -763,7 +823,7 @@ fn run_set_agents_enabled(
     if agents.is_empty() {
         bail!("no agent key provided");
     }
-    let infos = tool_service::list_tool_info(store);
+    let infos = tool_service::list_tool_info(store)?;
     let mut resolved = Vec::new();
     for key in agents {
         let info = infos
@@ -1019,7 +1079,7 @@ fn list_skills_filtered(
         .map(|reference| resolve_scenario(store, reference).map(|preset| preset.id))
         .transpose()?;
     if let Some(agent) = deployed_to {
-        if tool_adapters::find_adapter_with_store(store, agent).is_none() {
+        if tool_adapters::find_adapter_with_store(store, agent)?.is_none() {
             bail!("unknown agent: {agent}");
         }
     }
@@ -1108,7 +1168,7 @@ fn skill_status(store: &SkillStore, reference: &str) -> anyhow::Result<SkillStat
         .find(|item| item.id == skill.id)
         .ok_or_else(|| anyhow!("skill summary missing"))?;
     let targets = store.get_targets_for_skill(&skill.id)?;
-    let mut agents: Vec<SkillAgentStatus> = tool_service::list_tool_info(store)
+    let mut agents: Vec<SkillAgentStatus> = tool_service::list_tool_info(store)?
         .into_iter()
         .map(|agent| {
             let target = targets.iter().find(|target| target.tool == agent.key);
@@ -1210,7 +1270,7 @@ fn run_skill_deployment(
 
     let mut preserved: Vec<String> = Vec::new();
     if !dry_run {
-        scenario_service::apply_skills_to_tools(
+        let execution = scenario_service::apply_skills_to_tools(
             store,
             &skill_ids,
             &agent_keys,
@@ -1219,8 +1279,7 @@ fn run_skill_deployment(
             } else {
                 scenario_service::BatchApplyMode::Remove
             },
-        )
-        .map_err(map_app_err)?;
+        );
         let verification =
             verify_deployment_state(store, &skill_ids, &agent_keys, deploy, &existing_targets)?;
         for skill in &skills {
@@ -1240,6 +1299,7 @@ fn run_skill_deployment(
             }
         }
         preserved = verification.preserved.clone();
+        execution.map_err(map_app_err)?;
         if !verification.failures.is_empty() {
             bail!(
                 "deployment incomplete: {} pair(s) verified, {} verification issue(s): {}",
@@ -1312,7 +1372,20 @@ fn verify_deployment_state(
             {
                 let still_referenced = current_targets
                     .iter()
-                    .any(|target| target.target_path == previous.target_path);
+                    .chain(
+                        previous_targets
+                            .iter()
+                            .filter(|target| target.id != previous.id),
+                    )
+                    .any(|target| {
+                        match (
+                            scenario_service::entry_identity(Path::new(&target.target_path)),
+                            scenario_service::entry_identity(Path::new(&previous.target_path)),
+                        ) {
+                            (Ok(a), Ok(b)) => a == b,
+                            _ => true,
+                        }
+                    });
                 if !still_referenced {
                     match std::fs::symlink_metadata(&previous.target_path) {
                         Ok(_) => {
@@ -1321,11 +1394,14 @@ fn verify_deployment_state(
                             // took it over, keeping it was the correct call and
                             // reporting it as a failure would train users to
                             // ignore the warning (#363).
-                            let preserved_deliberately = !sync_engine::matches_recorded_deployment(
-                                Path::new(&previous.target_path),
-                                &previous.mode,
-                            )
-                            .unwrap_or(true);
+                            let preserved_deliberately = store
+                                .get_skill_by_id(&previous.skill_id)?
+                                .map_or(true, |skill| {
+                                    !scenario_service::recorded_target_matches_source(
+                                        previous,
+                                        Path::new(&skill.central_path),
+                                    )
+                                });
                             if preserved_deliberately {
                                 preserved.push(previous.target_path.clone());
                             } else {
@@ -1986,6 +2062,7 @@ fn run_sync(
             tool: tool_key.map(|s| s.to_string()),
             dry_run: true,
             targets: filtered,
+            deployment: None,
         });
     }
 
@@ -1995,22 +2072,15 @@ fn run_sync(
         store.set_active_scenario(&preset.id)?;
     }
 
-    if let Some(t) = tool_key {
-        // Build targets locally and filter to the requested tool so we don't
-        // fan out to every enabled adapter (which is what
-        // sync_active_scenario_to_tool ends up doing via
-        // sync_skill_to_active_scenario).
-        let all_targets = scenario_service::collect_scenario_sync_targets(store, &preset.id)
-            .map_err(map_app_err)?;
-        let desired: Vec<_> = all_targets.into_iter().filter(|tg| tg.tool == t).collect();
-        let refusals =
-            scenario_service::sync_desired_targets(store, &desired).map_err(map_app_err)?;
-        scenario_service::refusals_to_error(refusals).map_err(map_app_err)?;
-    } else {
-        let refusals =
-            scenario_service::apply_scenario_to_default(store, &preset.id).map_err(map_app_err)?;
-        scenario_service::refusals_to_error(refusals).map_err(map_app_err)?;
-    }
+    let _deployment = store.deployment_lock("CLI sync")?;
+    let all_targets =
+        scenario_service::collect_scenario_sync_targets(store, &preset.id).map_err(map_app_err)?;
+    let desired = all_targets
+        .into_iter()
+        .filter(|target| tool_key.map_or(true, |key| target.tool == key))
+        .collect::<Vec<_>>();
+    let deployment = scenario_service::sync_desired_targets_report(store, &desired);
+    deployment.require_complete().map_err(map_app_err)?;
 
     Ok(SyncReport {
         ok: true,
@@ -2019,6 +2089,7 @@ fn run_sync(
         tool: tool_key.map(|s| s.to_string()),
         dry_run: false,
         targets: filtered,
+        deployment: Some(deployment),
     })
 }
 
@@ -2642,7 +2713,7 @@ fn select_preset_agents(
     requested: &[String],
     require_available: bool,
 ) -> anyhow::Result<Vec<tool_service::ToolInfo>> {
-    let infos = tool_service::list_tool_info(store);
+    let infos = tool_service::list_tool_info(store)?;
     if requested.is_empty() {
         return Ok(infos
             .into_iter()
@@ -2693,7 +2764,7 @@ fn select_agent_keys_for_removal(
         return Ok(keys);
     }
 
-    let known_keys: std::collections::HashSet<String> = tool_service::list_tool_info(store)
+    let known_keys: std::collections::HashSet<String> = tool_service::list_tool_info(store)?
         .into_iter()
         .map(|agent| agent.key)
         .collect();
@@ -2723,7 +2794,7 @@ fn preset_status(
         .filter(|target| target.status == "ok")
         .map(|target| (target.skill_id.clone(), target.tool.clone()))
         .collect();
-    let infos = tool_service::list_tool_info(store);
+    let infos = tool_service::list_tool_info(store)?;
     let agent_keys = if requested_agents.is_empty() {
         let mut keys: Vec<String> = infos
             .iter()
@@ -2830,7 +2901,7 @@ fn run_preset_deployment(
 
     let mut preserved: Vec<String> = Vec::new();
     if !dry_run {
-        scenario_service::apply_skills_to_tools(
+        let execution = scenario_service::apply_skills_to_tools(
             store,
             &skill_ids,
             &agent_keys,
@@ -2839,8 +2910,7 @@ fn run_preset_deployment(
             } else {
                 scenario_service::BatchApplyMode::Remove
             },
-        )
-        .map_err(map_app_err)?;
+        );
         let verification =
             verify_deployment_state(store, &skill_ids, &agent_keys, deploy, &existing_targets)?;
         for skill_id in &skill_ids {
@@ -2868,6 +2938,7 @@ fn run_preset_deployment(
             }
         }
         preserved = verification.preserved.clone();
+        execution.map_err(map_app_err)?;
         if !verification.failures.is_empty() {
             bail!(
                 "deployment incomplete: {} pair(s) verified, {} verification issue(s): {}",

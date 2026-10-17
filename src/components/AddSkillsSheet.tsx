@@ -275,7 +275,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
     : [];
 
   const renderAgentIcons = (
-    agents: { key: string; display_name: string }[],
+    agents: { key: string; display_name: string; is_custom?: boolean }[],
     options: { dim?: string; limit?: number } = {},
   ) => {
     const dim = options.dim ?? "h-6 w-6";
@@ -289,6 +289,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
           <AgentIcon
             key={agent.key}
             agentKey={agent.key}
+            isCustom={agent.is_custom}
             displayName={agent.display_name}
             className={cn(
               dim,
@@ -446,6 +447,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
                       <span className="relative inline-flex">
                         <AgentIcon
                           agentKey={tt.key}
+            isCustom={tt.is_custom}
                           displayName={tt.display_name}
                           className={cn(
                             "h-5 w-5 rounded-full border-0 bg-transparent",
@@ -499,6 +501,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
                   >
                     <AgentIcon
                       agentKey={tt.key}
+            isCustom={tt.is_custom}
                       displayName={tt.display_name}
                       className="h-5 w-5 rounded-full border-0 bg-transparent"
                     />

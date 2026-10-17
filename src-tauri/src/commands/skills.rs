@@ -1,3 +1,4 @@
+use crate::core::scenario_service;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -2940,46 +2941,28 @@ pub fn swap_skill_directory(staged_path: &Path, current_path: &Path) -> Result<(
 }
 
 pub fn resync_copy_targets(store: &SkillStore, skill_id: &str) -> Result<(), AppError> {
+    let _deployment = store.deployment_lock("resync copy targets")?;
     let skill = store
         .get_skill_by_id(skill_id)
         .map_err(AppError::db)?
         .ok_or_else(|| AppError::not_found("Skill not found"))?;
-    let source = PathBuf::from(&skill.central_path);
     let targets = store
         .get_targets_for_skill(skill_id)
         .map_err(AppError::db)?;
-
-    for target in targets {
-        if target.mode != "copy" {
-            continue;
-        }
-
-        // Recorded: this walks existing rows, so each path is one we wrote.
-        // The row's mode is filtered to "copy" above, and sync_engine still
-        // refuses if what is on disk no longer matches that record.
-        sync_engine::sync_skill(
-            &source,
-            Path::new(&target.target_path),
-            sync_engine::SyncMode::Copy,
-            sync_engine::ReplacePolicy::Recorded {
-                mode: target.mode.as_str(),
-            },
-        )
-        .map_err(AppError::io)?;
-
-        let updated_target = SkillTargetRecord {
-            synced_at: Some(chrono::Utc::now().timestamp_millis()),
-            status: "ok".to_string(),
-            last_error: None,
-            // Refresh the hash so the startup freshness check (#153)
-            // sees this resync as up-to-date instead of stale.
+    let desired = targets
+        .into_iter()
+        .filter(|target| target.mode == "copy")
+        .map(|target| scenario_service::ScenarioSyncTarget {
+            skill_id: skill.id.clone(),
+            skill_name: skill.name.clone(),
+            tool: target.tool,
+            source: PathBuf::from(&skill.central_path),
+            target: PathBuf::from(target.target_path),
+            mode: sync_engine::SyncMode::Copy,
             source_hash: skill.content_hash.clone(),
-            ..target
-        };
-        store.insert_target(&updated_target).map_err(AppError::db)?;
-    }
-
-    Ok(())
+        })
+        .collect::<Vec<_>>();
+    scenario_service::sync_desired_targets_report(store, &desired).require_complete()
 }
 
 #[tauri::command]

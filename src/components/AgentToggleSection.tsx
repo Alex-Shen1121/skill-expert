@@ -6,6 +6,7 @@ import { AgentIcon } from "./AgentIcon";
 
 export interface AgentToggleItem {
   key: string;
+  isCustom?: boolean;
   displayName: string;
   enabled: boolean;
   isAvailable: boolean;
@@ -124,6 +125,7 @@ function AgentToggle({
       </span>
       <AgentIcon
         agentKey={item.key}
+        isCustom={item.isCustom}
         displayName={item.displayName}
         className="h-5 w-5 rounded-[4px]"
       />

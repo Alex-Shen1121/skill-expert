@@ -236,7 +236,9 @@ struct TrayMenuData {
     check_updates_running: bool,
 }
 
-fn collect_tray_menu_data(store: &core::skill_store::SkillStore) -> TrayMenuData {
+fn collect_tray_menu_data(
+    store: &core::skill_store::SkillStore,
+) -> Result<TrayMenuData, core::error::AppError> {
     let all_skills = store.get_all_skills().unwrap_or_default();
     let total_skills = all_skills.len();
     let update_count = all_skills
@@ -244,7 +246,7 @@ fn collect_tray_menu_data(store: &core::skill_store::SkillStore) -> TrayMenuData
         .filter(|s| s.update_status == "update_available")
         .count();
 
-    let coding_keys: Vec<String> = core::tool_adapters::enabled_installed_adapters(store)
+    let coding_keys: Vec<String> = core::tool_adapters::enabled_installed_adapters(store)?
         .into_iter()
         .filter(|adapter| matches!(adapter.category, core::tool_adapters::ToolCategory::Coding))
         .map(|adapter| adapter.key)
@@ -287,13 +289,13 @@ fn collect_tray_menu_data(store: &core::skill_store::SkillStore) -> TrayMenuData
         });
     }
 
-    TrayMenuData {
+    Ok(TrayMenuData {
         total_skills,
         coding_agent_count,
         update_count,
         presets,
         check_updates_running: TRAY_CHECK_UPDATES_RUNNING.load(Ordering::SeqCst),
-    }
+    })
 }
 
 fn format_status_line(data: &TrayMenuData) -> String {
@@ -373,7 +375,8 @@ fn build_tray_menu<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     store: &Arc<core::skill_store::SkillStore>,
 ) -> tauri::Result<(tauri::menu::Menu<R>, String)> {
-    let data = collect_tray_menu_data(store);
+    let data = collect_tray_menu_data(store)
+        .map_err(|e| tauri::Error::Io(std::io::Error::other(e.to_string())))?;
     build_tray_menu_from_data(app, &data)
 }
 
@@ -497,7 +500,7 @@ pub(crate) fn refresh_tray_menu<R: tauri::Runtime>(
     // (NSMenu / NSStatusItem) APIs and MUST run on the main thread — calling
     // them from a worker thread is UB and crashed the app with a
     // `slice::from_raw_parts` alignment panic during repeated tray actions.
-    let data = collect_tray_menu_data(&store);
+    let data = collect_tray_menu_data(&store).map_err(|e| e.to_string())?;
     let app_for_main = app.clone();
     app.run_on_main_thread(move || {
         let Some(tray) = app_for_main.tray_by_id(MAIN_TRAY_ID) else {
@@ -580,7 +583,7 @@ fn apply_preset_from_tray<R: tauri::Runtime>(
                 return Ok(false);
             }
             let tool_keys: Vec<String> =
-                core::tool_adapters::enabled_installed_adapters(&store_for_task)
+                core::tool_adapters::enabled_installed_adapters(&store_for_task).map_err(|e| e.to_string())?
                     .into_iter()
                     .filter(|adapter| {
                         matches!(adapter.category, core::tool_adapters::ToolCategory::Coding)
@@ -907,6 +910,43 @@ fn teardown_before_exit(app: &tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn get_startup_failure(app: tauri::AppHandle) -> Option<core::app_state::StartupFailure> {
+    app.try_state::<core::app_state::StartupFailure>()
+        .map(|state| state.inner().clone())
+}
+
+fn application_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
+fn run_startup_failure(failure: core::app_state::StartupFailure) {
+    tauri::Builder::default()
+        .manage(failure)
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            restore_main_window(app);
+        }))
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            ensure_debug_acceptance_window(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                window.app_handle().exit(0);
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_startup_failure,
+            commands::settings::restart_app,
+            commands::settings::app_exit,
+            commands::settings::log_startup_event
+        ])
+        .run(application_context())
+        .expect("Unable to show startup failure window");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(debug_assertions)]
@@ -914,8 +954,13 @@ pub fn run() {
         .expect("无法配置 debug 验收状态根");
 
     let pre_builder_start = Instant::now();
-    let (store, startup_timings) =
-        core::app_state::initialize_store().expect("Failed to initialize app state");
+    let (store, startup_timings) = match core::app_state::initialize_store() {
+        Ok(state) => state,
+        Err(error) => {
+            run_startup_failure(core::app_state::StartupFailure::from_error(&error));
+            return;
+        }
+    };
     let pre_builder_ms = pre_builder_start.elapsed().as_millis();
     let store_for_setup = store.clone();
 
@@ -997,8 +1042,15 @@ pub fn run() {
             let store_for_backfill = store_for_setup.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let step = Instant::now();
-                let repaired =
-                    commands::agent_workspace::backfill_stranded_agent_targets(&store_for_backfill);
+                let repaired = match commands::agent_workspace::backfill_stranded_agent_targets(
+                    &store_for_backfill,
+                ) {
+                    Ok(count) => count,
+                    Err(error) => {
+                        log::warn!("Backfill stopped: {error}");
+                        return;
+                    }
+                };
                 if repaired > 0 {
                     log::info!(
                         "startup: backfilled {} stranded agent skill target(s) in {} ms",
@@ -1101,7 +1153,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Agent plugins
+            get_startup_failure, // Agent plugins
             commands::agent_plugins::get_agent_plugin_projection,
             commands::agent_plugins::get_agent_plugin_details,
             commands::agent_plugins::get_codex_cli_configuration,
@@ -1119,6 +1171,7 @@ pub fn run() {
             commands::tools::set_custom_tool_project_path,
             commands::tools::reset_custom_tool_project_path,
             commands::tools::add_custom_tool,
+            commands::tools::query_custom_tool,
             commands::tools::remove_custom_tool,
             // Skills
             commands::skills::get_managed_skills,
@@ -1218,6 +1271,7 @@ pub fn run() {
             commands::projects::remove_project,
             commands::projects::scan_projects,
             commands::projects::get_project_agent_targets,
+            commands::projects::get_project_root_impact,
             commands::projects::get_project_skills,
             commands::projects::get_project_skill_document,
             commands::projects::import_project_skill_to_center,
@@ -1249,7 +1303,7 @@ pub fn run() {
             commands::presets::get_preset_skill_order,
             commands::presets::reorder_preset_skills,
         ])
-        .build(tauri::generate_context!())
+        .build(application_context())
         .expect("error while building tauri application");
 
     app.run(|_app, _event| {

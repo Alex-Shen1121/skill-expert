@@ -31,3 +31,7 @@
 ## macOS 首次打开
 
 测试应用、Updater archive 中的应用和独立 CLI 都会接受 ad-hoc 完整性回验，但这不代表通过 Apple 公证或被 Gatekeeper 自动接受。首次打开可能需要前往“系统设置 → 隐私与安全性 → 仍要打开”；请保持 Gatekeeper 启用。
+
+## Agent 注册专项（不产包）
+
+对指定分支手动设置 `validation_only=true`、`agent_registration=true`，在 Windows/Linux runner 执行注册、路径、并发、旧 Duo 与共享根行为及真实 CLI fixture。普通 PR/main 不增加平台；结果绑定运行的源码 SHA，不能作为 GUI、Duo 新会话加载或正式发布证明。命令及数据边界见 [Agent 注册自测](agent-registration.md)。

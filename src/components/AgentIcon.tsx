@@ -5,6 +5,7 @@ import { getAgentIconSrc, agentIconNeedsDarkInvert } from "../lib/agentIcons";
 
 interface AgentIconProps {
   agentKey: string;
+  isCustom?: boolean;
   displayName?: string;
   className?: string;
   imageClassName?: string;
@@ -13,12 +14,13 @@ interface AgentIconProps {
 
 export function AgentIcon({
   agentKey,
+  isCustom = false,
   displayName,
   className,
   imageClassName,
   fallback,
 }: AgentIconProps) {
-  const src = getAgentIconSrc(agentKey);
+  const src = isCustom ? null : getAgentIconSrc(agentKey);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const hasFailed = src === failedSrc;
 

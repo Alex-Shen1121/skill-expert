@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { DeploymentFeedback } from "../components/DeploymentFeedback";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Folder,
   FolderOpen,
@@ -60,7 +61,7 @@ import { ToggleSwitch } from "../components/ToggleSwitch";
 import { SettingsPage } from "../components/settings/SettingsPage";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
-import { getErrorMessage } from "../lib/error";
+import { getErrorMessage, isAppError } from "../lib/error";
 import type { Theme } from "../hooks/useTheme";
 
 const IS_WINDOWS = navigator.userAgent.includes("Windows");
@@ -261,12 +262,29 @@ export function Settings() {
   const [editingProjectPathKey, setEditingProjectPathKey] = useState<string | null>(null);
   const [editingProjectPathValue, setEditingProjectPathValue] = useState("");
   // Custom agent dialog
+  const registrationReceiptRef = useRef<HTMLElement>(null);
+  const customNameRef = useRef<HTMLInputElement>(null);
+  const [registration, setRegistration] = useState<api.RegistrationReceipt | null>(null);
+  const [pendingDefinition, setPendingDefinition] = useState<api.CustomDefinition | null>(null);
+  const [registrationConflict, setRegistrationConflict] = useState<api.ToolInfo | null>(null);
+  const [registrationUnknown, setRegistrationUnknown] = useState(false);
+  const [originalRequestEnded, setOriginalRequestEnded] = useState(false);
+  const [registrationFeedback, setRegistrationFeedback] = useState("");
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [operationReport, setOperationReport] = useState<api.DeploymentReport | null>(null);
   const [showAddCustom, setShowAddCustom] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customPath, setCustomPath] = useState("");
   const [customProjectPath, setCustomProjectPath] = useState("");
   const [addingCustom, setAddingCustom] = useState(false);
   const [showMoreAgents, setShowMoreAgents] = useState(false);
+
+  useEffect(() => { if (showAddCustom) customNameRef.current?.focus(); }, [showAddCustom]);
+  useEffect(() => { if (registration) registrationReceiptRef.current?.focus(); }, [registration]);
+  const closeCustomForm = () => {
+    setShowAddCustom(false);
+    document.getElementById("add-custom-agent")?.focus();
+  };
 
   const GITHUB_URL = "https://github.com/Alex-Shen1121/skill-expert";
   const RELEASES_URL = "https://github.com/Alex-Shen1121/skill-expert/releases";
@@ -281,12 +299,13 @@ export function Settings() {
     if (!editingPathKey || !editingPathValue.trim()) return;
     try {
       await api.setCustomToolPath(editingPathKey, editingPathValue.trim());
-      await refreshTools();
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("settings.pathSaved"));
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
       setEditingPathKey(null);
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) { setOperationReport(details.deployment); setRefreshFailed(!(await refreshTools())); }
+      toast.error(getErrorMessage(error, t("common.error")));
     }
   };
 
@@ -300,30 +319,36 @@ export function Settings() {
     const trimmed = editingProjectPathValue.trim();
     try {
       await api.setCustomToolProjectPath(editingProjectPathKey, trimmed || null);
-      await refreshTools();
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("settings.pathSaved"));
       setEditingProjectPathKey(null);
     } catch (e) {
-      toast.error(String(e));
+      toast.error(getErrorMessage(e, t("common.error")));
     }
   };
 
   const handleResetProjectPath = async (key: string) => {
+    if (key === "gitlab_duo" && !(await dialogConfirm(t("agentRegistration.resetDuo", { path: ".agents/skills" })))) return;
     try {
       await api.resetCustomToolProjectPath(key);
-      await refreshTools();
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("settings.projectPathReset"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     }
   };
 
   const handleResetPath = async (key: string) => {
+    if (key === "gitlab_duo" && !(await dialogConfirm(t("agentRegistration.resetDuo", { path: "~/.gitlab/duo/skills" })))) return;
     try {
       await api.resetCustomToolPath(key);
-      await refreshTools();
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("settings.pathReset"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     }
   };
@@ -357,31 +382,63 @@ export function Settings() {
     const trimPath = customPath.trim();
     const trimProjectPath = customProjectPath.trim();
     if (!trimName || !trimPath) return;
-    const trimKey = generateCustomAgentKey(trimName);
+    if (registrationUnknown || addingCustom) return;
+    const definition = pendingDefinition ?? { key: generateCustomAgentKey(trimName), display_name: trimName,
+      skills_dir: trimPath, project_relative_skills_dir: trimProjectPath || null };
+    setPendingDefinition(definition);
+    setRegistration(null);
+    setRegistrationFeedback("");
+    setRegistrationConflict(null);
     setAddingCustom(true);
     try {
-      await api.addCustomTool(trimKey, trimName, trimPath, trimProjectPath || undefined);
-      await refreshTools();
-      toast.success(t("settings.customAgentAdded"));
+      const receipt = await api.addCustomTool(definition.key, definition.display_name, definition.skills_dir, definition.project_relative_skills_dir ?? undefined);
+      setRegistration(receipt);
+      setRegistrationUnknown(false);
+      setPendingDefinition(null);
+      setRefreshFailed(!(await refreshTools()));
       setShowAddCustom(false);
-      setCustomName("");
-      setCustomPath("");
-      setCustomProjectPath("");
-    } catch (e) {
-      toast.error(String(e));
-    } finally {
-      setAddingCustom(false);
-    }
+      setCustomName(""); setCustomPath(""); setCustomProjectPath("");
+    } catch (error) {
+      const kind = typeof error === "object" && error !== null && "kind" in error ? String(error.kind) : null;
+      const unknown = kind === null || kind === "commit_unknown" || kind === "internal";
+      setRegistrationUnknown(unknown);
+      setOriginalRequestEnded(kind !== null);
+      setRegistrationFeedback(t(unknown ? "agentRegistration.saveUnknown" : "agentRegistration.saveFailed"));
+      if (!unknown) setPendingDefinition(null);
+    } finally { setAddingCustom(false); }
+  };
+
+  const queryRegistration = async () => {
+    if (!pendingDefinition) return;
+    setAddingCustom(true);
+    try {
+      const result = await api.queryCustomTool(pendingDefinition);
+      setRegistrationFeedback(t(`agentRegistration.query_${result.state}`));
+      setRegistrationConflict(result.state === "conflict" ? result.tool : null);
+      if (result.state === "matches") {
+        setRegistrationUnknown(false); setShowAddCustom(false); setPendingDefinition(null);
+        setRegistration({ registered: true, definition: pendingDefinition, tool: result.tool,
+          deployment: { scope: "global", state: "unknown", reason: null, total: null, targets: [], issues: [] } });
+        setRefreshFailed(!(await refreshTools()));
+      } else if (result.state === "absent" && originalRequestEnded) {
+        setRegistrationUnknown(false);
+      }
+    } catch { setRegistrationFeedback(t("agentRegistration.query_failed")); }
+    finally { setAddingCustom(false); }
   };
 
   const handleRemoveCustomAgent = async (key: string, name: string) => {
     const shouldRemove = await dialogConfirm(t("settings.removeCustomAgentConfirm", { name }));
     if (!shouldRemove) return;
     try {
-      await api.removeCustomTool(key);
-      await refreshTools();
+      const receipt = await api.removeCustomTool(key);
+      setOperationReport(receipt.deployment);
+      if (receipt.next_tool) setRegistrationFeedback(t("agentRegistration.duoRemoved", { path: receipt.next_tool.skills_dir, project: receipt.next_tool.project_relative_skills_dir ?? t("agentRegistration.noProject") }));
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("settings.customAgentRemoved"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     }
   };
@@ -437,17 +494,29 @@ export function Settings() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refreshTools();
+    const refreshed = await refreshTools();
+    setRefreshFailed(!refreshed);
     setRefreshing(false);
-    toast.success(t("common.success"));
+    if (refreshed) toast.success(t("common.success"));
+  };
+
+  const confirmDuoEnable = async () => {
+    const current = (await api.getToolStatus()).find((tool) => tool.key === "gitlab_duo" && !tool.is_custom && !tool.enabled);
+    if (!current) return { accepted: true, current: undefined };
+    const accepted = await dialogConfirm(t("agentRegistration.enableDuo", { path: current.skills_dir, project: current.project_relative_skills_dir ?? t("agentRegistration.noProject") }));
+    return { accepted, current };
   };
 
   const handleToggleTool = async (key: string, enabled: boolean) => {
     setTogglingTools((prev) => new Set(prev).add(key));
     try {
-      await api.setToolEnabled(key, enabled);
-      await refreshTools();
-    } catch {
+      const confirmation = enabled && key === "gitlab_duo" ? await confirmDuoEnable() : { accepted: true, current: undefined };
+      if (!confirmation.accepted) return;
+      await api.setToolEnabled(key, enabled, confirmation.current);
+      setRefreshFailed(!(await refreshTools()));
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     } finally {
       setTogglingTools((prev) => {
@@ -460,10 +529,14 @@ export function Settings() {
 
   const handleToggleAllTools = async (enabled: boolean) => {
     try {
-      await api.setAllToolsEnabled(enabled);
-      await refreshTools();
+      const confirmation = enabled ? await confirmDuoEnable() : { accepted: true, current: undefined };
+      if (!confirmation.accepted) return;
+      await api.setAllToolsEnabled(enabled, confirmation.current);
+      setRefreshFailed(!(await refreshTools()));
       toast.success(t("common.success"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     }
   };
@@ -571,7 +644,7 @@ export function Settings() {
       toast.success(t("settings.repoPathSaved"));
       toast.info(t("settings.repoPathRestartNotice"));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(getErrorMessage(error, t("common.error")));
     } finally {
       setSavingCentralRepoPath(false);
     }
@@ -588,7 +661,7 @@ export function Settings() {
       toast.success(t("settings.repoPathReset"));
       toast.info(t("settings.repoPathRestartNotice"));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(getErrorMessage(error, t("common.error")));
     } finally {
       setSavingCentralRepoPath(false);
     }
@@ -797,7 +870,9 @@ export function Settings() {
       await api.setSettings("git_backup_remote_url", effective);
       setGitRemoteInput(effective);
       toast.success(t("settings.gitConfigSaved"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     } finally {
       setGitRemoteSaving(false);
@@ -810,7 +885,9 @@ export function Settings() {
       await api.gitBackupRemoveRemote();
       setGitRemoteInput("");
       toast.success(t("settings.gitDisconnected"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     } finally {
       setGitRemoteDisconnecting(false);
@@ -827,7 +904,9 @@ export function Settings() {
     try {
       await api.setSettings("proxy_url", trimmed);
       toast.success(t("settings.proxyUrlSaved"));
-    } catch {
+    } catch (error) {
+      const details = isAppError(error) ? error.details : undefined;
+      if (details?.deployment) setOperationReport(details.deployment);
       toast.error(t("common.error"));
     } finally {
       setProxySaving(false);
@@ -896,8 +975,8 @@ export function Settings() {
       );
 
       try {
-        await api.setToolOrder(newFullOrder);
-        await refreshTools();
+        await api.setToolOrder(newFullOrder, tools.map((tool) => tool.key));
+        setRefreshFailed(!(await refreshTools()));
       } catch (e) {
         toast.error(getErrorMessage(e, t("common.error")));
       }
@@ -923,6 +1002,7 @@ export function Settings() {
         {dragHandle}
         <AgentIcon
           agentKey={agent.key}
+            isCustom={agent.is_custom}
           displayName={agent.display_name}
           className="mt-px h-6 w-6 shrink-0 rounded-md"
         />
@@ -946,6 +1026,7 @@ export function Settings() {
           </div>
 
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {agent.key === "gitlab_duo" && !agent.is_custom && <p className="w-full text-[12px] text-muted whitespace-normal break-words">{t("agentRegistration.duoHelp")}</p>}
             {agent.is_custom && (
               <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
                 {t("settings.customAgent")}
@@ -1145,6 +1226,7 @@ export function Settings() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
+            id="add-custom-agent"
             onClick={() => setShowAddCustom(true)}
             className="flex items-center gap-1 text-[13px] text-accent hover:text-accent-light transition-colors font-medium outline-none"
           >
@@ -1184,12 +1266,26 @@ export function Settings() {
         <span>{t("settings.customAgents")} <span className="font-medium text-secondary">{customTools.length}</span></span>
       </div>
 
+      {(registration || registrationFeedback || refreshFailed || operationReport) && <section ref={registrationReceiptRef} tabIndex={-1} className="app-panel mb-3 p-4 focus-visible:outline focus-visible:outline-2" aria-label={t("agentRegistration.receipt")}>
+        {registration && <><h3 className="font-semibold">{t("agentRegistration.saved")} · {registration.definition.key}</h3>
+          <DeploymentFeedback report={registration.deployment} />
+          <button className={actionButtonClass} onClick={() => navigate(`/global-workspace/${encodeURIComponent(registration.definition.key)}`)}>{t("agentRegistration.inspect")}</button></>}
+        {operationReport && <DeploymentFeedback report={operationReport} />}
+        {registrationFeedback && <p role="alert">{registrationFeedback}</p>}
+        {registrationConflict && <dl className="break-all text-sm"><dt>{t("settings.agentName")}</dt><dd>{registrationConflict.display_name}</dd><dt>{t("settings.skillsPath")}</dt><dd>{registrationConflict.skills_dir}</dd><dt>{t("settings.projectSkillsPath")}</dt><dd>{registrationConflict.project_relative_skills_dir ?? t("agentRegistration.noProject")}</dd></dl>}
+        {registrationUnknown && <><p>{pendingDefinition?.key}</p><button disabled={addingCustom} onClick={queryRegistration} className={actionButtonClass}>{t("agentRegistration.query")}</button></>}
+        {refreshFailed && <p role="alert">{t("agentRegistration.refreshFailed")}</p>}
+        <button disabled={refreshing} onClick={handleRefresh} className={actionButtonClass}>{t("agentRegistration.refresh")}</button>
+      </section>}
       {/* Add custom agent form */}
       {showAddCustom && (
-        <div className="app-panel p-4 mb-3 space-y-2.5">
+        <div className="app-panel p-4 mb-3 space-y-2.5" onKeyDown={(event) => {
+          if (event.key === "Escape" && !addingCustom && !registrationUnknown) { event.preventDefault(); closeCustomForm(); }
+          if (event.key === "Enter" && event.target instanceof HTMLInputElement) { event.preventDefault(); void handleAddCustomAgent(); }
+        }}>
           <div className="flex items-center justify-between">
             <h3 className="text-[13px] font-medium text-secondary">{t("settings.addCustomAgent")}</h3>
-            <button onClick={() => setShowAddCustom(false)} className="text-muted hover:text-secondary outline-none">
+            <button aria-label={t("common.cancel")} onClick={closeCustomForm} disabled={addingCustom || registrationUnknown} className="text-muted hover:text-secondary focus-visible:outline focus-visible:outline-2">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -1197,7 +1293,10 @@ export function Settings() {
             <label className="text-[12px] text-muted mb-1 block">{t("settings.agentName")}</label>
             <input
               type="text"
+              ref={customNameRef}
+              aria-label={t("settings.agentName")}
               value={customName}
+              disabled={addingCustom || registrationUnknown}
               onChange={(e) => setCustomName(e.target.value)}
               placeholder={t("settings.agentNamePlaceholder")}
               className={`${fieldClass} w-full`}
@@ -1208,7 +1307,9 @@ export function Settings() {
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="text"
-                value={customPath}
+                aria-label={t("settings.skillsPath")}
+              value={customPath}
+              disabled={addingCustom || registrationUnknown}
                 onChange={(e) => setCustomPath(e.target.value)}
                 placeholder={t("settings.skillsPathPlaceholder")}
                 className={`${fieldClass} min-w-0 flex-1 font-mono`}
@@ -1228,7 +1329,9 @@ export function Settings() {
             </label>
             <input
               type="text"
+              aria-label={t("settings.projectSkillsPath")}
               value={customProjectPath}
+              disabled={addingCustom || registrationUnknown}
               onChange={(e) => setCustomProjectPath(e.target.value)}
               placeholder={t("settings.projectSkillsPathPlaceholder")}
               className={`${fieldClass} w-full font-mono`}
@@ -1240,7 +1343,7 @@ export function Settings() {
           <div className="flex justify-end">
             <button
               onClick={handleAddCustomAgent}
-              disabled={addingCustom || !customName.trim() || !customPath.trim()}
+              disabled={addingCustom || registrationUnknown || !customName.trim() || !customPath.trim()}
               className={`${actionButtonClass} bg-accent text-white border-accent hover:opacity-90 disabled:opacity-50`}
             >
               {addingCustom ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}

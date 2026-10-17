@@ -56,7 +56,7 @@ Agent Skills 往往散落在全局目录、项目目录、Git 仓库、压缩包
 
 - **Skills** —— 搜索、预览、标签、筛选、多选、导出、删除、来源检查和上游差异比较。
 - **Presets** —— 创建命名技能组，并为选定 Agent 激活，同时保留每个 Agent 的可见状态。
-- **Agents** —— 使用 52 个内置集成，调整常用 Agent 顺序、修改路径，或添加自定义工具。
+- **Agents** —— 使用 53 个内置集成，调整常用 Agent 顺序、修改路径，或添加自定义工具。
 - **工作区** —— 用一致的交互管理全局、项目和关联 Skills。
 - **更新** —— 在前台批量检查与更新，显示进度，支持重试、停止和并发数配置。
 - **日常运维** —— 选择软链接或复制模式，配置代理、主题，查看活动记录并导出 Issue 所需日志。
@@ -64,9 +64,9 @@ Agent Skills 往往散落在全局目录、项目目录、Git 仓库、压缩包
 
 ## 支持的 Agents
 
-开箱支持 52 个 Agent，包括：
+开箱支持 53 个 Agent，包括：
 
-Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
+Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · GitLab Duo · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy
 
 **设置** 会优先展示当前机器已检测到的 Agent。自定义工具同样可以使用技能库、工作区和部署控制。
 
@@ -81,6 +81,33 @@ Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · OpenCode · Op
 - 远端始终是普通 Git 仓库，无需 Agent 技能管家也能克隆和检查。
 
 ## CLI
+
+### GitLab Duo 与自定义 Agent 注册
+
+详细协议与隔离自测命令见[Agent 注册技术说明](docs/agent-registration.md)。
+
+GitLab Duo 默认全局部署到 `~/.gitlab/duo/skills`，额外从 `~/.agents/skills` 发现技能，项目部署到 `<项目>/.agents/skills`。共享发现不自动导入、不取得文件所有权。共享或影响未知的项目根拒绝移动、删除和从中心替换；全局停用不会撤销其他程序对项目文件的访问。
+
+Windows 使用已有技能路径设置，手动填写展开后的 `%APPDATA%\GitLab\duo\skills` 绝对路径。自定义配置根优先使用 `GLAB_CONFIG_DIR` 的 `skills` 子目录，否则使用 `XDG_CONFIG_HOME/gitlab/duo/skills`；不自动展开环境变量。按 [GitLab Agent Skills 契约](https://docs.gitlab.com/user/duo_agent_platform/customize/agent_skills/)，项目能力要求 Duo CLI ≥8.73.0 或 GitLab for VS Code ≥6.71.4；全局能力要求 Duo CLI ≥8.83.0，并启用 `--enable-global-skills true` 或 `GITLAB_ENABLE_GLOBAL_SKILLS=true`。新技能需要新会话或显式加载。手动路径可用不代表厂商已安装、认证或加载成功。
+
+```sh
+skill-expert-cli agents add-custom my-agent --path "/absolute/skills path" --name "My Agent" --project-path .my-agent/skills
+skill-expert-cli agents list
+```
+
+`tools` 保留为 `agents` 的兼容别名。KEY 和 `--path` 必填，省略名称使用 KEY，省略或留空项目路径表示不支持项目。名称与路径去首尾空白；全局路径需为绝对路径或 `~/`，项目路径须相对且不得含父目录片段或归一到项目根。重复或保留键拒绝且不覆盖。GUI/CLI 共用校验与配置事务；同库 CLI 修改后刷新桌面列表。`--skills-root` 隔离库及 WSL 库不自动合并。
+
+注册返回 `registered`、规范化 `definition`、`tool`（无法读取时为 null）和真实全局 `deployment` 回执。退出 0 表示保存且协调完成或有依据未执行，不代表 Duo 已加载。退出 1 表示失败或部署不完整；已确认保存的定义保留，`DEPLOYMENT_INCOMPLETE` 含 `registered=true`。提交结果不确定时 `registered=null`，先查询同一 KEY 并比较全部字段，不凭通信异常认定回滚或直接重复注册。参数解析失败退出 2。无论是否指定 `--json`，执行成功 stdout、失败 stderr 均只有一份 JSON。报告区分已提交、已核对、拒绝、失败和记录未确认；无法确认总量时为 null。未确认结果先核对文件与记录再重试。
+
+既有有效 custom `gitlab_duo` 保留旧名、分类、路径、项目 null、顺序和禁用状态，不自动转内置。显式移除后内置项保持停用，合法休眠覆盖保留。重新启用前在同一库列出并核对实际目标：
+
+```sh
+skill-expert-cli --skills-root /path/to/library agents list
+skill-expert-cli --skills-root /path/to/library agents enable gitlab_duo
+```
+
+两步独立执行，不证明操作者已阅读，也不锁定跨命令路径；有并发修改时重新 list。损坏或歧义配置阻止后续相关写入；启动失败视图提供完整进程重启、复制脱敏诊断、退出，不清库。通用设置继续支持无关键，五项 Agent 配置只能经已有专用操作修改。
+
 
 桌面应用与 `skill-expert-cli` 共用同一套 Rust 核心、SQLite 数据库、中央技能库和部署引擎。
 

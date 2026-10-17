@@ -1,10 +1,11 @@
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::core::{
-    error::AppError, scenario_service, skill_store::SkillStore, sync_engine, sync_metadata,
-    tool_adapters, tool_service,
+    error::AppError, scenario_service, skill_store::SkillStore, sync_metadata, tool_adapters,
+    tool_service,
 };
 use serde::Serialize;
 
@@ -17,7 +18,7 @@ pub struct SkillToolToggleDto {
     pub enabled: bool,
 }
 
-fn disabled_tools(store: &SkillStore) -> Vec<String> {
+fn disabled_tools(store: &SkillStore) -> Result<Vec<String>, AppError> {
     tool_service::get_disabled_tools(store)
 }
 
@@ -51,6 +52,7 @@ pub async fn sync_skill_to_tool(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _deployment = store.deployment_lock("sync_skill_to_tool")?;
         let outcome = (|| -> Result<(), AppError> {
             sync_skill_to_tool_internal(&store, &skill_id, &tool)?;
 
@@ -60,7 +62,7 @@ pub async fn sync_skill_to_tool(
                     .map_err(AppError::db)?;
                 if skill_ids.contains(&skill_id) {
                     let adapter_keys: Vec<String> =
-                        tool_adapters::enabled_installed_adapters(&store)
+                        tool_adapters::enabled_installed_adapters(&store)?
                             .iter()
                             .map(|a| a.key.clone())
                             .collect();
@@ -94,54 +96,17 @@ pub async fn unsync_skill_from_tool(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _deployment = store.deployment_lock("unsync_skill_from_tool")?;
         let outcome = (|| -> Result<(), AppError> {
             let targets = store
                 .get_targets_for_skill(&skill_id)
                 .map_err(AppError::db)?;
 
-            // Toggling a skill off is the GUI twin of `skills undeploy`, so it
-            // needs the same protection: the row says we deployed here, but if
-            // the user has since replaced our artifact with content of their
-            // own, that content is not ours to delete (#363).
-            if let Some(target) = targets.iter().find(|t| t.tool == tool) {
-                let target_path = PathBuf::from(&target.target_path);
-                // Several tools can resolve to one skills directory, so this
-                // exact path may still be deployed for another (skill, tool)
-                // that is staying. `apply_remove` has this survivor check;
-                // without it here, switching agent A off deletes agent B's
-                // live deployment.
-                let still_referenced = store
-                    .get_all_targets()
-                    .map_err(AppError::db)?
-                    .into_iter()
-                    .any(|other| {
-                        other.target_path == target.target_path
-                            && !(other.skill_id == skill_id && other.tool == tool)
-                    });
-                if still_referenced {
-                    log::debug!(
-                        "unsync: keeping {} (still referenced by another target)",
-                        target_path.display()
-                    );
-                } else {
-                    match sync_engine::remove_recorded_target(&target_path, &target.mode) {
-                        Ok(true) => {}
-                        Ok(false) => log::warn!(
-                            "unsync: preserving {} — no longer matches its recorded {} deployment; \
-                             removing the record only",
-                            target_path.display(),
-                            target.mode
-                        ),
-                        Err(e) => {
-                            log::warn!("unsync: failed to remove {}: {e}", target_path.display())
-                        }
-                    }
-                }
-            }
-
-            store
-                .delete_target(&skill_id, &tool)
-                .map_err(AppError::db)?;
+            let targets = targets
+                .into_iter()
+                .filter(|t| t.tool == tool)
+                .collect::<Vec<_>>();
+            scenario_service::remove_targets(&store, &targets)?.require_complete()?;
 
             if let Ok(Some(active_id)) = store.get_active_scenario_id() {
                 let skill_ids = store
@@ -149,7 +114,7 @@ pub async fn unsync_skill_from_tool(
                     .map_err(AppError::db)?;
                 if skill_ids.contains(&skill_id) {
                     let adapter_keys: Vec<String> =
-                        tool_adapters::enabled_installed_adapters(&store)
+                        tool_adapters::enabled_installed_adapters(&store)?
                             .iter()
                             .map(|a| a.key.clone())
                             .collect();
@@ -212,8 +177,8 @@ pub async fn get_skill_tool_toggles(
             return Err(AppError::not_found("Skill is not enabled in this preset"));
         }
 
-        let disabled = disabled_tools(&store);
-        let all_adapters = tool_adapters::all_tool_adapters(&store);
+        let disabled = disabled_tools(&store)?;
+        let all_adapters = tool_adapters::all_tool_adapters(&store)?;
         let default_enabled_keys: Vec<String> = all_adapters
             .iter()
             .filter(|adapter| adapter.is_installed() && !disabled.contains(&adapter.key))
@@ -265,6 +230,7 @@ pub async fn set_skill_tool_toggle(
 ) -> Result<(), AppError> {
     let store = store.inner().clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _deployment = store.deployment_lock("set_skill_tool_toggle")?;
         let skill_ids = store
             .get_skill_ids_for_scenario(&preset_id)
             .map_err(AppError::db)?;
@@ -272,9 +238,9 @@ pub async fn set_skill_tool_toggle(
             return Err(AppError::not_found("Skill is not enabled in this preset"));
         }
 
-        let adapter = tool_adapters::find_adapter_with_store(&store, &tool)
+        let adapter = tool_adapters::find_adapter_with_store(&store, &tool)?
             .ok_or_else(|| AppError::not_found(format!("Unknown tool: {}", tool)))?;
-        let disabled = disabled_tools(&store);
+        let disabled = disabled_tools(&store)?;
         let globally_enabled = !disabled.contains(&tool);
 
         if enabled {
@@ -310,13 +276,11 @@ pub async fn set_skill_tool_toggle(
                 let targets = store
                     .get_targets_for_skill(&skill_id)
                     .map_err(AppError::db)?;
-                if let Some(target) = targets.iter().find(|target| target.tool == tool) {
-                    // Safe because the app currently guarantees a single active scenario.
-                    sync_engine::remove_target(&PathBuf::from(&target.target_path)).ok();
-                }
-                store
-                    .delete_target(&skill_id, &tool)
-                    .map_err(AppError::db)?;
+                let targets = targets
+                    .into_iter()
+                    .filter(|target| target.tool == tool)
+                    .collect::<Vec<_>>();
+                scenario_service::remove_targets(&store, &targets)?.require_complete()?;
             }
         }
 

@@ -126,6 +126,7 @@ export function SyncDots({
         ) : useIcon ? (
           <AgentIcon
             agentKey={dot.key}
+            isCustom={tools.find((tool) => tool.key === dot.key)?.is_custom}
             className="h-full w-full rounded-[4px] border-0 bg-transparent"
           />
         ) : (

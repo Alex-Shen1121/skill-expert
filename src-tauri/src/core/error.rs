@@ -10,12 +10,22 @@ pub struct AppError {
     pub kind: ErrorKind,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<ErrorDetails>,
+    pub details: Option<Box<ErrorDetails>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigurationFailure {
+    pub setting: String,
+    pub code: String,
 }
 
 /// 部署因目标不属于本应用而被拒绝时的机器可读信息。
 #[derive(Debug, Serialize)]
 pub struct ErrorDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<ConfigurationFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment: Option<super::scenario_service::DeploymentReport>,
     pub conflicts: Vec<TargetConflictDetail>,
 }
 
@@ -38,6 +48,8 @@ pub enum ErrorKind {
     Internal,
     /// 目标路径不是受管部署，现有内容保持不变。
     TargetConflict,
+    DeploymentIncomplete,
+    CommitUnknown,
     /// 浏览所依据的目录或文件已变化，调用方应重新索引。
     StaleSnapshot,
     /// 目录未完整枚举，不能确认请求的文件是否存在。
@@ -166,7 +178,48 @@ impl AppError {
         Self {
             kind: ErrorKind::TargetConflict,
             message: message.into(),
-            details: Some(ErrorDetails { conflicts }),
+            details: Some(Box::new(ErrorDetails {
+                conflicts,
+                deployment: None,
+                configuration: None,
+            })),
+        }
+    }
+
+    pub fn configuration(setting: &str, code: &str) -> Self {
+        Self {
+            kind: ErrorKind::InvalidInput,
+            message: format!("Agent configuration: {setting}: {code}"),
+            details: Some(Box::new(ErrorDetails {
+                conflicts: vec![],
+                deployment: None,
+                configuration: Some(ConfigurationFailure {
+                    setting: setting.into(),
+                    code: code.into(),
+                }),
+            })),
+        }
+    }
+
+    pub fn commit_unknown() -> Self {
+        Self {
+            kind: ErrorKind::CommitUnknown,
+            message:
+                "Configuration commit result is unknown; query the same Agent key before retrying"
+                    .into(),
+            details: None,
+        }
+    }
+
+    pub fn deployment_incomplete(report: super::scenario_service::DeploymentReport) -> Self {
+        Self {
+            kind: ErrorKind::DeploymentIncomplete,
+            message: "Skill deployment incomplete; confirmed changes were retained".into(),
+            details: Some(Box::new(ErrorDetails {
+                conflicts: vec![],
+                deployment: Some(report),
+                configuration: None,
+            })),
         }
     }
 

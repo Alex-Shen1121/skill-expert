@@ -84,6 +84,10 @@ test('手工入口提供不产包且不可晋级的 Windows 与 Linux 进程验�
   assert.ok(validationStart > 0);
   assert.ok(packageStart > validationStart);
   assert.match(manual, /validation_only:[\s\S]*type: boolean/);
+  assert.match(manual, /agent_registration:[\s\S]*default: false[\s\S]*type: boolean/);
+  assert.match(validationJob, /if: inputs\.agent_registration == true[\s\S]*core::tool_config::tests[\s\S]*commands::tools::duo_removal_tests[\s\S]*commands::projects::shared_root_tests/);
+  assert.match(validationJob, /python scripts\/verify-agent-registration\.py --binary/);
+  assert.match(validationJob, /source_sha: \$GITHUB_SHA/);
   assert.match(validationJob, /if: inputs\.validation_only == true/);
   assert.match(validationJob, /runner: \[windows-latest, ubuntu-22\.04\]/);
   assert.match(validationJob, /PROMOTABLE: ['\"]false['\"]/);

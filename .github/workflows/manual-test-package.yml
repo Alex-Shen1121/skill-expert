@@ -4,7 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       validation_only:
-        description: 仅验证 Windows 与 Linux 受控进程，不构建测试包
+        description: 仅运行 Windows 与 Linux 行为验证，不构建测试包
+        required: true
+        default: false
+        type: boolean
+      agent_registration:
+        description: 在仅验证模式中运行 Agent 注册、原生路径与并发用例
         required: true
         default: false
         type: boolean
@@ -34,11 +39,12 @@ permissions:
 
 jobs:
   validate-process-runner:
-    name: 受控进程验证（${{ matrix.runner }}）
+    name: ${{ inputs.agent_registration && 'Agent 注册验证' || '受控进程验证' }}（${{ matrix.runner }}）
     if: inputs.validation_only == true
     runs-on: ${{ matrix.runner }}
     env:
       PROMOTABLE: "false"
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -68,22 +74,47 @@ jobs:
             patchelf
 
       - name: 运行公共受控进程 fixture
+        if: inputs.agent_registration == false
         run: >-
           cargo test --locked
           --manifest-path src-tauri/Cargo.toml
           core::process_runner::tests
 
       - name: 检查当前平台全部 Rust 目标
+        if: inputs.agent_registration == false
         run: >-
           cargo check --locked
           --manifest-path src-tauri/Cargo.toml
           --all-targets
 
-      - name: 记录不可晋级验证摘要
+      - name: 运行 Agent 注册相关原生 Rust 行为
+        if: inputs.agent_registration == true
         shell: bash
         run: |
+          set -euo pipefail
+          for filter in core::tool_config::tests commands::tools::duo_removal_tests commands::projects::shared_root_tests; do
+            cargo test --locked --manifest-path src-tauri/Cargo.toml --lib "$filter"
+          done
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --bin skill-expert-cli
+
+      - name: 运行真实 CLI 注册与跨进程并发 fixture
+        if: inputs.agent_registration == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --bin skill-expert-cli
+          binary=src-tauri/target/debug/skill-expert-cli
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          python scripts/verify-agent-registration.py --binary "$binary" --root "$RUNNER_TEMP/agent-registration"
+          python -c 'import pathlib, os; [print(p.read_text(encoding="utf-8")) for p in pathlib.Path(os.environ["RUNNER_TEMP"], "agent-registration").glob("*/results.json")]'
+
+      - name: 记录不可晋级验证摘要
+        shell: bash
+        env:
+          VALIDATION_PURPOSE: ${{ inputs.agent_registration && 'agent-registration-validation' || 'process-fixture-validation' }}
+        run: |
           {
-            echo "purpose: process-fixture-validation"
+            echo "purpose: $VALIDATION_PURPOSE"
             echo "promotable: false"
             echo "runner: $RUNNER_OS"
             echo "source_sha: $GITHUB_SHA"

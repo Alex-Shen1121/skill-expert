@@ -290,6 +290,7 @@ export function SkillProjectsSection({ skill, projects, onChanged }: Props) {
                         >
                           <AgentIcon
                             agentKey={target.key}
+            isCustom={target.is_custom}
                             displayName={target.display_name}
                             className="h-3.5 w-3.5 rounded-[4px]"
                           />

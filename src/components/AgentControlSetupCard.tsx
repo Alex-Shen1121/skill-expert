@@ -126,6 +126,7 @@ export function AgentControlSetupCard() {
                     >
                       <AgentIcon
                         agentKey={tool.key}
+            isCustom={tool.is_custom}
                         displayName={tool.display_name}
                         className="h-4 w-4 rounded-[4px]"
                       />

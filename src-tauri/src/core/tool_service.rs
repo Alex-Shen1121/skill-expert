@@ -7,7 +7,7 @@ use super::{
     tool_adapters::{self, CustomToolDef, ToolCategory},
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, Serialize)]
 pub struct ToolInfo {
     pub key: String,
     pub display_name: String,
@@ -21,13 +21,8 @@ pub struct ToolInfo {
     pub category: ToolCategory,
 }
 
-pub fn get_disabled_tools(store: &SkillStore) -> Vec<String> {
-    store
-        .get_setting("disabled_tools")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
-        .unwrap_or_default()
+pub fn get_disabled_tools(store: &SkillStore) -> Result<Vec<String>, AppError> {
+    Ok(store.tool_config()?.disabled)
 }
 
 /// Default ordering for the agent list, roughly most- to least-known.
@@ -79,19 +74,29 @@ const DEFAULT_PRIORITY_ORDER: &[&str] = &[
     "omp_agent",
 ];
 
-pub fn get_tool_order(store: &SkillStore) -> Vec<String> {
-    store
-        .get_setting("tool_order")
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
-        .unwrap_or_default()
+pub fn get_tool_order(store: &SkillStore) -> Result<Vec<String>, AppError> {
+    Ok(store.tool_config()?.order)
 }
 
-pub fn set_tool_order(store: &SkillStore, order: &[String]) -> Result<(), AppError> {
-    let json = serde_json::to_string(order)
-        .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
-    store.set_setting("tool_order", &json).map_err(AppError::db)
+pub fn set_tool_order(
+    store: &SkillStore,
+    order: &[String],
+    expected: &[String],
+) -> Result<(), AppError> {
+    store.update_tool_config(|config| {
+        if tool_info_from_config(config)
+            .iter()
+            .map(|info| info.key.as_str())
+            .collect::<Vec<_>>()
+            != expected.iter().map(String::as_str).collect::<Vec<_>>()
+        {
+            return Err(AppError::invalid_input(
+                "Agent order changed; refresh before sorting again",
+            ));
+        }
+        config.order = order.to_vec();
+        Ok(())
+    })
 }
 
 /// Merge a saved tool order with the actual list of available tool keys.
@@ -145,61 +150,45 @@ fn merge_order(saved: &[String], all_keys: &[String]) -> Vec<String> {
     out
 }
 
-pub fn disabled_tools_set(store: &SkillStore) -> HashSet<String> {
-    get_disabled_tools(store).into_iter().collect()
+pub fn disabled_tools_set(store: &SkillStore) -> Result<HashSet<String>, AppError> {
+    Ok(get_disabled_tools(store)?.into_iter().collect())
 }
 
-pub fn set_disabled_tools(store: &SkillStore, disabled: &[String]) -> Result<(), AppError> {
-    let json = serde_json::to_string(disabled)
-        .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
-    store
-        .set_setting("disabled_tools", &json)
-        .map_err(AppError::db)
-}
-
-pub fn get_custom_tool_paths(store: &SkillStore) -> HashMap<String, String> {
+pub fn get_custom_tool_paths(store: &SkillStore) -> Result<HashMap<String, String>, AppError> {
     tool_adapters::custom_tool_paths(store)
 }
+pub fn get_custom_tool_project_paths(
+    store: &SkillStore,
+) -> Result<HashMap<String, String>, AppError> {
+    tool_adapters::custom_tool_project_paths(store)
+}
+pub fn get_custom_tools(store: &SkillStore) -> Result<Vec<CustomToolDef>, AppError> {
+    tool_adapters::custom_tools(store)
+}
 
+pub fn set_custom_tools(store: &SkillStore, customs: &[CustomToolDef]) -> Result<(), AppError> {
+    store.update_tool_config(|config| {
+        config.customs = customs.to_vec();
+        Ok(())
+    })
+}
 pub fn set_custom_tool_paths(
     store: &SkillStore,
     paths: &HashMap<String, String>,
 ) -> Result<(), AppError> {
-    let json = serde_json::to_string(paths)
-        .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
-    store
-        .set_setting("custom_tool_paths", &json)
-        .map_err(AppError::db)
+    store.update_tool_config(|config| {
+        config.paths = paths.clone();
+        Ok(())
+    })
 }
-
-pub fn get_custom_tool_project_paths(store: &SkillStore) -> HashMap<String, String> {
-    tool_adapters::custom_tool_project_paths(store)
-}
-
 pub fn set_custom_tool_project_paths(
     store: &SkillStore,
     paths: &HashMap<String, String>,
 ) -> Result<(), AppError> {
-    let json = serde_json::to_string(paths)
-        .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
-    store
-        .set_setting("custom_tool_project_paths", &json)
-        .map_err(AppError::db)
-}
-
-pub fn get_custom_tools(store: &SkillStore) -> Vec<CustomToolDef> {
-    tool_adapters::custom_tools(store)
-}
-
-pub fn set_custom_tools(
-    store: &SkillStore,
-    custom_tools: &[CustomToolDef],
-) -> Result<(), AppError> {
-    let json = serde_json::to_string(custom_tools)
-        .map_err(|e| AppError::internal(format!("Failed to serialize: {e}")))?;
-    store
-        .set_setting("custom_tools", &json)
-        .map_err(AppError::db)
+    store.update_tool_config(|config| {
+        config.project_paths = paths.clone();
+        Ok(())
+    })
 }
 
 pub fn normalize_skills_dir_input(path: &str) -> Result<String, AppError> {
@@ -209,13 +198,11 @@ pub fn normalize_skills_dir_input(path: &str) -> Result<String, AppError> {
     }
 
     let expanded = if raw == "~" {
-        dirs::home_dir()
-            .ok_or_else(|| AppError::internal("Cannot determine home directory"))?
+        super::central_repo::runtime_home_dir()
             .to_string_lossy()
             .to_string()
     } else if let Some(rest) = raw.strip_prefix("~/") {
-        dirs::home_dir()
-            .ok_or_else(|| AppError::internal("Cannot determine home directory"))?
+        super::central_repo::runtime_home_dir()
             .join(rest)
             .to_string_lossy()
             .to_string()
@@ -236,7 +223,12 @@ pub fn normalize_project_relative_skills_dir_input(path: &str) -> Result<Option<
         return Ok(None);
     }
     let candidate = std::path::Path::new(trimmed);
-    if candidate.is_absolute() {
+    if candidate.components().any(|part| {
+        matches!(
+            part,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    }) {
         return Err(AppError::invalid_input(
             "Project skills path must be relative to the project root",
         ));
@@ -249,13 +241,26 @@ pub fn normalize_project_relative_skills_dir_input(path: &str) -> Result<Option<
             "Project skills path cannot contain parent directory segments",
         ));
     }
+    if !candidate
+        .components()
+        .any(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(AppError::invalid_input(
+            "Project skills path cannot be the project root",
+        ));
+    }
     Ok(Some(trimmed.trim_matches('/').to_string()))
 }
 
-pub fn list_tool_info(store: &SkillStore) -> Vec<ToolInfo> {
-    let disabled = disabled_tools_set(store);
-    let project_overrides = get_custom_tool_project_paths(store);
-    let infos: Vec<ToolInfo> = tool_adapters::all_tool_adapters(store)
+pub fn list_tool_info(store: &SkillStore) -> Result<Vec<ToolInfo>, AppError> {
+    let config = store.tool_config()?;
+    Ok(tool_info_from_config(&config))
+}
+
+pub fn tool_info_from_config(config: &super::tool_config::ToolConfig) -> Vec<ToolInfo> {
+    let disabled = &config.disabled;
+    let project_overrides = &config.project_paths;
+    let infos: Vec<ToolInfo> = tool_adapters::adapters_from_config(config)
         .into_iter()
         .map(|adapter| ToolInfo {
             key: adapter.key.clone(),
@@ -281,9 +286,9 @@ pub fn list_tool_info(store: &SkillStore) -> Vec<ToolInfo> {
         })
         .collect();
 
-    let saved = get_tool_order(store);
+    let saved = &config.order;
     let all_keys: Vec<String> = infos.iter().map(|i| i.key.clone()).collect();
-    let ordered_keys = merge_order(&saved, &all_keys);
+    let ordered_keys = merge_order(saved, &all_keys);
 
     let mut by_key: HashMap<String, ToolInfo> =
         infos.into_iter().map(|i| (i.key.clone(), i)).collect();
@@ -294,118 +299,129 @@ pub fn list_tool_info(store: &SkillStore) -> Vec<ToolInfo> {
 }
 
 pub fn migrate_legacy_tool_keys(store: &SkillStore) -> Result<(), AppError> {
+    let _deployment = store.deployment_lock("legacy Agent configuration")?;
     const OLD_KEY: &str = "clawdbot";
     const NEW_KEY: &str = "openclaw";
     const LEGACY_OMP_KEY: &str = "omp_agent";
 
-    let mut changed = false;
+    let changed = store.update_tool_config(|config| {
+        let mut changed = false;
 
-    let mut disabled = get_disabled_tools(store);
-    if disabled.iter().any(|k| k == OLD_KEY) {
-        for key in &mut disabled {
-            if key == OLD_KEY {
-                *key = NEW_KEY.to_string();
-            }
-        }
-        disabled.sort();
-        disabled.dedup();
-        set_disabled_tools(store, &disabled)?;
-        changed = true;
-    }
-
-    let mut custom_paths = get_custom_tool_paths(store);
-    let mut custom_paths_changed = false;
-    if let Some(old_path) = custom_paths.remove(OLD_KEY) {
-        custom_paths.entry(NEW_KEY.to_string()).or_insert(old_path);
-        custom_paths_changed = true;
-        changed = true;
-    }
-
-    let mut custom_project_paths = get_custom_tool_project_paths(store);
-    let mut custom_project_paths_changed = false;
-
-    let mut custom_tools = get_custom_tools(store);
-    let mut legacy_omp_skills_dir = None;
-    let mut legacy_omp_project_path = None;
-    let original_custom_tool_count = custom_tools.len();
-    custom_tools.retain(|custom| {
-        if custom.key != LEGACY_OMP_KEY {
-            return true;
-        }
-        if legacy_omp_skills_dir.is_none() {
-            legacy_omp_skills_dir = Some(custom.skills_dir.clone());
-        }
-        if legacy_omp_project_path.is_none() {
-            legacy_omp_project_path = custom.project_relative_skills_dir.clone();
-        }
-        false
-    });
-    let mut custom_tools_changed = custom_tools.len() != original_custom_tool_count;
-    if custom_tools_changed {
-        changed = true;
-        if let Some(skills_dir) = legacy_omp_skills_dir {
-            if !custom_paths.contains_key(LEGACY_OMP_KEY) {
-                custom_paths.insert(LEGACY_OMP_KEY.to_string(), skills_dir);
-                custom_paths_changed = true;
-            }
-        }
-        if let Some(project_path) = legacy_omp_project_path {
-            if !custom_project_paths.contains_key(LEGACY_OMP_KEY) {
-                custom_project_paths.insert(LEGACY_OMP_KEY.to_string(), project_path);
-                custom_project_paths_changed = true;
-            }
-        }
-    }
-
-    if custom_tools.iter().any(|c| c.key == OLD_KEY) {
-        let has_new = custom_tools.iter().any(|c| c.key == NEW_KEY);
-        let mut migrated = Vec::with_capacity(custom_tools.len());
-        let mut seen_keys = std::collections::HashSet::new();
-        for mut custom in custom_tools {
-            if custom.key == OLD_KEY {
-                if has_new {
-                    continue;
+        let mut disabled = config.disabled.clone();
+        if disabled.iter().any(|k| k == OLD_KEY) {
+            for key in &mut disabled {
+                if key == OLD_KEY {
+                    *key = NEW_KEY.to_string();
                 }
-                custom.key = NEW_KEY.to_string();
             }
-            if seen_keys.insert(custom.key.clone()) {
-                migrated.push(custom);
+            disabled.sort();
+            disabled.dedup();
+            config.disabled = disabled;
+            changed = true;
+        }
+
+        let mut custom_paths = config.paths.clone();
+        let mut custom_paths_changed = false;
+        if let Some(old_path) = custom_paths.remove(OLD_KEY) {
+            custom_paths.entry(NEW_KEY.to_string()).or_insert(old_path);
+            custom_paths_changed = true;
+            changed = true;
+        }
+
+        let mut custom_project_paths = config.project_paths.clone();
+        let mut custom_project_paths_changed = false;
+
+        let mut custom_tools = config.customs.clone();
+        let mut legacy_omp_skills_dir = None;
+        let mut legacy_omp_project_path = None;
+        let original_custom_tool_count = custom_tools.len();
+        custom_tools.retain(|custom| {
+            if custom.key != LEGACY_OMP_KEY {
+                return true;
+            }
+            if legacy_omp_skills_dir.is_none() {
+                legacy_omp_skills_dir = Some(custom.skills_dir.clone());
+            }
+            if legacy_omp_project_path.is_none() {
+                legacy_omp_project_path = custom.project_relative_skills_dir.clone();
+            }
+            false
+        });
+        let mut custom_tools_changed = custom_tools.len() != original_custom_tool_count;
+        if custom_tools_changed {
+            changed = true;
+            if let Some(skills_dir) = legacy_omp_skills_dir {
+                if !custom_paths.contains_key(LEGACY_OMP_KEY) {
+                    custom_paths.insert(LEGACY_OMP_KEY.to_string(), skills_dir);
+                    custom_paths_changed = true;
+                }
+            }
+            if let Some(project_path) = legacy_omp_project_path {
+                if !custom_project_paths.contains_key(LEGACY_OMP_KEY) {
+                    custom_project_paths.insert(LEGACY_OMP_KEY.to_string(), project_path);
+                    custom_project_paths_changed = true;
+                }
             }
         }
-        custom_tools = migrated;
-        custom_tools_changed = true;
-        changed = true;
-    }
 
-    for value in custom_paths.values_mut() {
-        if let Ok(normalized) = normalize_skills_dir_input(value) {
-            if *value != normalized {
-                *value = normalized;
-                custom_paths_changed = true;
-                changed = true;
+        if custom_tools.iter().any(|c| c.key == OLD_KEY) {
+            let has_new = custom_tools.iter().any(|c| c.key == NEW_KEY);
+            let mut migrated = Vec::with_capacity(custom_tools.len());
+            let mut seen_keys = std::collections::HashSet::new();
+            for mut custom in custom_tools {
+                if custom.key == OLD_KEY {
+                    if has_new {
+                        continue;
+                    }
+                    custom.key = NEW_KEY.to_string();
+                }
+                if seen_keys.insert(custom.key.clone()) {
+                    migrated.push(custom);
+                }
+            }
+            custom_tools = migrated;
+            custom_tools_changed = true;
+            changed = true;
+        }
+
+        for (key, value) in &mut custom_paths {
+            if key == "gitlab_duo" && custom_tools.iter().any(|tool| tool.key == "gitlab_duo") {
+                continue;
+            }
+            if let Ok(normalized) = normalize_skills_dir_input(value) {
+                if *value != normalized {
+                    *value = normalized;
+                    custom_paths_changed = true;
+                    changed = true;
+                }
             }
         }
-    }
 
-    for custom in &mut custom_tools {
-        if let Ok(normalized) = normalize_skills_dir_input(&custom.skills_dir) {
-            if custom.skills_dir != normalized {
-                custom.skills_dir = normalized;
-                custom_tools_changed = true;
+        for custom in &mut custom_tools {
+            if custom.key == "gitlab_duo" {
+                continue;
+            }
+            if let Ok(normalized) = normalize_skills_dir_input(&custom.skills_dir) {
+                if custom.skills_dir != normalized {
+                    custom.skills_dir = normalized;
+                    custom_tools_changed = true;
+                }
             }
         }
-    }
 
-    if custom_paths_changed {
-        set_custom_tool_paths(store, &custom_paths)?;
-    }
-    if custom_project_paths_changed {
-        set_custom_tool_project_paths(store, &custom_project_paths)?;
-        changed = true;
-    }
-    if custom_tools_changed {
-        set_custom_tools(store, &custom_tools)?;
-    }
+        if custom_paths_changed {
+            config.paths = custom_paths;
+        }
+        if custom_project_paths_changed {
+            config.project_paths = custom_project_paths;
+            changed = true;
+        }
+        if custom_tools_changed {
+            config.customs = custom_tools;
+        }
+
+        Ok(changed)
+    })?;
 
     if changed
         || store
@@ -562,17 +578,17 @@ mod tests {
 
         migrate_legacy_tool_keys(&store).unwrap();
 
-        let customs = get_custom_tools(&store);
+        let customs = get_custom_tools(&store).unwrap();
         assert!(!customs.iter().any(|custom| custom.key == "omp_agent"));
         assert!(customs.iter().any(|custom| custom.key == "custom_agent"));
 
-        let custom_paths = get_custom_tool_paths(&store);
+        let custom_paths = get_custom_tool_paths(&store).unwrap();
         assert_eq!(
             custom_paths.get("omp_agent"),
             Some(&legacy_skills.to_string_lossy().into_owned())
         );
 
-        let project_paths = get_custom_tool_project_paths(&store);
+        let project_paths = get_custom_tool_project_paths(&store).unwrap();
         assert_eq!(
             project_paths.get("omp_agent"),
             Some(&".legacy/skills".to_string())
@@ -605,16 +621,16 @@ mod tests {
 
         migrate_legacy_tool_keys(&store).unwrap();
 
-        let customs = get_custom_tools(&store);
+        let customs = get_custom_tools(&store).unwrap();
         assert!(!customs.iter().any(|custom| custom.key == "omp_agent"));
 
-        let custom_paths = get_custom_tool_paths(&store);
+        let custom_paths = get_custom_tool_paths(&store).unwrap();
         assert_eq!(
             custom_paths.get("omp_agent"),
             Some(&explicit_skills.to_string_lossy().into_owned())
         );
 
-        let project_paths = get_custom_tool_project_paths(&store);
+        let project_paths = get_custom_tool_project_paths(&store).unwrap();
         assert_eq!(
             project_paths.get("omp_agent"),
             Some(&".explicit/skills".to_string())

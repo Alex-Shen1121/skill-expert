@@ -5,6 +5,59 @@ use anyhow::{Context, Result};
 
 use super::{central_repo, scenario_service, skill_store::SkillStore, sync_metadata, tool_service};
 
+#[derive(Debug)]
+struct InitializationStage(&'static str);
+impl std::fmt::Display for InitializationStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StartupFailure {
+    pub stage: String,
+    pub code: String,
+    pub setting: Option<String>,
+    pub retryable: bool,
+    pub diagnostics: String,
+}
+
+impl StartupFailure {
+    pub fn from_error(error: &anyhow::Error) -> Self {
+        let configuration = error
+            .downcast_ref::<super::error::AppError>()
+            .and_then(|error| error.details.as_ref())
+            .and_then(|details| details.configuration.as_ref());
+        let stage = if configuration.is_some() {
+            "agent_configuration"
+        } else {
+            error
+                .downcast_ref::<InitializationStage>()
+                .map_or("initialization", |stage| stage.0)
+        };
+        let code = configuration
+            .map(|c| c.code.clone())
+            .unwrap_or_else(|| "initialization_failed".into());
+        let setting = configuration.map(|c| c.setting.clone());
+        let diagnostics = super::log_sanitize::sanitize(&format!(
+            "version={}\nos={}\narch={}\nstage={}\ncode={}\nsetting={}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            stage,
+            code,
+            setting.as_deref().unwrap_or("unknown")
+        ));
+        Self {
+            stage: stage.into(),
+            code,
+            setting,
+            retryable: configuration.map_or(true, |c| c.code == "read failed"),
+            diagnostics,
+        }
+    }
+}
+
 /// Per-stage timings collected during `initialize_store`. The struct is
 /// returned to the caller so the log lines can be emitted once
 /// `tauri_plugin_log` is registered — anything logged from inside this
@@ -50,14 +103,16 @@ impl Default for StartupTimings {
 pub fn initialize_store() -> Result<(Arc<SkillStore>, StartupTimings)> {
     let caller = super::existing_install_import::ProcessCallerRole::Gui;
     let import_lock_is_exclusive =
-        super::existing_install_import::acquire_process_lifetime_lock(caller)?;
+        super::existing_install_import::acquire_process_lifetime_lock(caller)
+            .context(InitializationStage("import_lock"))?;
     initialize_store_inner(caller, import_lock_is_exclusive)
 }
 
 pub fn initialize_cli_store() -> Result<Arc<SkillStore>> {
     let caller = super::existing_install_import::ProcessCallerRole::Cli;
     let import_lock_is_exclusive =
-        super::existing_install_import::acquire_process_lifetime_lock(caller)?;
+        super::existing_install_import::acquire_process_lifetime_lock(caller)
+            .context(InitializationStage("import_lock"))?;
     initialize_store_inner(caller, import_lock_is_exclusive).map(|(store, _)| store)
 }
 
@@ -74,7 +129,7 @@ fn initialize_store_inner(
     // supplied runtime override remains isolated from the desktop marker.
     let isolated_runtime_library = central_repo::base_dir_override_active();
     let step = Instant::now();
-    central_repo::ensure_central_repo().context("Failed to create central repo")?;
+    central_repo::ensure_central_repo().context(InitializationStage("library_prepare"))?;
     timings.ensure_central_repo_ms = step.elapsed().as_millis();
 
     // 先解析并迁移 Agent 技能管家自身配置的中央库，确保已批准的上游导入始终指向
@@ -85,22 +140,23 @@ fn initialize_store_inner(
         && import_lock_is_exclusive
     {
         super::existing_install_import::process_pending_before_store_open(caller)
-            .context("Existing-installation import failed before store open")?;
+            .context(InitializationStage("existing_install_import"))?;
     }
     if caller == super::existing_install_import::ProcessCallerRole::Gui {
         super::existing_install_import::downgrade_process_lifetime_lock_to_shared(caller)
-            .context("打开 Agent 技能管家数据库前无法降级进程锁")?;
+            .context(InitializationStage("import_lock"))?;
     }
 
     let db_path = central_repo::db_path();
     let step = Instant::now();
-    let store = Arc::new(SkillStore::new(&db_path).context("Failed to initialize database")?);
+    let store = Arc::new(SkillStore::new(&db_path).context(InitializationStage("database_open"))?);
     timings.open_store_ms = step.elapsed().as_millis();
 
     let step = Instant::now();
+    store.tool_config()?;
     tool_service::migrate_legacy_tool_keys(&store)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .context("Failed to migrate legacy tool keys")?;
+        .context(InitializationStage("legacy_configuration"))?;
     timings.migrate_legacy_tool_keys_ms = step.elapsed().as_millis();
 
     timings.skill_count = store.get_all_skills().map(|s| s.len()).unwrap_or(0);
@@ -108,20 +164,19 @@ fn initialize_store_inner(
     if sync_metadata::metadata_exists() {
         let step = Instant::now();
         sync_metadata::reindex_from_metadata(&store)
-            .context("Failed to reindex from sync metadata")?;
+            .context(InitializationStage("metadata_read"))?;
         timings.reindex_from_metadata_ms = Some(step.elapsed().as_millis());
     }
 
     let step = Instant::now();
     let changed = scenario_service::restore_all_skills_sync_included(&store)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .context("Failed to restore skill sync inclusion")?;
+        .context(InitializationStage("skill_inclusion"))?;
     timings.restore_sync_included_ms = step.elapsed().as_millis();
     timings.restore_sync_included_changed = changed;
     if changed {
         let step = Instant::now();
-        sync_metadata::write_all_from_db(&store)
-            .context("Failed to persist restored skill sync inclusion")?;
+        sync_metadata::write_all_from_db(&store).context(InitializationStage("metadata_write"))?;
         timings.write_all_from_db_ms = Some(step.elapsed().as_millis());
     }
 
@@ -129,12 +184,12 @@ fn initialize_store_inner(
     if caller == super::existing_install_import::ProcessCallerRole::Gui {
         scenario_service::ensure_default_startup_scenario(&store)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
-            .context("Failed to initialize startup scenario")?;
+            .context(InitializationStage("startup_coordination"))?;
         timings.apply_scenario_kind = "default_startup";
     } else {
         scenario_service::ensure_cli_scenario_state(&store)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
-            .context("Failed to initialize CLI scenario state")?;
+            .context(InitializationStage("cli_initialization"))?;
         timings.apply_scenario_kind = "cli";
     }
     timings.apply_scenario_ms = step.elapsed().as_millis();
@@ -185,5 +240,24 @@ impl StartupTimings {
             self.apply_scenario_ms,
             self.skill_count
         );
+    }
+}
+
+#[cfg(test)]
+mod startup_failure_tests {
+    use super::*;
+    #[test]
+    fn diagnostics_use_known_fields_instead_of_the_source_error_or_database_values() {
+        let error = anyhow::anyhow!("token=private-secret /Users/private/database.db")
+            .context(InitializationStage("database_open"));
+        let failure = StartupFailure::from_error(&error);
+        assert_eq!(failure.stage, "database_open");
+        assert!(!failure.diagnostics.contains("private"));
+        let failure = StartupFailure::from_error(&anyhow::Error::new(
+            super::super::error::AppError::configuration("custom_tools", "duplicate key"),
+        ));
+        assert_eq!(failure.stage, "agent_configuration");
+        assert_eq!(failure.setting.as_deref(), Some("custom_tools"));
+        assert!(!failure.retryable);
     }
 }
