@@ -15,7 +15,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
--
+- 修复旧自定义 Agent 测试夹具写死 Unix 路径的问题，改用隔离临时目录，并将路径编辑回归纳入 Windows/Linux 专项验证。
 
 ## [1.0.22] - 2026-10-18
 
