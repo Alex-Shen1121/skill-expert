@@ -9,15 +9,30 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
-- Add built-in GitLab Duo and shared GUI/CLI custom Agent registration.
+-
 
 ### User-facing
-- 应用文件缺失或不可执行时，重启前返回错误并保留当前窗口，允许修复后重试，避免启动错误页直接消失。
-- Report registration, deployment and refresh separately; preserve legacy Duo identity and shared or unverified files. Add safe startup recovery and shared project-root guards.
-- 项目技能的删除、启停和中心更新部分成功时，立即回读实际状态并保留逐目标回执，避免卡片继续显示已失效的分配或启停状态。
+-
 
 ### Developer & Governance
-- Use strict Agent configuration snapshots and transactional updates; keep the stable source version unchanged.
+-
+
+## [1.0.22] - 2026-10-18
+
+### 发布概览
+- 新增内置 GitLab Duo 和 GUI/CLI 共用的自定义 Agent 注册，交付 GRJNGJ-83。
+
+### 用户可见更新
+- 分开展示注册、部署与刷新结果；保留旧 Duo 有效身份及共享、未确认文件，增加启动失败恢复与共享项目根保护。
+- 项目技能删除、启停和中心更新部分成功时，立即回读实际状态并保留逐目标回执，避免卡片继续显示失效状态。
+- 应用文件缺失或不可执行时，重启前返回错误并保留当前窗口；macOS 检查更新后的实际启动目标，允许修复后重试。
+
+### 开发者与治理更新
+- Agent 配置使用严格快照读取与事务更新；补充配置保护、共享目标保全及恢复流程回归。
+
+### 验证范围与已知限制
+- 已完成真实 macOS GUI/CLI 验收和自动回归；真实 Duo 会话加载、VoiceOver 实际朗读及 Windows/Linux GUI 交互未实测，不将其记为通过。
+- 重启预检不能排除检查完成后的文件变化或系统启动失败。
 
 ## [1.0.21] - 2026-10-15
 
