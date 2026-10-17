@@ -623,7 +623,7 @@ mod tests {
         let customs = vec![CustomToolDef {
             key: key.to_string(),
             display_name: "DeepSeek Harness".to_string(),
-            skills_dir: "/tmp/whatever-they-had".to_string(),
+            skills_dir: dir.join("legacy-skills").to_string_lossy().into_owned(),
             project_relative_skills_dir: Some(".old/skills".to_string()),
             category: ToolCategory::Coding,
         }];

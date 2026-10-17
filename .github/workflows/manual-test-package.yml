@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for filter in core::tool_config::tests commands::tools::duo_removal_tests commands::projects::shared_root_tests; do
+          for filter in core::tool_config::tests commands::tools::tests commands::tools::duo_removal_tests commands::projects::shared_root_tests; do
             cargo test --locked --manifest-path src-tauri/Cargo.toml --lib "$filter"
           done
           cargo test --locked --manifest-path src-tauri/Cargo.toml --bin skill-expert-cli
