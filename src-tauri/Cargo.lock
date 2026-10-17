@@ -4974,6 +4974,7 @@ dependencies = [
  "log",
  "nix 0.27.1",
  "notify",
+ "plist",
  "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
