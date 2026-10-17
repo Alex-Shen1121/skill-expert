@@ -156,8 +156,9 @@ export function ProjectDetail() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectSkillGroup | null>(null);
   const [unsyncedRemoval, setUnsyncedRemoval] = useState<{
     details: string[];
-    resolve: (confirmed: boolean) => void;
+    alsoRemoved: number;
   } | null>(null);
+  const unsyncedRemovalResolve = useRef<((confirmed: boolean) => void) | null>(null);
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [batchTagDialogOpen, setBatchTagDialogOpen] = useState(false);
   const [batchToggling, setBatchToggling] = useState(false);
@@ -646,16 +647,48 @@ export function ProjectDetail() {
     }
   };
 
+  const settleUnsyncedRemoval = useCallback((confirmed: boolean) => {
+    unsyncedRemovalResolve.current?.(confirmed);
+    unsyncedRemovalResolve.current = null;
+    setUnsyncedRemoval(null);
+  }, []);
+
+  // Leaving the project or the page answers a pending confirmation "no".
+  useEffect(() => () => settleUnsyncedRemoval(false), [id, settleUnsyncedRemoval]);
+
   // Agent toggles and preset removal delete workspace copies outright. Only
   // in_sync proves the center holds the same bytes (see
   // pushSkillToCenterAndAlign), so ask first when any copy is anything else.
-  const confirmUnsyncedRemoval = useCallback((variants: ProjectSkill[]) => {
-    const details = variants
-      .filter((variant) => variant.sync_status !== "in_sync")
-      .map((variant) => `${variant.name} · ${variant.agent_display_name}`);
-    if (details.length === 0) return Promise.resolve(true);
-    return new Promise<boolean>((resolve) => setUnsyncedRemoval({ details, resolve }));
-  }, []);
+  // The page's scan may predate edits on disk, so re-read the workspace
+  // first; a failed re-read, or a copy missing from it, counts as unsynced.
+  // Not loadSkills: its loading flag swaps the whole grid for a spinner.
+  const confirmUnsyncedRemoval = useCallback(async (variants: ProjectSkill[]) => {
+    if (!id || variants.length === 0) return true;
+    // Read, don't bump: a bump would strand an in-flight loadSkills' spinner.
+    const requestId = skillsRequestRef.current;
+    let fresh: ProjectSkill[] | null = null;
+    try {
+      fresh = await api.getProjectSkills(id);
+      if (skillsRequestRef.current === requestId) setSkills(fresh);
+    } catch (e) {
+      console.error("Failed to re-read project skills before removal:", e);
+    }
+    const unsynced = variants.filter((variant) => {
+      const current = fresh?.find(
+        (skill) => skill.relative_path === variant.relative_path && skill.agent === variant.agent
+      );
+      return current?.sync_status !== "in_sync";
+    });
+    if (unsynced.length === 0) return true;
+    unsyncedRemovalResolve.current?.(false);
+    return new Promise<boolean>((resolve) => {
+      unsyncedRemovalResolve.current = resolve;
+      setUnsyncedRemoval({
+        details: unsynced.map((variant) => `${variant.name} · ${variant.agent_display_name}`),
+        alsoRemoved: variants.length - unsynced.length,
+      });
+    });
+  }, [id]);
 
   const handleToggleDetailAgent = async (skill: ProjectSkillGroup, agentKey: string, enabled: boolean) => {
     if (!id) return;
@@ -663,7 +696,6 @@ export function ProjectDetail() {
     const target = exportTargets.find((item) => item.key === agentKey);
     const displayName = target?.display_name ?? agentKey;
     const existingVariant = skill.variants.find((variant) => variant.agent === agentKey);
-    if (!enabled && existingVariant && !(await confirmUnsyncedRemoval([existingVariant]))) return;
 
     setTogglingAgentTarget({ skillKey: getSkillKey(skill), agent: agentKey });
     try {
@@ -677,6 +709,9 @@ export function ProjectDetail() {
         toast.success(t("project.agentAdded", { agent: displayName, name: skill.name }));
       } else {
         if (!existingVariant) return;
+        // Asked while the toggle is marked pending, so a second click cannot
+        // start another removal.
+        if (!(await confirmUnsyncedRemoval([existingVariant]))) return;
         await api.deleteProjectSkill(id, existingVariant.relative_path, agentKey);
         toast.success(t("project.agentRemoved", { agent: displayName, name: skill.name }));
       }
@@ -1591,19 +1626,20 @@ export function ProjectDetail() {
 
       {/* Portaled so it covers the detail sheet (its agent toggles land here)
           and the sheet's Escape handler leaves the key to it. ConfirmDialog
-          calls onClose after onConfirm too; a settled promise ignores it. */}
+          calls onClose after onConfirm too; by then the resolver is gone. */}
       {createPortal(
         <ConfirmDialog
           open={!!unsyncedRemoval}
           title={t("project.removeUnsyncedTitle")}
-          message={t("project.removeUnsyncedConfirm")}
+          message={
+            unsyncedRemoval && unsyncedRemoval.alsoRemoved > 0
+              ? t("project.removeUnsyncedConfirmWithOthers", { count: unsyncedRemoval.alsoRemoved })
+              : t("project.removeUnsyncedConfirm")
+          }
           details={unsyncedRemoval?.details}
           tone="danger"
-          onClose={() => {
-            unsyncedRemoval?.resolve(false);
-            setUnsyncedRemoval(null);
-          }}
-          onConfirm={async () => unsyncedRemoval?.resolve(true)}
+          onClose={() => settleUnsyncedRemoval(false)}
+          onConfirm={async () => settleUnsyncedRemoval(true)}
         />,
         document.body
       )}

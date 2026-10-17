@@ -93,9 +93,10 @@ export function PresetBar({
           .filter((agentKey) => existsInWorkspace(skill, agentKey))
           .map((agentKey) => ({ skill, agentKey }))
       );
-    if (confirmRemove && !(await confirmRemove(pairs))) return;
+    // Busy before asking, so a second click cannot start another removal.
     setLoadingKey(`${preset.id}-remove`);
     try {
+      if (confirmRemove && !(await confirmRemove(pairs))) return;
       let removed = 0, failed = 0;
       const failures: string[] = [];
       for (const { skill, agentKey } of pairs) {
