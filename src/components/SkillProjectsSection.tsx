@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -320,21 +321,26 @@ export function SkillProjectsSection({ skill, projects, onChanged }: Props) {
           );
         })}
       </div>
-      <ConfirmDialog
-        open={!!removeTarget}
-        title={t("addFromLibrary.removeConfirmTitle")}
-        message={t("addFromLibrary.removeConfirm", {
-          skill: skill.name,
-          project: removeTarget?.project.name,
-          agent: removeTarget?.target.display_name,
-        })}
-        confirmLabel={t("common.delete")}
-        tone="danger"
-        onClose={() => setRemoveTarget(null)}
-        onConfirm={async () => {
-          if (removeTarget) await handleRemove(removeTarget.project, removeTarget.target);
-        }}
-      />
+      {/* Portaled out of the DetailSheet so the sheet's Escape handler sees
+          a covering dialog and leaves the key to it. */}
+      {createPortal(
+        <ConfirmDialog
+          open={!!removeTarget}
+          title={t("addFromLibrary.removeConfirmTitle")}
+          message={t("addFromLibrary.removeConfirm", {
+            skill: skill.name,
+            project: removeTarget?.project.name,
+            agent: removeTarget?.target.display_name,
+          })}
+          confirmLabel={t("common.delete")}
+          tone="danger"
+          onClose={() => setRemoveTarget(null)}
+          onConfirm={async () => {
+            if (removeTarget) await handleRemove(removeTarget.project, removeTarget.target);
+          }}
+        />,
+        document.body,
+      )}
     </div>
   );
 }
