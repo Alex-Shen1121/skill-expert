@@ -701,18 +701,54 @@ pub async fn app_exit(app: tauri::AppHandle) {
     }
 }
 
-/// Relaunch the app so a freshly installed update takes effect. Only ever
-/// invoked from an explicit user confirmation — the updater never restarts on
-/// its own.
-///
-/// Scheduled onto the main thread for the same reason `app_exit` is: the
-/// teardown destroys the main window before the process goes away.
+fn validate_restart_binary(path: &std::path::Path) -> Result<(), AppError> {
+    if !std::fs::metadata(path).map_err(AppError::io)?.is_file() {
+        return Err(AppError::invalid_input("应用重启目标不是普通文件"));
+    }
+    #[cfg(unix)]
+    nix::unistd::access(path, nix::unistd::AccessFlags::X_OK).map_err(AppError::io)?;
+    // shortcut: 预检不能排除随后发生的系统启动失败，需要进程交接保证时再扩展。
+    Ok(())
+}
+
+/// 用户明确重启后，先检查目标可执行，再安排主线程关闭窗口并重启。
 #[tauri::command]
-pub async fn restart_app(app: tauri::AppHandle) {
+pub async fn restart_app(app: tauri::AppHandle) -> Result<(), AppError> {
+    let binary = tauri::process::current_binary(&app.env()).map_err(AppError::io)?;
+    validate_restart_binary(&binary)?;
     let app_for_main = app.clone();
-    if let Err(err) = app.run_on_main_thread(move || crate::restart_app(&app_for_main)) {
-        log::error!("Failed to schedule restart_app on main thread: {err}");
-        crate::restart_app(&app);
+    app.run_on_main_thread(move || crate::restart_app(&app_for_main))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::validate_restart_binary;
+
+    #[test]
+    fn missing_or_directory_restart_target_is_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(validate_restart_binary(&root.path().join("missing")).is_err());
+        assert!(validate_restart_binary(root.path()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_permission_failure_is_recoverable_after_permissions_are_restored() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let binary = root.path().join("app");
+        std::fs::write(&binary, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(validate_restart_binary(&binary).is_err());
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        validate_restart_binary(&binary).unwrap();
+    }
+
+    #[test]
+    fn current_test_executable_is_accepted() {
+        validate_restart_binary(&std::env::current_exe().unwrap()).unwrap();
     }
 }
 

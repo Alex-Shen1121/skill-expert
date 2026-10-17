@@ -12,6 +12,7 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 - Add built-in GitLab Duo and shared GUI/CLI custom Agent registration.
 
 ### User-facing
+- 应用文件缺失或不可执行时，重启前返回错误并保留当前窗口，允许修复后重试，避免启动错误页直接消失。
 - Report registration, deployment and refresh separately; preserve legacy Duo identity and shared or unverified files. Add safe startup recovery and shared project-root guards.
 - 项目技能的删除、启停和中心更新部分成功时，立即回读实际状态并保留逐目标回执，避免卡片继续显示已失效的分配或启停状态。
 
