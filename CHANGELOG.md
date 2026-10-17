@@ -15,7 +15,26 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 -
 
 ### Developer & Governance
-- 修复旧自定义 Agent 测试夹具写死 Unix 路径的问题，改用隔离临时目录，并将路径编辑回归纳入 Windows/Linux 专项验证。
+-
+
+## [1.0.23] - 2026-10-18
+
+### 发布概览
+- 修复 Windows 测试夹具后，正式交付 v1.0.22 未公开 Draft 中的 GitLab Duo、自定义 Agent 注册与恢复修复，完成 GRJNGJ-83。
+
+### 用户可见更新
+- 新增内置 GitLab Duo 和 GUI/CLI 共用的自定义 Agent 注册，分开展示注册、部署与刷新结果。
+- 保留旧 Duo 有效身份及共享、未确认文件，增加启动失败恢复与共享项目根保护。
+- 项目技能删除、启停和中心更新部分成功时，立即回读实际状态并保留逐目标回执，避免卡片继续显示失效状态。
+- 应用文件缺失时在重启前返回错误，macOS/Linux 同时检查执行权限；macOS 检查更新后的实际启动目标，失败时保留当前窗口，允许修复后重试。
+
+### 开发者与治理更新
+- Agent 配置使用严格快照读取与事务更新；补充配置保护、共享目标保全及恢复流程回归。
+- 旧自定义 Agent 测试夹具改用隔离临时目录，路径编辑回归纳入 Windows/Linux 专项；生产路径校验保持不变。
+
+### 验证范围与已知限制
+- 已完成真实 macOS GUI/CLI 验收及 Windows/Linux 原生注册专项；真实 Duo 会话加载、VoiceOver 实际朗读及 Windows/Linux GUI 交互未实测，不将其记为通过。
+- 重启预检不能排除检查完成后的文件变化或系统启动失败。
 
 ## [1.0.22] - 2026-10-18
 
