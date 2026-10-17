@@ -985,13 +985,14 @@ pub fn set_active_preset_tool_toggles(
 /// without changing `active_scenario_id`.
 ///
 /// This is the tray-side preset apply primitive, also behind the CLI's
-/// `presets deploy/undeploy` and `skills deploy/undeploy`. Remove mode also
-/// turns the pairs off in the active preset's toggles, for skills in that
-/// preset: the startup sync deploys the active preset from those toggles, so
-/// leaving them on brought back at the next launch what was just removed
-/// (#549). The toggles go first, so a busy repo lock fails the batch before
-/// any file changes. Add mode leaves the toggles alone: the startup sync only
-/// adds, so a pair deployed to an agent whose toggle is off stays deployed.
+/// `presets deploy/undeploy` and `skills deploy/undeploy`. It also turns the
+/// pairs on (Add) or off (Remove) in the active preset's toggles, for skills
+/// in that preset. The startup sync deploys the active preset from those
+/// toggles: one left on brought a removed skill back at the next launch, and
+/// one left off kept a deployed skill out of the preview and out of the
+/// startup repair (#549). The toggles go first, so a busy repo lock fails the
+/// batch before any file changes, and a pair that then fails to deploy is
+/// retried by the startup sync.
 ///
 /// Remove mode handles shared physical paths: a `target_path` may be referenced
 /// by multiple `(skill_id, tool)` records when several tools resolve to the same
@@ -1008,12 +1009,11 @@ pub fn apply_skills_to_tools(
         return Ok(());
     }
 
+    let add = matches!(mode, BatchApplyMode::Add);
+    set_active_preset_tool_toggles(store, skill_ids, tool_keys, add)?;
     match mode {
         BatchApplyMode::Add => apply_add(store, skill_ids, tool_keys, false),
-        BatchApplyMode::Remove => {
-            set_active_preset_tool_toggles(store, skill_ids, tool_keys, false)?;
-            apply_remove(store, skill_ids, tool_keys)
-        }
+        BatchApplyMode::Remove => apply_remove(store, skill_ids, tool_keys),
     }
 }
 

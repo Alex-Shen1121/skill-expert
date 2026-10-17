@@ -752,6 +752,40 @@ mod tests {
         assert!(!repo.deployed.exists());
     }
 
+    /// Deploying it again must turn the toggle back on, or the preview and the
+    /// startup sync keep ignoring a skill that is deployed.
+    #[test]
+    fn batch_redeployed_active_preset_skill_is_back_in_the_preset_after_restart() {
+        let repo = deployed_active_preset_repo();
+        let skill = ["s1".to_string()];
+        let agent = ["test_agent".to_string()];
+        scenario_service::apply_skills_to_tools(
+            &repo.store,
+            &skill,
+            &agent,
+            scenario_service::BatchApplyMode::Remove,
+        )
+        .unwrap();
+
+        scenario_service::apply_skills_to_tools(
+            &repo.store,
+            &skill,
+            &agent,
+            scenario_service::BatchApplyMode::Add,
+        )
+        .unwrap();
+        restart(&repo.store);
+
+        assert!(repo.deployed.exists());
+        let preview = scenario_service::preview_scenario_sync(&repo.store, "active").unwrap();
+        assert!(
+            preview
+                .iter()
+                .any(|target| target.skill_id == "s1" && target.tool == "test_agent"),
+            "the redeployed skill is missing from the preset: {preview:?}"
+        );
+    }
+
     #[test]
     fn sync_skill_to_tool_keeps_duplicate_skill_names_separate() {
         let tmp = tempdir().unwrap();
