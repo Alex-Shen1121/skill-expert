@@ -175,7 +175,7 @@ export function PresetBar({
                   onClick={() => { if (!busy) void handleDeactivate(preset); }}
                   title={t("presetActions.removePreset", { name: preset.name })}
                   aria-label={t("presetActions.removePreset", { name: preset.name })}
-                  className="rounded-full p-1 text-amber-600 transition-colors hover:bg-amber-500/12 disabled:opacity-50 dark:text-amber-400"
+                  className="rounded-md p-1 text-amber-600 transition-colors hover:bg-amber-500/12 disabled:opacity-50 dark:text-amber-400"
                 >
                   <X className="h-3 w-3" />
                 </button>
