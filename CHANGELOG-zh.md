@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.42.2] - 2026-10-18
+
+### 发布概览
+- 两项 Linux / Windows 修复：Linux AppImage 里的备份和 Git 安装恢复正常；Windows 和 Linux 的窗口顶部不再有一条空白。
+
+### 用户可见更新
+- **Linux AppImage：备份和 Git 安装恢复正常** — 在 AppImage 里，「立即备份」以及从 Git 安装、更新 Skill 可能失败，报 Git HTTPS helper / libcurl 符号查找错误。原因是系统的 `git` 加载了 AppImage 自带的库。现在 Git 使用系统自己的库。感谢 @JonathanPitre（#539、#536）。
+- **Windows 和 Linux：窗口顶部不再有空白条** — 为 macOS 窗口按钮预留的 28px 空白条，在 Windows 和 Linux 上也会出现在原生标题栏下方。现在只在 macOS 上保留。感谢 @YageGeng（#547）。
+
+### 开发者与治理更新
+- `git_fetcher.rs` 和 `git_backup.rs` 里两份相同的 `git_command()` 合并到 `core/git_command.rs`。Linux 上设置了 `APPDIR` 时，Git 子进程不再继承 `LD_LIBRARY_PATH`，应用自身的环境不变。新增的回归测试只在 Linux 上运行，而 Linux CI 只跑 `cargo check`。
 ## [1.42.1] - 2026-10-17
 
 ### 发布概览

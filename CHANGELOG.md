@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.2] - 2026-10-18
+
+### Release Overview
+- Two fixes for Linux and Windows: backups and Git installs work again in the Linux AppImage, and Windows and Linux no longer show an empty strip at the top of the window.
+
+### User-facing
+- **Linux AppImage: backups and Git installs work again** — In the AppImage, Back Up Now and installing or updating skills from Git could fail with a Git HTTPS helper / libcurl symbol lookup error. The system `git` was loading libraries bundled inside the AppImage. Git now runs with the system's own libraries. Thanks to @JonathanPitre (#539, #536).
+- **Windows and Linux: no empty strip at the top of the window** — A 28px band reserved for the macOS window buttons also appeared on Windows and Linux, just below the native title bar. It now appears only on macOS. Thanks to @YageGeng (#547).
+
+### Developer & Governance
+- The two identical `git_command()` helpers in `git_fetcher.rs` and `git_backup.rs` are now one, in `core/git_command.rs`. On Linux, when `APPDIR` is set, Git child processes no longer inherit `LD_LIBRARY_PATH`; the app's own environment is unchanged. The new regression test runs only on Linux, and the Linux CI job only runs `cargo check`.
 ## [1.42.1] - 2026-10-17
 
 ### Release Overview
