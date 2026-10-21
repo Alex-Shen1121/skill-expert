@@ -95,6 +95,13 @@ brew install --cask skills-manager
 
 从 [最新 Release](https://github.com/xingkongliang/skills-manager/releases/latest) 下载对应平台的安装包：Windows 为 `.exe` 或 `.msi`，Linux 为 `.AppImage`、`.deb` 或 `.rpm`（提供 x64 和 arm64）。
 
+Windows 也可以用 [Scoop](https://scoop.sh) 安装：
+
+```powershell
+scoop bucket add extras
+scoop install extras/skills-manager
+```
+
 所有安装包都自带 CLI，位置见 [二进制放在哪](#二进制放在哪)。
 
 ## 快速上手

@@ -99,6 +99,13 @@ You can also download the `.dmg` for your Mac from the [latest release](https://
 
 Download the installer for your platform from the [latest release](https://github.com/xingkongliang/skills-manager/releases/latest): `.exe` or `.msi` for Windows, and `.AppImage`, `.deb`, or `.rpm` for Linux (x64 and arm64).
 
+On Windows you can also install with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add extras
+scoop install extras/skills-manager
+```
+
 Every installer ships the CLI inside the app — see [Where the binary lives](#where-the-binary-lives).
 
 ## Quick Start
