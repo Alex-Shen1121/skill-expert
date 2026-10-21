@@ -404,6 +404,12 @@
       "git": "Git",
       "skillssh": "skills.sh"
     },
+    "groupBySource": "按来源分组",
+    "sourcePicker": {
+      "label": "来源",
+      "clear": "清除来源筛选",
+      "unknownSource": "未分类"
+    },
     "tags": {
       "filter": "标签",
       "allTags": "全部标签",
