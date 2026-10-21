@@ -785,16 +785,43 @@ pub fn default_tool_adapters() -> Vec<ToolAdapter> {
             project_relative_skills_dir: None,
         },
         ToolAdapter {
-            // WorkBuddy's user skill directory is `~/.workbuddy/skills/` — that
-            // is where its own skill import unpacks to and what it scans as
-            // `source='user'`. `~/.workbuddy/skills-marketplace/` is a different
-            // thing: a vendor cache that `BuiltinSkillMarketplaceUpdater` wipes
-            // and re-extracts wholesale on every marketplace version bump, so
-            // anything deployed under it is destroyed on the next update.
+            // WorkBuddy ships two editions with separate data directories, and
+            // the directory name *is* the edition: the app reports `overseas`
+            // when its config directory contains `workbuddy-ai` and `cn`
+            // otherwise. This adapter is the domestic edition, whose user
+            // skills live under `~/.workbuddy/` — still the path its
+            // Chinese-language documentation describes. The overseas edition
+            // is `workbuddy_overseas` below.
+            //
+            // `skills-marketplace/` is a different thing: a vendor cache that
+            // `BuiltinSkillMarketplaceUpdater` wipes and re-extracts wholesale
+            // on every marketplace version bump, so anything deployed under it
+            // is destroyed on the next update.
             key: "workbuddy".into(),
             display_name: "WorkBuddy".into(),
             relative_skills_dir: ".workbuddy/skills".into(),
             relative_detect_dir: ".workbuddy".into(),
+            additional_scan_dirs: vec![],
+            override_skills_dir: None,
+            category: ToolCategory::Lobster,
+            is_custom: false,
+            recursive_scan: false,
+            project_relative_skills_dir: None,
+        },
+        ToolAdapter {
+            // The overseas edition keeps its data directory in
+            // `~/.workbuddy-ai/` and reads user skills from `skills/` beneath
+            // it. Deploying to the domestic path instead fails silently: the
+            // app reports nothing and the skill never loads (#587).
+            //
+            // `~/.workbuddy/` also exists on these machines — the app keeps
+            // writing its device id and logs there — so the domestic adapter
+            // above still reports as detected. The path shown for each agent is
+            // what tells the two apart.
+            key: "workbuddy_overseas".into(),
+            display_name: "WorkBuddy AI".into(),
+            relative_skills_dir: ".workbuddy-ai/skills".into(),
+            relative_detect_dir: ".workbuddy-ai".into(),
             additional_scan_dirs: vec![],
             override_skills_dir: None,
             category: ToolCategory::Lobster,
@@ -1019,6 +1046,24 @@ mod tests {
             .expect("antigravity adapter should exist");
 
         assert_eq!(adapter.relative_skills_dir, ".gemini/antigravity/skills");
+    }
+
+    #[test]
+    fn workbuddy_editions_use_their_own_skill_paths() {
+        let adapters = default_tool_adapters();
+        let domestic = adapters
+            .iter()
+            .find(|adapter| adapter.key == "workbuddy")
+            .expect("workbuddy adapter should exist");
+        let overseas = adapters
+            .iter()
+            .find(|adapter| adapter.key == "workbuddy_overseas")
+            .expect("workbuddy_overseas adapter should exist");
+
+        assert_eq!(domestic.relative_skills_dir, ".workbuddy/skills");
+        assert_eq!(domestic.relative_detect_dir, ".workbuddy");
+        assert_eq!(overseas.relative_skills_dir, ".workbuddy-ai/skills");
+        assert_eq!(overseas.relative_detect_dir, ".workbuddy-ai");
     }
 
     #[test]
