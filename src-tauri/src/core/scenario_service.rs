@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::{
+    central_repo,
     error::{AppError, TargetConflictDetail},
     skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
     sync_engine, sync_metadata, tool_adapters,
@@ -191,6 +192,86 @@ fn remove_recorded_or_warn(path: &Path, recorded_mode: &str) -> bool {
     }
 }
 
+/// Clean up a deployment at a path its tool no longer reads: the adapter
+/// moved, or the tool's skills directory was changed. [`deployment_target`]
+/// keeps any recorded path inside the tool's root, so a recorded path that
+/// differs from the desired one lies outside it.
+///
+/// Links are removed as usual. A copy-mode directory may hold edits made
+/// there that exist nowhere else (#593), and a matching content hash is no
+/// proof it is unedited: the hash skips `.gitignore` and caches. It cannot
+/// stay where it is either. Another agent may read that directory too, and
+/// moving the tool back would find it in the way. So it is moved into the
+/// library's `kept-copies/<tool>/`. Callers drop the record either way.
+pub(crate) fn release_abandoned_target(path: &Path, recorded_mode: &str, tool: &str) {
+    if recorded_mode != "copy" {
+        remove_recorded_or_warn(path, recorded_mode);
+        return;
+    }
+    // Only what still looks like our copy is ours to move.
+    match sync_engine::matches_recorded_deployment(path, recorded_mode) {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            log::warn!("Keeping {}: cannot inspect it ({e})", path.display());
+            return;
+        }
+    }
+    match move_into_kept_copies(path, tool) {
+        Ok(kept) => log::warn!(
+            "Moved {} to {}: {tool} no longer reads that path, and the copy may hold edits",
+            path.display(),
+            kept.display()
+        ),
+        Err(e) => log::warn!(
+            "Keeping {} in place: could not move it into the library ({e})",
+            path.display()
+        ),
+    }
+}
+
+/// A rename only, so nothing is copied half-way; across volumes it fails and
+/// the caller keeps the copy where it is.
+fn move_into_kept_copies(path: &Path, tool: &str) -> std::io::Result<PathBuf> {
+    let root = central_repo::base_dir()
+        .join("kept-copies")
+        .join(single_dir_name(tool));
+    std::fs::create_dir_all(&root)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "skill".to_string());
+    let mut kept = root.join(&name);
+    let mut n = 2;
+    // `symlink_metadata`, not `exists`: a dangling link still takes the name.
+    while std::fs::symlink_metadata(&kept).is_ok() {
+        kept = root.join(format!("{name}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &kept)?;
+    Ok(kept)
+}
+
+/// A tool key as one directory name. Custom keys reach here unchecked from
+/// the CLI, so a key like `../skills` must not lead outside `kept-copies/`.
+fn single_dir_name(key: &str) -> String {
+    let name: String = key
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        "tool".to_string()
+    } else {
+        name
+    }
+}
+
 /// A key identifying the *directory entry* a target path names, used to spot
 /// two rows that claim one object under different spellings.
 ///
@@ -304,19 +385,7 @@ pub fn sync_desired_targets(
                         desired.tool
                     );
                 } else {
-                    match sync_engine::remove_recorded_target(&target_path, &existing.mode) {
-                        Ok(true) => {}
-                        Ok(false) => log::warn!(
-                            "Keeping {}: no longer matches its recorded {} deployment; \
-                             dropping the stale record only",
-                            target_path.display(),
-                            existing.mode
-                        ),
-                        Err(e) => log::warn!(
-                            "Failed to remove stale target {}: {e}",
-                            target_path.display()
-                        ),
-                    }
+                    release_abandoned_target(&target_path, &existing.mode, &desired.tool);
                 }
                 if let Err(e) = store.delete_target(&desired.skill_id, &desired.tool) {
                     log::warn!(
@@ -527,11 +596,16 @@ pub fn unsync_obsolete_scenario_targets(
         for target in &targets {
             let path = PathBuf::from(&target.target_path);
             let key = (skill_id.clone(), target.tool.clone());
-            if desired_paths.get(&key) == Some(&path) {
-                continue;
+            match desired_paths.get(&key) {
+                Some(desired) if desired == &path => continue,
+                // Still deployed to this tool under the new preset, only
+                // somewhere else: the old path is abandoned, not removed by
+                // the user.
+                Some(_) => release_abandoned_target(&path, &target.mode, &target.tool),
+                None => {
+                    remove_recorded_or_warn(&path, &target.mode);
+                }
             }
-
-            remove_recorded_or_warn(&path, &target.mode);
             if let Err(e) = store.delete_target(skill_id, &target.tool) {
                 log::warn!(
                     "Failed to delete target record for skill {skill_id}, tool {}: {e}",
@@ -612,18 +686,21 @@ pub fn sync_skill_to_active_scenario(
                 if let Some(old) = old_targets.iter().find(|t| t.tool == adapter.key) {
                     let old_path = PathBuf::from(&old.target_path);
                     if old_path != target {
-                        match sync_engine::remove_recorded_target(&old_path, &old.mode) {
-                            Ok(true) => {}
-                            Ok(false) => log::warn!(
-                                "Keeping {}: no longer matches its recorded {} deployment; \
-                                 dropping the stale record only",
+                        // As in `sync_desired_targets`: a path another tool
+                        // still deploys to is its live deployment.
+                        let claimed_by_another_tool = old_targets.iter().any(|other| {
+                            other.tool != adapter.key
+                                && PathBuf::from(&other.target_path) == old_path
+                        });
+                        if claimed_by_another_tool {
+                            log::info!(
+                                "Keeping {}: still the deployment target of another tool; \
+                                 dropping {}'s stale record only",
                                 old_path.display(),
-                                old.mode
-                            ),
-                            Err(e) => log::warn!(
-                                "Failed to remove stale target {}: {e}",
-                                old_path.display()
-                            ),
+                                adapter.key
+                            );
+                        } else {
+                            release_abandoned_target(&old_path, &old.mode, &adapter.key);
                         }
                         let _ = store.delete_target(skill_id, &adapter.key);
                     } else {
@@ -1430,7 +1507,6 @@ fn apply_remove(
 #[cfg(test)]
 mod sync_desired_targets_tests {
     use super::*;
-    use crate::core::central_repo;
     use crate::core::skill_store::{SkillRecord, SkillStore, SkillTargetRecord};
     use std::fs;
     use tempfile::tempdir;
@@ -1538,6 +1614,45 @@ mod sync_desired_targets_tests {
         central_repo::set_test_base_dir_override(None);
     }
 
+
+    /// Kept copies land under `kept-copies/`, whatever the tool key looks
+    /// like, and never on top of an earlier one, dangling links included.
+    #[test]
+    fn kept_copies_stay_inside_kept_copies_and_never_collide() {
+        let _lock = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        let library = tmp.path().join("library");
+        central_repo::set_test_base_dir_override(Some(library.clone()));
+        let make_copy = |dir: &str| {
+            let path = tmp.path().join(dir).join("skill-a");
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("notes.md"), dir).unwrap();
+            path
+        };
+
+        // A CLI-created key with path syntax in it.
+        let first = make_copy("agent-1");
+        release_abandoned_target(&first, "copy", "../skills");
+        let kept_root = library.join("kept-copies").join("___skills");
+        assert_eq!(
+            fs::read_to_string(kept_root.join("skill-a/notes.md")).unwrap(),
+            "agent-1"
+        );
+        assert!(!library.join("skills").exists(), "escaped kept-copies/");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tmp.path().join("gone"), kept_root.join("skill-a-2")).unwrap();
+        let second = make_copy("agent-2");
+        release_abandoned_target(&second, "copy", "../skills");
+        assert!(!second.exists(), "the second copy was not moved");
+        let landed = if cfg!(unix) { "skill-a-3" } else { "skill-a-2" };
+        assert_eq!(
+            fs::read_to_string(kept_root.join(landed).join("notes.md")).unwrap(),
+            "agent-2"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
 
     /// Startup must survive a collision. `ensure_default_startup_scenario`
     /// reaches this function through `sync_scenario_skills`, and its caller
