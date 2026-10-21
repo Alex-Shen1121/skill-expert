@@ -145,7 +145,7 @@ npx skills add xingkongliang/skills-manager
 
 ## 支持的工具
 
-开箱支持 55 个 Agent，包括：
+开箱支持 56 个 Agent，包括：
 
 Claude Code · Codex · Cursor · GitHub Copilot · Gemini CLI · GitLab Duo · OpenCode · OpenClaw · Hermes Agent · OpenHands · Cline · Goose · Windsurf · Continue · Grok · Antigravity · Qwen Code · ZCode · Crush · Kilo Code · Roo Code · Amp · Kiro CLI · Droid · TRAE IDE · Warp · Qoder · CodeBuddy · MiniMax Code
 
