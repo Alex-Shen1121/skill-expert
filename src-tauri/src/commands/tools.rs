@@ -1031,4 +1031,150 @@ mod tests {
             "edited by the user"
         );
     }
+
+    /// A copy deployed from the library's current content, with the hash
+    /// recorded as a real install records it, then edited in the agent's folder.
+    fn edited_copy() -> MovedTool {
+        let deployed = deploy_before_the_move("copy");
+        set_library_hash(&deployed);
+        sync_active_scenario_to_tool(&deployed.store, "test_agent");
+        fs::write(
+            deployed.old_copy.join("SKILL.md"),
+            "edited in the agent's copy",
+        )
+        .unwrap();
+        deployed
+    }
+
+    fn set_library_hash(deployed: &MovedTool) {
+        let skill = deployed.store.get_skill_by_id("a").unwrap().unwrap();
+        let hash =
+            crate::core::content_hash::hash_directory(Path::new(&skill.central_path)).unwrap();
+        deployed
+            .store
+            .update_skill_after_install("a", "skill-a", None, None, None, Some(&hash), "local_only")
+            .unwrap();
+    }
+
+    fn copy_still_edited(deployed: &MovedTool) -> bool {
+        fs::read_to_string(deployed.old_copy.join("SKILL.md")).unwrap()
+            == "edited in the agent's copy"
+    }
+
+    type Resync = fn(&SkillStore) -> Result<(), AppError>;
+
+    /// Every way the app re-syncs one skill to an agent that already has it.
+    const RESYNCS: [(&str, Resync); 5] = [
+        ("full sync", |store| {
+            scenario_service::sync_scenario_skills(store, "active").map(drop)
+        }),
+        ("single skill to the active preset", |store| {
+            scenario_service::sync_skill_to_active_scenario(store, "active", "a")
+        }),
+        ("single skill to one agent", |store| {
+            scenario_service::sync_single_skill_to_tool(
+                store,
+                "a",
+                "test_agent",
+                scenario_service::DeployIntent::Managed,
+            )
+        }),
+        ("batch deploy", |store| {
+            scenario_service::apply_skills_to_tools(
+                store,
+                &["a".to_string()],
+                &["test_agent".to_string()],
+                scenario_service::BatchApplyMode::Add,
+            )
+        }),
+        ("copies after an update", |store| {
+            crate::commands::skills::resync_copy_targets(store, "a")
+        }),
+    ];
+
+    /// Applying a preset from the PresetBar, a batch deploy or the sync after
+    /// an install rewrote the copy and deleted edits made in it, although the
+    /// library had not changed (F1's third case).
+    #[test]
+    fn a_resync_leaves_an_edited_copy_alone_while_the_library_is_unchanged() {
+        for (name, resync) in RESYNCS {
+            let deployed = edited_copy();
+            resync(&deployed.store).unwrap();
+            assert!(
+                copy_still_edited(&deployed),
+                "{name} overwrote the edited copy"
+            );
+        }
+    }
+
+    /// The user swapped the copy for a link to the library. That serves the
+    /// same content, so the link is left as it is, as `main` did.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_the_library_in_place_of_the_copy_is_left_alone() {
+        for (name, resync) in RESYNCS {
+            let deployed = edited_copy();
+            let skill = deployed.store.get_skill_by_id("a").unwrap().unwrap();
+            fs::remove_dir_all(&deployed.old_copy).unwrap();
+            std::os::unix::fs::symlink(&skill.central_path, &deployed.old_copy).unwrap();
+
+            resync(&deployed.store).unwrap();
+
+            assert!(
+                fs::symlink_metadata(&deployed.old_copy)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "{name} replaced the user's link with a copy"
+            );
+        }
+    }
+
+    /// A copy is current only while it is still a directory (or a link to the
+    /// library). A file the user put in its place stays, and deploying over it
+    /// is refused.
+    #[test]
+    fn a_file_in_place_of_the_copy_is_not_taken_for_a_current_copy() {
+        for (name, resync) in RESYNCS {
+            let deployed = edited_copy();
+            fs::remove_dir_all(&deployed.old_copy).unwrap();
+            fs::write(&deployed.old_copy, "the user's file").unwrap();
+
+            let result = resync(&deployed.store);
+
+            assert_eq!(
+                fs::read_to_string(&deployed.old_copy).unwrap(),
+                "the user's file",
+                "{name} replaced the user's file"
+            );
+            if name == "single skill to one agent" {
+                assert!(
+                    result.is_err(),
+                    "{name} reported success over the user's file"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_resync_still_delivers_a_library_change() {
+        for (name, resync) in RESYNCS {
+            let deployed = edited_copy();
+            let skill = deployed.store.get_skill_by_id("a").unwrap().unwrap();
+            fs::write(
+                Path::new(&skill.central_path).join("unique.txt"),
+                "library v2",
+            )
+            .unwrap();
+            set_library_hash(&deployed);
+
+            resync(&deployed.store).unwrap();
+
+            assert_eq!(
+                fs::read_to_string(deployed.old_copy.join("unique.txt")).unwrap(),
+                "library v2",
+                "{name} did not deliver the library change"
+            );
+        }
+    }
 }
