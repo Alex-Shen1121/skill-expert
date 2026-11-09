@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import { cn } from "../utils";
 import * as api from "../lib/tauri";
 import type { ManagedSkill, ProjectAgentTarget } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
+import { normalizeSkillSearch, skillSearchMatches } from "../lib/skillSearch";
 import {
   classifySkill,
   targetsToInstall,
@@ -74,6 +75,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
   const [sourceFilters, setSourceFilters] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
 
   const initialAgents = target.kind === "project" ? target.initialSelectedAgents : [];
@@ -176,16 +178,11 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
   );
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizeSkillSearch(search);
     const hasUntagged = tagFilters.has(UNTAGGED_FILTER);
     const tagSelected = tagFilters.size > 0;
     return managedSkills.filter((skill) => {
-      if (q) {
-        const matches =
-          skill.name.toLowerCase().includes(q) ||
-          (skill.description || "").toLowerCase().includes(q);
-        if (!matches) return false;
-      }
+      if (!skillSearchMatches(q, [skill.name, skill.description])) return false;
       if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
       if (tagSelected) {
         const matchUntagged = hasUntagged && skill.tags.length === 0;
@@ -207,6 +204,27 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
     });
   }, [filtered, ctx]);
 
+  // IDs of skills the user can add (status "available") in the current filtered view.
+  const availableIds = useMemo(
+    () => ordered.filter((s) => classifySkill(s, ctx) === "available").map((s) => s.id),
+    [ordered, ctx],
+  );
+  const allAvailableSelected =
+    availableIds.length > 0 && availableIds.every((id) => selectedIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (availableIds.length === 0) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allAvailableSelected) {
+        for (const id of availableIds) next.delete(id);
+      } else {
+        for (const id of availableIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
   const skillsHaveUntagged = useMemo(
     () => managedSkills.some((s) => s.tags.length === 0),
     [managedSkills],
@@ -219,6 +237,35 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
       else next.add(id);
       return next;
     });
+  };
+
+  // Normal click toggles one row and moves the shift-click anchor there.
+  const handleRowClick = (index: number) => (e: MouseEvent<HTMLDivElement>) => {
+    const skill = ordered[index];
+    if (e.shiftKey && anchorId) {
+      const anchorIndex = ordered.findIndex((s) => s.id === anchorId);
+      if (anchorIndex !== -1) {
+        const [lo, hi] = anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
+        const rangeIds = ordered
+          .slice(lo, hi + 1)
+          .map((s) => s.id)
+          .filter((id) => availableIds.includes(id));
+        if (rangeIds.length > 0) {
+          const alreadyAllSelected = rangeIds.every((id) => selectedIds.has(id));
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of rangeIds) {
+              if (alreadyAllSelected) next.delete(id);
+              else next.add(id);
+            }
+            return next;
+          });
+          return;
+        }
+      }
+    }
+    toggleSelect(skill.id);
+    setAnchorId(skill.id);
   };
 
   const toggleSourceFilter = (source: string) => {
@@ -632,7 +679,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
             </div>
           ) : (
             <div className="divide-y divide-border-subtle">
-              {ordered.map((skill) => {
+              {ordered.map((skill, index) => {
                 const status = classifySkill(skill, ctx);
                 return (
                   <SkillPickerRow
@@ -642,7 +689,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
                     allTags={allTags}
                     sourceLabel={sourceLabel(skill.source_type)}
                     selected={selectedIds.has(skill.id)}
-                    onToggle={() => toggleSelect(skill.id)}
+                    onToggle={handleRowClick(index)}
                   />
                 );
               })}
@@ -651,6 +698,23 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
         </div>
 
         <div className="shrink-0 border-t border-border-subtle bg-bg-secondary px-5 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="truncate text-[12px] text-muted">
+              {selectableSelected.length > 0
+                ? t("addFromLibrary.selectedCount", { count: selectableSelected.length })
+                : t("addFromLibrary.shiftHint")}
+            </span>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              disabled={availableIds.length === 0}
+              className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
+            >
+              {allAvailableSelected
+                ? t("addFromLibrary.deselectAllSkills")
+                : t("addFromLibrary.selectAllSkills")}
+            </button>
+          </div>
           <button
             onClick={handleInstall}
             disabled={
