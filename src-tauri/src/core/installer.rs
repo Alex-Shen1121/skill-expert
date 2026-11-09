@@ -134,6 +134,15 @@ pub fn hash_local_source(source: &Path) -> Result<String> {
     content_hash::hash_directory(prepared.skill_dir())
 }
 
+/// [`hash_local_source`] with CRLF folded to LF, for the "do these differ by
+/// anything other than line endings?" tiebreaker. Goes through the same
+/// [`PreparedSource`] so an archive source is answered the same way a
+/// directory source is.
+pub fn hash_local_source_eol_insensitive(source: &Path) -> Result<String> {
+    let prepared = PreparedSource::open(source)?;
+    content_hash::hash_directory_eol_insensitive(prepared.skill_dir())
+}
+
 pub fn install_from_git_dir(source: &Path, name: Option<&str>) -> Result<InstallResult> {
     install_from_local(source, name)
 }
@@ -144,6 +153,31 @@ pub fn install_skill_dir_to_destination(
     destination: &Path,
 ) -> Result<InstallResult> {
     let meta = skill_metadata::parse_skill_md(source);
+
+    // A local skill can be a symlink back to this exact central directory
+    // (for example, after restoring the database). Treat that as an already
+    // installed directory: removing `destination` here would delete the data
+    // that `source` resolves to before the copy starts.
+    // Only when `destination` is itself a real directory: if it is a link out
+    // of the library, fall through so it is replaced by a real copy.
+    if source != destination {
+        let source_canonical = source.canonicalize().ok();
+        let destination_canonical = destination.canonicalize().ok();
+        if source_canonical.is_some()
+            && source_canonical == destination_canonical
+            && destination
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.file_type().is_dir())
+        {
+            let hash = content_hash::hash_directory(destination)?;
+            return Ok(InstallResult {
+                name: name.to_string(),
+                description: meta.description,
+                central_path: destination.to_path_buf(),
+                content_hash: hash,
+            });
+        }
+    }
 
     sync_engine::ensure_dst_not_inside_src(source, destination)?;
 
@@ -345,6 +379,54 @@ mod tests {
         assert!(!destination.exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn central_skill_symlink_import_preserves_content() {
+        let tmp = tempdir().unwrap();
+        let destination = make_skill_dir(tmp.path(), "central", Some("central"));
+        std::fs::write(destination.join("only-copy.txt"), "precious").unwrap();
+        let source = tmp.path().join("agent-link");
+        std::os::unix::fs::symlink(&destination, &source).unwrap();
+        let expected_hash = content_hash::hash_directory(&destination).unwrap();
+        assert_eq!(
+            unique_skill_dest(tmp.path(), "central", &source).unwrap(),
+            destination
+        );
+
+        let result = install_skill_dir_to_destination(&source, "central", &destination);
+        assert_eq!(
+            std::fs::read_to_string(destination.join("only-copy.txt")).unwrap(),
+            "precious"
+        );
+        let result = result.expect("reimporting a link to the central skill should succeed");
+        assert_eq!(result.content_hash, expected_hash);
+        assert_eq!(result.central_path, destination);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn central_destination_symlink_is_materialized_as_directory() {
+        let tmp = tempdir().unwrap();
+        let source = make_skill_dir(tmp.path(), "external", Some("external"));
+        std::fs::write(source.join("only-copy.txt"), "precious").unwrap();
+        let destination = tmp.path().join("central-link");
+        std::os::unix::fs::symlink(&source, &destination).unwrap();
+
+        install_skill_dir_to_destination(&source, "external", &destination).unwrap();
+        assert!(
+            destination.symlink_metadata().unwrap().file_type().is_dir(),
+            "the central library must own a real directory"
+        );
+        assert_eq!(
+            std::fs::read_to_string(source.join("only-copy.txt")).unwrap(),
+            "precious"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("only-copy.txt")).unwrap(),
+            "precious"
+        );
+    }
+
     #[test]
     fn unique_dest_legacy_no_metadata_base_can_reinstall_if_content_matches() {
         let tmp = tempdir().unwrap();
@@ -355,6 +437,32 @@ mod tests {
 
         let dest = unique_skill_dest(tmp.path(), "legacy", &source).unwrap();
         assert_eq!(dest, tmp.path().join("legacy"));
+    }
+
+    /// An archive source is prepared by the same extraction, so the tiebreaker
+    /// has to answer for it exactly as it does for a directory: a CRLF archive
+    /// of the same skill is not an update. Covers the only source shape where
+    /// the comparison re-extracts rather than re-walking.
+    #[test]
+    fn eol_insensitive_hash_sees_through_an_archive_with_crlf_content() {
+        let tmp = tempdir().unwrap();
+        let archive = tmp.path().join("demo.skill");
+        write_skill_archive(&archive, "line one\r\nline two\r\n");
+
+        let extracted = tmp.path().join("extracted");
+        std::fs::create_dir_all(&extracted).unwrap();
+        std::fs::write(extracted.join("SKILL.md"), "---\nname: Demo Skill\n---\n").unwrap();
+        std::fs::write(extracted.join("body.md"), "line one\nline two\n").unwrap();
+
+        assert_ne!(
+            hash_local_source(&archive).unwrap(),
+            content_hash::hash_directory(&extracted).unwrap(),
+            "the byte hashes disagree, which is what sends the check to the tiebreaker"
+        );
+        assert_eq!(
+            hash_local_source_eol_insensitive(&archive).unwrap(),
+            content_hash::hash_directory_eol_insensitive(&extracted).unwrap()
+        );
     }
 
     fn write_skill_archive(path: &Path, body: &str) {
