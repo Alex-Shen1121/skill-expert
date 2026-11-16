@@ -9,6 +9,17 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
+-
+
+### User-facing
+-
+
+### Developer & Governance
+-
+
+## [1.0.24] - 2026-11-16
+
+### Release Overview
 - 合入最新上游功能，并兼容现有 Agent 技能管家的数据、Agent 配置及发布身份。
 
 ### User-facing
