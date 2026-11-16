@@ -23,7 +23,9 @@ test('正式发布只能手动绑定精确 main SHA', () => {
   assert.match(workflow, /\^\[0-9a-f\]\{40\}\$/);
   assert.match(workflow, /refs\/heads\/main:refs\/remotes\/origin\/main/);
   assert.match(workflow, /merge-base --is-ancestor[^]*?origin\/main/);
-  assert.match(workflow, /commits\/\$\{INPUT_RELEASE_SHA\}\/pulls/);
+  assert.match(workflow, /gh api --method GET[^]*?"repos\/\$\{REPO\}\/pulls"/);
+  assert.match(workflow, /-f state=closed -f base=main/);
+  assert.ok(workflow.includes('-f "head=${REPO%%/*}:${RELEASE_REF}"'));
   assert.match(workflow, /\.head\.ref == \$release_ref/);
   assert.match(workflow, /\.base\.ref == "main"/);
   assert.match(workflow, /\.merge_commit_sha == \$release_sha/);

@@ -75,8 +75,11 @@ jobs:
             exit 1
           fi
           RELEASE_REF="codex/release-v${VERSION}"
-          gh api -H "Accept: application/vnd.github+json" \
-            "repos/${REPO}/commits/${INPUT_RELEASE_SHA}/pulls" > "$RUNNER_TEMP/release-pulls.json"
+          gh api --method GET -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/pulls" \
+            -f state=closed -f base=main \
+            -f "head=${REPO%%/*}:${RELEASE_REF}" \
+            -f per_page=100 > "$RUNNER_TEMP/release-pulls.json"
           VALID_RELEASES="$(jq \
             --arg repo "$REPO" \
             --arg release_ref "$RELEASE_REF" \

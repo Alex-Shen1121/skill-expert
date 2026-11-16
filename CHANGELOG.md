@@ -9,13 +9,15 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 修复发布身份查询后，交付 v1.0.24 未公开的上游同步与兼容更新。
 
 ### User-facing
--
+- 技能列表支持来源分组、渠道筛选和隐藏选中项提示；新增项目技能 CLI 与共享目录部署。
+- 备份恢复可确认同名差异并保留副本，项目卸载保留本地编辑的忽略文件和链接。
+- 新增更新内容展示、西班牙语与韩语，保留现有 Agent 配置、数据和偏好。
 
 ### Developer & Governance
--
+- 按发布分支查询已关闭 PR，继续逐项核验已合并状态、仓库、主线、精确合并 SHA 和唯一性，避免提交关联接口返回空列表时误拒绝发布。
 
 ## [1.0.24] - 2026-11-16
 
