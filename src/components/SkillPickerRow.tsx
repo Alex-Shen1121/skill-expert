@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../utils";
@@ -11,7 +12,7 @@ interface Props {
   allTags: string[];
   sourceLabel: string;
   selected: boolean;
-  onToggle: () => void;
+  onToggle: (e: MouseEvent<HTMLDivElement>) => void;
   busy?: boolean;
 }
 
@@ -48,7 +49,7 @@ export function SkillPickerRow({
       onClick={selectable ? onToggle : undefined}
       title={tooltip}
       className={cn(
-        "flex items-center gap-3 px-5 py-2.5 transition-colors",
+        "flex select-none items-center gap-3 px-5 py-2.5 transition-colors",
         selectable && "cursor-pointer hover:bg-surface-hover",
         selectable && selected && "bg-accent-bg/40",
         !selectable && "opacity-60",
@@ -56,7 +57,7 @@ export function SkillPickerRow({
     >
       <div
         className={cn(
-          "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
           selectable && selected
             ? "border-accent bg-accent text-white"
             : selectable
@@ -87,7 +88,7 @@ export function SkillPickerRow({
               <span
                 key={tag}
                 className={cn(
-                  "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10.5px] font-medium",
+                  "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-medium",
                   getTagColor(tag, allTags),
                 )}
               >

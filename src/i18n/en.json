@@ -497,7 +497,7 @@
     "sourceType": "Source type",
     "sourceRef": "Source",
     "sourceResolved": "Resolved source",
-    "sourceBranch": "Branch",
+    "sourceBranch": "Branch / Tag",
     "sourceSubpath": "Subpath",
     "sourceRevision": "Revision",
     "docTabs": {
@@ -641,7 +641,8 @@
       "import": "Imported",
       "git": "Git",
       "skillssh": "skills.sh",
-      "well-known": "Website snapshot"
+      "well-known": "Website snapshot",
+      "website": "Website"
     },
     "tags": {
       "filter": "Tags",
@@ -654,6 +655,9 @@
       "renameTag": "Rename tag",
       "deleteTag": "Delete tag",
       "tagName": "Tag name",
+      "showAll": "Show all {{count}}",
+      "showFewer": "Show fewer",
+      "foldedSelected": "({{count}} selected)",
       "manageHint": "Right-click to rename or delete",
       "tagRenamed": "Tag renamed",
       "tagDeleted": "Tag deleted",
@@ -701,7 +705,17 @@
       "apply": "Sync {{count}}",
       "noAgents": "No installed and enabled agents.",
       "allSynced": "Every selected skill is already on this agent"
-    }
+    },
+    "agentTogglePendingSync": "Pending sync",
+    "agentTogglePendingSyncHint": "Enabled in this preset but not deployed to this agent yet. Click to deploy.",
+    "groupBySource": "Group by source",
+    "sourcePicker": {
+      "label": "Source",
+      "clear": "Clear source filter",
+      "unknownSource": "Unclassified"
+    },
+    "notShownCount": "({{count}} not shown)",
+    "batchDeleteConfirmWithHidden": "Delete {{count}} selected skills permanently, including {{hidden}} not shown in the list? This removes their central library files, preset links, and synced agent targets."
   },
   "install": {
     "title": "Install Skills",
@@ -897,7 +911,7 @@
     "repoPathDesc": "Default storage location for all Skills and preset configs.",
     "repoPathSaved": "Central repository path updated",
     "repoPathReset": "Central repository path reset to default",
-    "repoPathRestartNotice": "Restart the app to apply the new path and migrate existing data.",
+    "repoPathRestartNotice": "Quit the app completely, including from the tray, then open it again to apply the new path and move existing data.",
     "repoPathEmpty": "Enter a central repository path first",
     "repoPathDefaultHint": "Using the default central repository path",
     "repoPathCustomHint": "Using a custom central repository path",
@@ -950,7 +964,7 @@
     "panicBanner": "Agent 技能管家 crashed during the last session ({{time}}).",
     "repoWarning_config_unreadable": "The central library config file is unreadable or corrupt, so this session fell back to the default location (~/.skill-expert). If your library looks empty, your data is still at the previously configured path — set “Central Repo Path” back to it.",
     "repoWarning_repo_path_invalid": "The configured central repository path is invalid, so this session fell back to the default location (~/.skill-expert). If your library looks empty, re-set “Central Repo Path” to where your data lives.",
-    "repoWarning_migration_incomplete": "Moving your central library to the new location couldn’t finish, so this session is using your existing library at its current location — nothing was lost. To complete the move, open Settings and point “Central Repo Path” at an empty, writable folder (tap Edit to see the destination you chose), then restart. Your current library stays where it is until the move succeeds — don’t delete it.",
+    "repoWarning_migration_incomplete": "Moving your central library to the new location couldn’t finish, so this session is using your existing library at its current location — nothing was lost. To complete the move, open Settings and point “Central Repo Path” at an empty, writable folder (tap Edit to see the destination you chose), then quit the app completely, including from the tray, and open it again. Your current library stays where it is until the move succeeds — don’t delete it.",
     "panicDismiss": "Dismiss",
     "gitBackup": "Git Sync",
     "gitBackupDesc": "Back up your skill library to a Git repository for version control and multi-machine sync.",
@@ -994,7 +1008,7 @@
     "gitSetupTitle": "Set Up Git Backup",
     "gitSetupSubtitle": "Choose how this skill library connects to a backup.",
     "gitSetupCardCloneTitle": "Use existing remote backup",
-    "gitSetupCardCloneDesc": "Clone from the configured remote. Local skills are preserved and non-conflicting items are merged back.",
+    "gitSetupCardCloneDesc": "Clone from the configured remote and copy in skills that exist only on this machine. If a local skill differs from the remote's copy of the same name, you are asked first and can save the local version to a separate folder before continuing.",
     "gitSetupCardCloneBadge": "Recommended: 2nd machine and beyond",
     "gitSetupCardInitTitle": "Back up this machine as new",
     "gitSetupCardInitDesc": "Initialize Git locally and push the current skill library to the configured remote.",
@@ -1005,9 +1019,9 @@
     "gitRecoverySubtitleUnrelated": "Local repository and remote do not share history; sync cannot proceed. Pick how to fix it.",
     "gitRecoverySubtitleNoUpstream": "No upstream tracking is set up with the remote. Pick how to fix it.",
     "gitRecoverySubtitleDetached": "Currently in detached HEAD state, possibly after restoring a snapshot. Realign to remote or restore a different snapshot first.",
-    "gitRecoverySubtitleConflict": "Local and remote skills were changed in conflicting ways. The merge was rolled back automatically — re-clone from remote to restore a clean copy. Skills that exist only locally are preserved.",
+    "gitRecoverySubtitleConflict": "Local and remote skills were changed in conflicting ways. The merge was rolled back automatically and the skill files on this machine are as they were. When re-cloning, skills whose local version differs from the remote's are listed first, and you decide whether to save the local versions aside and continue.",
     "gitRecoveryCardRecloneTitle": "Use remote backup (recommended)",
-    "gitRecoveryCardRecloneDesc": "Keep a temporary copy of local skills, re-clone from remote, then merge non-conflicting items back. Safest option.",
+    "gitRecoveryCardRecloneDesc": "Re-clone from the remote and copy in skills that exist only on this machine. Same-named skills that differ are listed first, and their local versions can be saved aside before continuing; old local Git history not confirmed to be on the remote is kept aside.",
     "gitRecoveryCardKeepLocalTitle": "Keep local, set up tracking",
     "gitRecoveryCardKeepLocalDesc": "Try to push local content as the new remote head. Only use when remote is empty or local should overwrite remote.",
     "gitRecoveryRecloneSuccess": "Remote backup re-cloned",
@@ -1084,7 +1098,20 @@
       "pathsLabel": "Directories for {{name}}",
       "globalPathLabel": "Global skills directory for {{name}}",
       "projectPathLabel": "Project skills directory for {{name}}"
-    }
+    },
+    "repoPathPendingHint": "Quit the app completely, including from the tray, and open it again to move the library to {{path}}. Until then this session keeps using the current location.",
+    "repoPathTargetNotEmpty": "{{path}} is not empty. Choose an empty or new folder for the central repository.",
+    "repoPathTargetInsideLibrary": "{{path}} is inside the current library. Choose a folder outside it.",
+    "whatsNew": "What's new",
+    "gitRecoveryRecloneKeptHistory": "Remote backup re-cloned. The old local Git history could not be confirmed to be fully on the remote (it may hold unpushed commits or tags), so it was kept at: {{path}}",
+    "gitSetAsideTitle": "Some local skills differ from the remote backup",
+    "gitSetAsideMessage": "The local versions of these skills differ from the same-named copies in the remote backup. If you continue, the local versions are saved to a separate folder next to the skills library and the library uses the remote versions; you'll be told where the folder is.",
+    "gitSetAsideConfirm": "Save local versions and continue",
+    "gitLocalCopiesSaved": "The local versions of the differing skills were saved to: {{path}}",
+    "gitSetAsideCancelled": "Cancelled. Nothing was cloned and this machine's skills library is unchanged.",
+    "gitSetAsideListChanged": "The list changed since you confirmed it — nothing was replaced. Please check it again.",
+    "gitErrorFilesKeptAside": "The operation did not finish normally. Some files were kept outside the skills library — don't delete them",
+    "gitErrorCloneLocalDiffers": "Stopped: these local skills differ from the same-named copies in the remote backup, and continuing would overwrite them: {{names}}. Nothing on this machine was changed."
   },
   "closeAction": {
     "title": "Close behavior",
@@ -1115,7 +1142,8 @@
     "goToSettings": "Settings",
     "expandAll": "Show all",
     "collapse": "Collapse",
-    "close": "关闭"
+    "close": "关闭",
+    "edit": "Edit"
   },
   "addFromLibrary": {
     "title": "Add from Library",
@@ -1123,6 +1151,11 @@
     "noTargetSelected": "no target",
     "changeTarget": "Change target",
     "selectAllTargets": "Select all",
+    "selectAllSkills": "Select all skills",
+    "deselectAllSkills": "Deselect all skills",
+    "selectedCount": "{{count}} selected",
+    "hiddenByFilters": "({{count}} hidden by the current filter)",
+    "shiftHint": "Shift + click to select a range",
     "clearTargets": "Clear",
     "searchPlaceholder": "Search the library…",
     "emptyLibrary": "Your library is empty",
@@ -1136,6 +1169,8 @@
     "toastFailed": "{{count}} skill(s) failed to add",
     "toastAddedToProject": "Added \"{{skill}}\" to {{project}}",
     "toastRemovedFromProject": "Removed \"{{skill}}\" from {{project}}",
+    "removeConfirmTitle": "Remove from workspace",
+    "removeConfirm": "Permanently delete the \"{{skill}}\" folder from {{project}} ({{agent}})? This action cannot be undone.",
     "add": "Add",
     "installedShort": "Added",
     "projectsTitle": "Project Workspaces",
@@ -1164,6 +1199,7 @@
     "descPlaceholder": "Briefly describe this preset...",
     "deleteConfirm": "Delete preset \"{{name}}\"? Skills will remain in the central repo.",
     "renamed": "Preset renamed",
+    "updated": "Preset updated",
     "deleted": "Preset deleted",
     "created": "Preset created",
     "switched": "Switched to \"{{name}}\""
@@ -1202,7 +1238,6 @@
     "addSelected": "Add Selected ({{count}})",
     "selectAll": "Select All",
     "deselectAll": "Deselect All",
-    "openInFinder": "Open Directory",
     "skillFiles": "Files",
     "importToCenter": "Update Center",
     "importFromCenter": "Add Skill",
@@ -1299,7 +1334,11 @@
     "batchEditTags": "Tags ({{count}})",
     "batchTagsUpdated": "Tags updated for {{count}} center skills",
     "batchTagsFailed": "{{count}} center skills failed to update tags",
-    "batchTagScopeNote": "Tags live in the central library, so edits affect every project using these skills. Project-only local skills are left untouched."
+    "batchTagScopeNote": "Tags live in the central library, so edits affect every project using these skills. Project-only local skills are left untouched.",
+    "removeUnsyncedTitle": "Delete workspace copies",
+    "removeUnsyncedConfirm": "These copies may hold content that is not in the center. Continuing permanently deletes them. This action cannot be undone.",
+    "removeUnsyncedConfirmWithOthers": "These copies may hold content that is not in the center. Continuing permanently deletes them, along with {{count}} other copy(ies) in this preset that match the center. This action cannot be undone.",
+    "revealInFileManager": "Open in {{app}}"
   },
   "presetActions": {
     "button": "Apply Preset",
@@ -1309,6 +1348,7 @@
     "action": "Action",
     "addMissing": "Add missing skills",
     "removeMatching": "Remove matching skills",
+    "removePreset": "Remove {{name}} from this workspace",
     "agents": "Agents",
     "selectAgents": "Select at least one agent",
     "noPresets": "No presets available",
@@ -1559,5 +1599,28 @@
     "refresh": "Refresh",
     "removalScope": "Global target removal; preservation reasons are listed per target. Project directories are unaffected.",
     "resetDuo": "Restore default target {{path}}? This may trigger global reconciliation. Windows or custom configuration roots may still need a manual override."
+  },
+  "platform": {
+    "fileManager": {
+      "finder": "Finder",
+      "explorer": "File Explorer",
+      "linux": "File Manager"
+    }
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "The window hit an unexpected error. Reload to continue. If it keeps happening, copy the details below into a GitHub issue.",
+    "copy": "Copy details",
+    "copied": "Copied",
+    "exportLogs": "Export logs",
+    "exportLogsDone": "Logs saved to {{path}}",
+    "exportLogsFailed": "Failed to export logs.",
+    "reload": "Reload"
+  },
+  "whatsNew": {
+    "title": "What's new",
+    "gotIt": "Got it",
+    "fullChangelog": "Full changelog",
+    "close": "Close"
   }
 }

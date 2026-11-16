@@ -125,7 +125,7 @@ impl RepoLock {
             operation,
             chrono::Utc::now().to_rfc3339()
         )?;
-        file.sync_all()?;
+        // 锁文件内容仅用于诊断，避免每次获取锁都同步整个磁盘卷。
         let file = Rc::new(file);
         let key = base.canonicalize()?.join(LOCK_FILE_NAME);
         HELD.with(|held| {
@@ -185,6 +185,44 @@ mod tests {
         assert!(
             entries.is_empty(),
             "skills_dir should remain empty while the lock is held; got {entries:?}"
+        );
+
+        drop(lock);
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    /// The stamp is the only reason the lock file has contents at all, and it
+    /// is written without an fsync — so pin down that a separate reader still
+    /// sees it. `File` does no userspace buffering, so the `write` reaches the
+    /// page cache before `stamp` returns; losing it to a crash would be
+    /// harmless, but losing it to buffering would silently blank the one clue
+    /// a "repository is busy" report has.
+    ///
+    /// Unix only, and not for lack of trying: fs2 locks the whole byte range
+    /// with `LockFileEx`, whose locks are mandatory on Windows, so *no* handle
+    /// can read the file while the lock is held — the assertion below cannot be
+    /// expressed there. Asserting it after the release instead would pass
+    /// whether or not the write ever reached the file, which is no assertion at
+    /// all. The same mandatory lock means a Windows operator cannot read the
+    /// stamp of a live holder either, so there is less to protect.
+    #[cfg(unix)]
+    #[test]
+    fn stamp_is_readable_by_another_handle_while_held() {
+        let _guard = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("base");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+
+        let lock = RepoLock::acquire("diagnosable operation").unwrap();
+
+        let stamped = std::fs::read_to_string(base.join(LOCK_FILE_NAME)).unwrap();
+        assert!(
+            stamped.contains(&format!("pid={}", std::process::id())),
+            "stamp should name the holding process; got {stamped:?}"
+        );
+        assert!(
+            stamped.contains("operation=diagnosable operation"),
+            "stamp should name the operation; got {stamped:?}"
         );
 
         drop(lock);

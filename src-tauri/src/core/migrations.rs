@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 /// Current schema version. Bump this when adding a new migration.
-const LATEST_VERSION: u32 = 8;
+const LATEST_VERSION: u32 = 10;
 
 /// Run all pending migrations on the database.
 ///
@@ -55,6 +55,8 @@ fn migrate_step(conn: &Connection, from_version: u32) -> Result<()> {
         5 => migrate_v5_to_v6(conn),
         6 => migrate_v6_to_v7(conn),
         7 => migrate_v7_to_v8(conn),
+        8 => migrate_v8_to_v9(conn),
+        9 => migrate_v9_to_v10(conn),
         _ => bail!("unknown migration version: {from_version}"),
     }
 }
@@ -306,7 +308,33 @@ fn migrate_v7_to_v8(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v8 → v9: per-skill content stamps, so the startup reindex can skip
+/// re-reading a skill whose files have not changed (#623). A local cache only:
+/// a missing row means "hash it", and the row goes with its skill.
+fn migrate_v8_to_v9(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS skill_content_stamps (
+            skill_id TEXT PRIMARY KEY REFERENCES skills(id) ON DELETE CASCADE,
+            stamp TEXT NOT NULL,
+            content_hash TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
 // ── Helpers ──
+
+/// v9 → v10：统一本分支与上游重叠的版本号，兼容两种旧库。
+fn migrate_v9_to_v10(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "skills", "source_content_hash", "TEXT")?;
+    conn.execute(
+        "DELETE FROM settings WHERE key = 'project_default_export_agents'",
+        [],
+    )?;
+    Ok(())
+}
 
 fn add_column_if_missing(
     conn: &Connection,
@@ -500,6 +528,10 @@ mod tests {
                 last_error TEXT,
                 UNIQUE(skill_id, tool)
             );
+            CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             PRAGMA user_version = 1;
             ",
         )
@@ -513,6 +545,115 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, LATEST_VERSION);
+    }
+
+    #[test]
+    fn orphaned_default_export_agents_setting_is_dropped() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Arrive at v7 the way a real upgrading database does, then plant the
+        // row that the removed UI used to write.
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        run_migrations(&conn).unwrap();
+        conn.pragma_update(None, "user_version", 7).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('project_default_export_agents', ?1)",
+            ["[\"claude_code\",\"codex\"]"],
+        )
+        .unwrap();
+        assert_eq!(
+            count_setting(&conn),
+            1,
+            "precondition: the row must exist, or this test proves nothing"
+        );
+
+        run_migrations(&conn).unwrap();
+
+        assert_eq!(count_setting(&conn), 0, "升级必须删除废弃偏好");
+        // Unrelated settings must survive.
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('theme', 'dark')",
+            [],
+        )
+        .unwrap();
+        run_migrations(&conn).unwrap();
+        let theme: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "dark");
+    }
+
+    fn count_setting(conn: &Connection) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'project_default_export_agents'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn fork_v8_and_upstream_v8_v9_preserve_data_when_migrating() {
+        for (version, upstream) in [(8, false), (8, true), (9, true)] {
+            let conn = Connection::open_in_memory().unwrap();
+            for step in 0..version {
+                migrate_step(&conn, step).unwrap();
+            }
+            if upstream {
+                conn.execute_batch("ALTER TABLE skills DROP COLUMN source_content_hash;")
+                    .unwrap();
+            }
+            conn.pragma_update(None, "user_version", version).unwrap();
+            conn.execute_batch(
+                "INSERT INTO skills (id, name, source_type, central_path) VALUES ('kept', '保留技能', 'local', '/kept');
+                 INSERT INTO settings (key, value) VALUES ('theme', 'dark');
+                 INSERT INTO settings (key, value) VALUES ('project_default_export_agents', '[\"codex\"]');"
+            ).unwrap();
+            if !upstream {
+                conn.execute(
+                    "UPDATE skills SET source_content_hash = 'source-hash' WHERE id = 'kept'",
+                    [],
+                )
+                .unwrap();
+            }
+
+            run_migrations(&conn).unwrap();
+            run_migrations(&conn).unwrap();
+
+            let (name, source_hash): (String, Option<String>) = conn
+                .query_row(
+                    "SELECT name, source_content_hash FROM skills WHERE id = 'kept'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(name, "保留技能");
+            assert_eq!(
+                source_hash.as_deref(),
+                if upstream { None } else { Some("source-hash") }
+            );
+            assert_eq!(count_setting(&conn), 0);
+            assert_eq!(
+                conn.query_row(
+                    "SELECT value FROM settings WHERE key = 'theme'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "dark"
+            );
+            conn.execute(
+                "INSERT INTO skill_content_stamps VALUES ('kept', 'stamp', 'hash')",
+                [],
+            )
+            .unwrap();
+            assert_eq!(
+                conn.pragma_query_value::<u32, _>(None, "user_version", |row| row.get(0))
+                    .unwrap(),
+                LATEST_VERSION
+            );
+        }
     }
 
     #[test]

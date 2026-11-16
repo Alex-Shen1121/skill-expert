@@ -23,6 +23,11 @@ pub fn bridge_dir() -> PathBuf {
     central_repo::home_base_dir().join("bin")
 }
 
+/// Whether `name` is one of the files the bridge keeps in [`bridge_dir`].
+pub(crate) fn is_bridge_file(name: &str) -> bool {
+    name == BRIDGE_BIN_NAME || name == ".version" || name == format!(".{BRIDGE_BIN_NAME}.staged")
+}
+
 pub fn bridge_path() -> PathBuf {
     bridge_dir().join(BRIDGE_BIN_NAME)
 }
@@ -122,6 +127,9 @@ pub fn ensure_bridge(app_version: &str) {
 }
 
 fn ensure_bridge_inner(app_version: &str) -> Result<PathBuf> {
+    // Fast path: this version already published and still present. Checked
+    // before anything is removed so an ordinary launch does not spend 15 MB of
+    // copying, and so a running agent's binary is not disturbed for no reason.
     if read_stamp().as_deref() == Some(app_version) && bridge_path().is_file() {
         return Ok(bridge_path());
     }
@@ -153,13 +161,35 @@ fn publish_from(source: &Path, app_version: &str) -> Result<PathBuf> {
         return Err(error);
     }
 
-    std::fs::rename(&staged, &target)
+    rename_retrying_sharing_violation(&staged, &target)
         .with_context(|| format!("无法替换 {}，文件可能正在使用", target.display()))?;
     std::fs::write(stamp_path(), app_version)
         .with_context(|| format!("无法写入 {}", stamp_path().display()))?;
 
     log::info!("CLI 桥接：已发布 {app_version} 到 {}", target.display());
     Ok(target)
+}
+
+/// #487: right after `verify` ran the staged exe, Windows can still hold it
+/// for a moment (scanners inspect a freshly executed binary), so the rename
+/// fails with a sharing violation. Wait that out, ~2 s at most; any other
+/// error, or a lock that outlasts it, is reported as before.
+fn rename_retrying_sharing_violation(from: &Path, to: &Path) -> std::io::Result<()> {
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    let mut attempts = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e)
+                if cfg!(windows)
+                    && e.raw_os_error() == Some(ERROR_SHARING_VIOLATION)
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            result => return result,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -227,6 +257,50 @@ mod tests {
         assert_ne!(bridge_dir(), central_repo::base_dir().join("bin"));
 
         central_repo::set_test_base_dir_override(None);
+        central_repo::set_test_home_dir_override(None);
+    }
+    /// The publish must abandon rather than proceed when the old bridge cannot
+    /// be made untrusted — otherwise it would leave a stamp vouching for a
+    /// binary that is no longer the one the app ships.
+    ///
+    /// Calls `invalidate_bridge` directly: going through `publish_from` would
+    /// also fail at the staged copy, and an assertion that cannot tell the two
+    /// apart proves nothing about the step under test.
+    #[cfg(unix)]
+    #[test]
+    fn a_bridge_that_cannot_be_invalidated_blocks_the_publish() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        central_repo::set_test_home_dir_override(Some(tmp.path().to_path_buf()));
+        let src_dir = tmp.path().join("bundle");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        publish_from(&fake_cli(&src_dir, "9.9.9"), "9.9.9").unwrap();
+        let stamp = bridge_dir().join(".version");
+
+        // Nothing here can be removed (the directory denies writes) and the
+        // stamp itself cannot be rewritten, so all three fallbacks are closed.
+        std::fs::set_permissions(&stamp, std::fs::Permissions::from_mode(0o400)).unwrap();
+        std::fs::set_permissions(bridge_dir(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = invalidate_bridge();
+        let published_still_there = bridge_path().is_file() && stamp.is_file();
+
+        std::fs::set_permissions(bridge_dir(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&stamp, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        result.expect_err("invalidation must fail when no fallback can take effect");
+        assert!(
+            published_still_there,
+            "precondition: the stale pair is what could not be removed"
+        );
+        // And the publish that would follow must not run.
+        std::fs::set_permissions(bridge_dir(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let publish = publish_from(&fake_cli(&src_dir, "9.9.10"), "9.9.10");
+        std::fs::set_permissions(bridge_dir(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        publish.expect_err("publishing must abandon rather than leave a lying stamp");
+
         central_repo::set_test_home_dir_override(None);
     }
 }

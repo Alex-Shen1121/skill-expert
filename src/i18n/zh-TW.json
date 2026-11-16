@@ -611,7 +611,8 @@
       "import": "匯入",
       "git": "Git",
       "skillssh": "skills.sh",
-      "well-known": "網站快照"
+      "well-known": "網站快照",
+      "website": "網站"
     },
     "tags": {
       "filter": "標籤",
@@ -624,6 +625,9 @@
       "renameTag": "重新命名標籤",
       "deleteTag": "刪除標籤",
       "tagName": "標籤名稱",
+      "showAll": "展開全部 {{count}} 個",
+      "showFewer": "收合",
+      "foldedSelected": "（其中 {{count}} 個已選）",
       "manageHint": "右鍵重新命名或刪除",
       "tagRenamed": "標籤已重新命名",
       "tagDeleted": "標籤已刪除",
@@ -658,6 +662,51 @@
       "apply": "同步 {{count}} 項",
       "noAgents": "沒有已安裝並啟用的 Agent。",
       "allSynced": "選取的 Skill 都已同步到這個 Agent"
+    },
+    "agentToggleEnabled": "{{agent}} 已開啟",
+    "agentToggleDisabled": "{{agent}} 已關閉",
+    "targetClickInstall": "點擊安裝",
+    "targetClickUninstall": "點擊解除安裝",
+    "targetInstalled": "已將 {{name}} 安裝到 {{agent}}",
+    "targetUninstalled": "已從 {{agent}} 解除安裝 {{name}}",
+    "sourceResolved": "解析後來源",
+    "sourceBranch": "分支 / 標籤",
+    "sourceSubpath": "子路徑",
+    "sourceRevision": "版本",
+    "docTabs": {
+      "local": "本機",
+      "diff": "差異",
+      "source": "來源"
+    },
+    "sourceDiffUnavailable": "暫時無法讀取來源版本內容",
+    "sourceDiff": {
+      "noChanges": "無差異 —— 來源與中央倉庫內容一致",
+      "status": {
+        "added": "新增",
+        "removed": "刪除",
+        "modified": "修改"
+      },
+      "execBit": "權限 {{before}} → {{after}}",
+      "summary": {
+        "binary": "二進位檔案已變更",
+        "too_large": "檔案已變更，但過大無法預覽",
+        "permission_only": "僅檔案權限有變更"
+      }
+    },
+    "notShownCount": "（其中 {{count}} 個未顯示）",
+    "batchDeleteConfirmWithHidden": "確定徹底刪除選中的 {{count}} 個 Skill（其中 {{hidden}} 個未顯示）嗎？中央倉庫檔案、Preset 關聯和已同步到各 Agent 的目標都會被移除。",
+    "batchEditTags": "標籤 ({{count}})",
+    "batchTagsUpdated": "已更新 {{count}} 個 Skill 的標籤",
+    "batchTagsFailed": "{{count}} 個 Skill 標籤更新失敗",
+    "batchTagDialog": {
+      "title": "為 {{count}} 個 Skill 編輯標籤",
+      "currentTags": "目前標籤（點擊標記移除）",
+      "toAdd": "新增標籤",
+      "noTags": "選取的 Skill 尚無標籤",
+      "apply": "套用",
+      "addButton": "新增",
+      "clickToRemove": "點擊標記為移除",
+      "undoRemove": "點擊保留此標籤"
     }
   },
   "install": {
@@ -725,9 +774,6 @@
     "gitDesc": "支援 Git 儲存庫連結和 https://skills.sh/site/<網域>/<技能> 網站技能連結。",
     "repoUrl": "來源連結",
     "repoUrlPlaceholder": "https://github.com/user/repo.git 或 git@github.com...",
-    "customName": "自訂名稱",
-    "customNameOptional": "選填",
-    "customNamePlaceholder": "留空則使用倉庫名稱",
     "gitAlreadyInstalled": "「{{name}}」已安裝，重新安裝將會更新。",
     "onlyThisContributor": "僅看該貢獻者",
     "gitReinstall": "重新安裝",
@@ -947,7 +993,7 @@
     "gitSetupTitle": "設定 Git 備份",
     "gitSetupSubtitle": "選擇此 skill 庫的備份連線方式。",
     "gitSetupCardCloneTitle": "使用既有的遠端備份",
-    "gitSetupCardCloneDesc": "從設定的遠端倉庫複製，會保留本機現有 skills，並把不衝突的內容合併回來。",
+    "gitSetupCardCloneDesc": "從設定的遠端倉庫複製，並把只在本機的 skills 合併進來。若本機某個 skill 與遠端同名版本內容不同，會先詢問你，可選擇把本機版本另存到單獨的資料夾後再繼續。",
     "gitSetupCardCloneBadge": "推薦：第二台及以後的機器",
     "gitSetupCardInitTitle": "把本機作為新的備份來源",
     "gitSetupCardInitDesc": "在本機初始化 Git，並將目前 skill 庫推送到設定的遠端位址。",
@@ -958,9 +1004,9 @@
     "gitRecoverySubtitleUnrelated": "本機倉庫與遠端倉庫歷史不一致，無法直接同步。請選擇修復方式。",
     "gitRecoverySubtitleNoUpstream": "尚未與遠端倉庫建立追蹤關係。請選擇修復方式。",
     "gitRecoverySubtitleDetached": "目前位於游離狀態（detached HEAD），可能是還原快照所致。建議重新對齊到遠端，或先在快照面板還原其它版本。",
-    "gitRecoverySubtitleConflict": "本機與遠端的技能變更發生衝突，合併已自動回復。請從遠端重新克隆以還原為乾淨副本；僅本機存在的技能會被保留。",
+    "gitRecoverySubtitleConflict": "本機與遠端的技能變更發生衝突，合併已自動回復，本機的 skill 檔案保持原樣。重新克隆時，本機版本與遠端不同的 skill 會先列出來，由你決定是否把本機版本另存後繼續。",
     "gitRecoveryCardRecloneTitle": "使用遠端備份還原本機（推薦）",
-    "gitRecoveryCardRecloneDesc": "保留本機現有 skills 的暫存副本，從遠端重新複製，再把不衝突的內容合併回來。最安全。",
+    "gitRecoveryCardRecloneDesc": "從遠端重新複製，並把只在本機的 skills 合併進來。同名但內容不同的 skill 會先列出來，可選擇把本機版本另存後繼續；無法確認已在遠端的舊本機 Git 歷史會另外保留一份。",
     "gitRecoveryCardKeepLocalTitle": "保留本機內容，建立追蹤",
     "gitRecoveryCardKeepLocalDesc": "嘗試把本機的內容作為遠端的延續推上去。僅在確認遠端倉庫為空、或本機內容應當覆蓋遠端時使用。",
     "gitRecoveryRecloneSuccess": "已重新複製遠端倉庫",
@@ -1027,7 +1073,34 @@
       "pathsLabel": "{{name}} 的目錄設定",
       "globalPathLabel": "{{name}} 的全域技能目錄",
       "projectPathLabel": "{{name}} 的專案技能目錄"
-    }
+    },
+    "dragToReorder": "拖曳以調整順序",
+    "repoPathPendingHint": "重新啟動應用後會把技能庫遷移到 {{path}}；在此之前仍使用目前位置。",
+    "proxyConfig": "網路代理",
+    "proxyUrl": "代理位址",
+    "proxyUrlDesc": "設定後，所有 Git 拉取與網路請求都會經由此代理。留空則直接連線。",
+    "proxyUrlPlaceholder": "http://127.0.0.1:7890",
+    "proxyUrlSaved": "代理設定已儲存",
+    "proxyUrlInvalid": "代理位址必須以 http://、https:// 或 socks5:// 開頭",
+    "gitRecoveryRecloneKeptHistory": "已重新複製遠端倉庫。無法確認舊的本機 Git 歷史都已在遠端（可能有未推送的提交或標籤），已保留在：{{path}}",
+    "gitSetAsideTitle": "本機有 skill 與遠端備份不同",
+    "gitSetAsideMessage": "以下 skill 的本機版本與遠端備份中的同名版本內容不同。繼續的話，這些本機版本會保存到技能庫旁邊的單獨資料夾，庫裡改用遠端版本；完成後會告訴你資料夾位置。",
+    "gitSetAsideConfirm": "另存本機版本並繼續",
+    "gitLocalCopiesSaved": "內容不同的 skill 本機版本已另存到：{{path}}",
+    "gitSetAsideCancelled": "已取消，沒有複製，本機技能庫保持原樣。",
+    "gitSetAsideListChanged": "名單在你確認後有變化，沒有替換任何內容。請再確認一次。",
+    "gitErrorFilesKeptAside": "操作沒有正常完成，部分檔案保存在技能庫之外，請勿刪除",
+    "gitErrorCloneLocalDiffers": "已停止：本機這些 skill 與遠端備份中的同名版本內容不同，繼續會覆蓋它們：{{names}}。本機未做任何變更。",
+    "closeAction": "關閉行為",
+    "closeActionDesc": "選擇點擊視窗關閉按鈕後應用程式的行為。",
+    "closeAction_ask": "每次詢問",
+    "closeAction_hide": "最小化到系統匣",
+    "closeAction_close": "結束應用程式",
+    "trayIcon": "系統匣圖示",
+    "trayIconDesc": "在系統匣中顯示圖示，方便快速顯示或結束應用程式。",
+    "trayIcon_on": "顯示",
+    "trayIcon_off": "隱藏",
+    "trayIconOffHint": "系統匣圖示已隱藏，關閉視窗時會直接結束應用程式。"
   },
   "common": {
     "loading": "載入中...",
@@ -1050,7 +1123,9 @@
     "goToSettings": "設定",
     "expandAll": "展開全部",
     "collapse": "收合",
-    "close": "关闭"
+    "close": "关闭",
+    "edit": "編輯",
+    "search": "搜尋"
   },
   "addFromLibrary": {
     "title": "從技能庫新增",
@@ -1058,6 +1133,11 @@
     "noTargetSelected": "未選擇",
     "changeTarget": "更換目標",
     "selectAllTargets": "全選",
+    "selectAllSkills": "全選技能",
+    "deselectAllSkills": "取消全選",
+    "selectedCount": "已選 {{count}} 個",
+    "hiddenByFilters": "（其中 {{count}} 個被目前篩選隱藏）",
+    "shiftHint": "按住 Shift 點擊可批量選擇",
     "clearTargets": "清空",
     "searchPlaceholder": "搜尋技能庫…",
     "emptyLibrary": "技能庫為空",
@@ -1071,6 +1151,8 @@
     "toastFailed": "有 {{count}} 個 Skill 新增失敗",
     "toastAddedToProject": "已將「{{skill}}」新增到 {{project}}",
     "toastRemovedFromProject": "已從 {{project}} 移除「{{skill}}」",
+    "removeConfirmTitle": "從工作區移除",
+    "removeConfirm": "從 {{project}}（{{agent}}）永久刪除「{{skill}}」資料夾？此操作無法復原。",
     "add": "新增",
     "installedShort": "已新增",
     "projectsTitle": "專案工作區",
@@ -1099,6 +1181,7 @@
     "descPlaceholder": "簡短描述這個 Preset 的用途...",
     "deleteConfirm": "確定刪除 Preset「{{name}}」嗎？Skills 仍會保留在中央倉庫中。",
     "renamed": "Preset 已重新命名",
+    "updated": "Preset 已更新",
     "deleted": "Preset 已刪除",
     "created": "Preset 已建立",
     "switched": "已切換到「{{name}}」"
@@ -1137,7 +1220,6 @@
     "addSelected": "新增選取（{{count}}）",
     "selectAll": "全選",
     "deselectAll": "取消全選",
-    "openInFinder": "開啟目錄",
     "skillFiles": "檔案",
     "importToCenter": "更新中心",
     "importFromCenter": "更新專案",
@@ -1223,7 +1305,22 @@
     "batchEditTags": "標籤 ({{count}})",
     "batchTagsUpdated": "已更新 {{count}} 個中心 Skill 的標籤",
     "batchTagsFailed": "{{count}} 個中心 Skill 標籤更新失敗",
-    "batchTagScopeNote": "標籤儲存在中央技能庫，改動會影響所有使用這個 Skill 的專案。只屬於本專案的本機 Skill 不會被修改。"
+    "batchTagScopeNote": "標籤儲存在中央技能庫，改動會影響所有使用這個 Skill 的專案。只屬於本專案的本機 Skill 不會被修改。",
+    "addSkill": "新增 Skill",
+    "addSkillsCta": "從中央倉庫新增 Skill",
+    "addSkillsToProject": "新增 Skill 到專案",
+    "addCallout": "也支援批次新增：在「新增 Skill」視窗裡依標籤篩選，可一次推送一組同類 Skill。",
+    "exportTagFilterLabel": "依標籤篩選:",
+    "exportTagFilterHint": "選擇一個或多個標籤可批次新增同類 Skill（如「前端」+「除錯」）。",
+    "docTabs": {
+      "center": "中心"
+    },
+    "agentClickAdd": "點擊新增",
+    "agentClickRemove": "點擊移除",
+    "removeUnsyncedTitle": "刪除工作區副本",
+    "removeUnsyncedConfirm": "以下副本可能含有中心沒有的內容，繼續將永久刪除它們。此操作不可復原。",
+    "removeUnsyncedConfirmWithOthers": "以下副本可能含有中心沒有的內容，繼續將永久刪除它們；該 Preset 中另外 {{count}} 個與中心一致的副本也會一併移除。此操作不可復原。",
+    "revealInFileManager": "在{{app}}中開啟"
   },
   "presetActions": {
     "button": "套用 Preset",
@@ -1233,6 +1330,7 @@
     "action": "操作",
     "addMissing": "加入缺少的 Skills",
     "removeMatching": "移除符合的 Skills",
+    "removePreset": "從目前工作區移除 {{name}}",
     "agents": "Agents",
     "selectAgents": "請至少選擇一個 Agent",
     "noPresets": "沒有可用 Preset",
@@ -1483,5 +1581,19 @@
     "refresh": "重新整理",
     "removalScope": "本次全域目標撤銷；保留原因逐項列出，專案目錄不受影響",
     "resetDuo": "還原預設目標 {{path}}？這可能觸發全域協調；Windows 或自訂設定根目錄仍可能需要手動覆寫。"
+  },
+  "closeAction": {
+    "title": "關閉行為",
+    "message": "最小化到系統匣後，應用程式仍會在背景執行，你可以從系統匣圖示重新開啟。",
+    "close": "結束應用程式",
+    "hide": "最小化到系統匣",
+    "remember": "記住我的選擇，下次不再詢問"
+  },
+  "platform": {
+    "fileManager": {
+      "finder": "Finder",
+      "explorer": "檔案總管",
+      "linux": "檔案管理員"
+    }
   }
 }

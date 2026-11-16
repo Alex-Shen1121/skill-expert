@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   getCentralRepoWarnings: vi.fn().mockResolvedValue([]),
   getCentralRepoPath: vi.fn().mockResolvedValue("/tmp/skills"),
   getCentralRepoPathOverride: vi.fn().mockResolvedValue(null),
+  getCentralRepoPendingPath: vi.fn().mockResolvedValue(null),
   setToolEnabled: vi.fn().mockResolvedValue(undefined),
   setAllToolsEnabled: vi.fn().mockResolvedValue(undefined),
   setCustomToolPath: vi.fn().mockResolvedValue(undefined),

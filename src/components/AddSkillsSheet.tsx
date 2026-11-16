@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleSlash,
   Loader2,
   Search,
   X,
@@ -15,6 +14,8 @@ import { cn } from "../utils";
 import * as api from "../lib/tauri";
 import type { ManagedSkill, ProjectAgentTarget } from "../lib/tauri";
 import { getErrorMessage } from "../lib/error";
+import { normalizeSkillSearch, skillSearchMatches } from "../lib/skillSearch";
+import { countHiddenSelected } from "../lib/selectionVisibility";
 import {
   classifySkill,
   targetsToInstall,
@@ -22,14 +23,16 @@ import {
   type ProjectPickerContext,
 } from "../lib/skillPickerStatus";
 import {
-  getTagActiveColor,
-  getTagColor,
   UNTAGGED_FILTER,
 } from "../lib/skillTags";
 import { AgentIcon } from "./AgentIcon";
 import { SkillPickerRow } from "./SkillPickerRow";
+import { ChannelPills } from "./ChannelPills";
+import { SourcePicker } from "./SourcePicker";
+import { TagFilterPills } from "./TagFilterPills";
+import { channelLabel, channelsForSkills } from "../lib/skillChannels";
+import { getSkillSourceInfo, sourceCandidates } from "../lib/skillSource";
 
-const SOURCE_PRIORITY = ["local", "import", "git", "skillssh"];
 const VISIBLE_TARGET_ICON_LIMIT = 5;
 
 export interface GlobalSheetTarget {
@@ -72,8 +75,12 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
-  const [sourceFilters, setSourceFilters] = useState<Set<string>>(new Set());
+  // Channels (`source_type`) and Sources (the upstream a skill came from) are
+  // different filters; My Skills names them the same way.
+  const [channelFilters, setChannelFilters] = useState<Set<string>>(new Set());
+  const [sourceSelection, setSourceSelection] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
 
   const initialAgents = target.kind === "project" ? target.initialSelectedAgents : [];
@@ -157,36 +164,18 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
     return Array.from(tags).sort((a, b) => a.localeCompare(b));
   }, [managedSkills]);
 
-  const sourceTypes = useMemo(() => {
-    const present = new Set(managedSkills.map((s) => s.source_type).filter(Boolean));
-    return [
-      ...SOURCE_PRIORITY.filter((s) => present.has(s)),
-      ...Array.from(present).filter((s) => !SOURCE_PRIORITY.includes(s)).sort(),
-    ];
-  }, [managedSkills]);
+  // Same list, same order as My Skills: the shared pills own both.
+  const channels = useMemo(() => channelsForSkills(managedSkills), [managedSkills]);
 
-  const sourceLabel = useCallback(
-    (source: string) => {
-      if (SOURCE_PRIORITY.includes(source)) {
-        return t(`mySkills.sourceFilter.${source}`);
-      }
-      return source;
-    },
-    [t],
-  );
+  const sourceLabel = useCallback((source: string) => channelLabel(t, source), [t]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizeSkillSearch(search);
     const hasUntagged = tagFilters.has(UNTAGGED_FILTER);
     const tagSelected = tagFilters.size > 0;
     return managedSkills.filter((skill) => {
-      if (q) {
-        const matches =
-          skill.name.toLowerCase().includes(q) ||
-          (skill.description || "").toLowerCase().includes(q);
-        if (!matches) return false;
-      }
-      if (sourceFilters.size > 0 && !sourceFilters.has(skill.source_type)) return false;
+      if (!skillSearchMatches(q, [skill.name, skill.description])) return false;
+      if (channelFilters.size > 0 && !channelFilters.has(skill.source_type)) return false;
       if (tagSelected) {
         const matchUntagged = hasUntagged && skill.tags.length === 0;
         const matchTag = skill.tags.some((tag) => tagFilters.has(tag));
@@ -194,18 +183,58 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
       }
       return true;
     });
-  }, [managedSkills, search, sourceFilters, tagFilters]);
+  }, [managedSkills, search, channelFilters, tagFilters]);
+
+  // Candidates before the Source filter is applied, or picking one Source would
+  // remove the others from the menu needed to switch. Same rule as My Skills.
+  const sourceOptions = useMemo(() => sourceCandidates(filtered), [filtered]);
+  const visible = useMemo(
+    () =>
+      sourceSelection.size === 0
+        ? filtered
+        : filtered.filter((skill) => sourceSelection.has(getSkillSourceInfo(skill).key)),
+    [filtered, sourceSelection]
+  );
+
+  // Selected skills the filters have hidden. They are still installed, so the
+  // footer has to say so rather than let the count disagree with the rows.
+  // The drawer has no collapsed groups, so every skill in `visible` has a row.
+  const hiddenSelectedCount = useMemo(
+    () => countHiddenSelected(selectedIds, visible.map((skill) => skill.id)),
+    [selectedIds, visible]
+  );
 
   // Sort: available first, then installed/conflict/unavailable (greyed out at bottom)
   const ordered = useMemo(() => {
     const statusOrder = { available: 0, conflict: 1, installed: 2, unavailable: 3 } as const;
-    return [...filtered].sort((a, b) => {
+    return [...visible].sort((a, b) => {
       const sa = classifySkill(a, ctx);
       const sb = classifySkill(b, ctx);
       if (sa !== sb) return statusOrder[sa] - statusOrder[sb];
       return a.name.localeCompare(b.name);
     });
-  }, [filtered, ctx]);
+  }, [visible, ctx]);
+
+  // IDs of skills the user can add (status "available") in the current filtered view.
+  const availableIds = useMemo(
+    () => ordered.filter((s) => classifySkill(s, ctx) === "available").map((s) => s.id),
+    [ordered, ctx],
+  );
+  const allAvailableSelected =
+    availableIds.length > 0 && availableIds.every((id) => selectedIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (availableIds.length === 0) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allAvailableSelected) {
+        for (const id of availableIds) next.delete(id);
+      } else {
+        for (const id of availableIds) next.add(id);
+      }
+      return next;
+    });
+  };
 
   const skillsHaveUntagged = useMemo(
     () => managedSkills.some((s) => s.tags.length === 0),
@@ -221,11 +250,40 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
     });
   };
 
-  const toggleSourceFilter = (source: string) => {
-    setSourceFilters((prev) => {
+  // Normal click toggles one row and moves the shift-click anchor there.
+  const handleRowClick = (index: number) => (e: MouseEvent<HTMLDivElement>) => {
+    const skill = ordered[index];
+    if (e.shiftKey && anchorId) {
+      const anchorIndex = ordered.findIndex((s) => s.id === anchorId);
+      if (anchorIndex !== -1) {
+        const [lo, hi] = anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
+        const rangeIds = ordered
+          .slice(lo, hi + 1)
+          .map((s) => s.id)
+          .filter((id) => availableIds.includes(id));
+        if (rangeIds.length > 0) {
+          const alreadyAllSelected = rangeIds.every((id) => selectedIds.has(id));
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of rangeIds) {
+              if (alreadyAllSelected) next.delete(id);
+              else next.add(id);
+            }
+            return next;
+          });
+          return;
+        }
+      }
+    }
+    toggleSelect(skill.id);
+    setAnchorId(skill.id);
+  };
+
+  const toggleChannelFilter = (channel: string) => {
+    setChannelFilters((prev) => {
       const next = new Set(prev);
-      if (next.has(source)) next.delete(source);
-      else next.add(source);
+      if (next.has(channel)) next.delete(channel);
+      else next.add(channel);
       return next;
     });
   };
@@ -552,74 +610,32 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
             />
           </div>
 
-          {(allTags.length > 0 || skillsHaveUntagged) && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[12px] text-muted">{t("mySkills.tags.filter")}</span>
-              <button
-                onClick={() => setTagFilters(new Set())}
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
-                  tagFilters.size === 0
-                    ? "bg-accent text-white dark:bg-accent dark:text-white"
-                    : "bg-surface-hover text-muted hover:text-secondary",
-                )}
-              >
-                {t("mySkills.tags.allTags")}
-              </button>
-              {skillsHaveUntagged && (
-                <button
-                  onClick={() => toggleTagFilter(UNTAGGED_FILTER)}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
-                    tagFilters.has(UNTAGGED_FILTER)
-                      ? "bg-surface-active text-primary"
-                      : "border border-dashed border-border text-muted hover:text-secondary",
-                  )}
-                  title={t("mySkills.tags.untagged")}
-                >
-                  <CircleSlash className="h-3 w-3" />
-                  {t("mySkills.tags.untagged")}
-                </button>
-              )}
-              {allTags.map((tag) => {
-                const active = tagFilters.has(tag);
-                return (
-                  <button
-                    key={tag}
-                    onClick={() => toggleTagFilter(tag)}
-                    className={cn(
-                      "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
-                      active ? getTagActiveColor(tag, allTags) : getTagColor(tag, allTags),
-                    )}
-                  >
-                    {tag}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Channels before tags, as My Skills lays them out: the two rows
+              never reorder between the page and the drawer. */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <ChannelPills
+              channels={channels}
+              selected={channelFilters}
+              onToggle={toggleChannelFilter}
+              className="gap-1.5"
+            />
+            <SourcePicker
+              candidates={sourceOptions}
+              selected={sourceSelection}
+              onChange={setSourceSelection}
+            />
+          </div>
 
-          {sourceTypes.length > 1 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[12px] text-muted">{t("mySkills.sourceType")}</span>
-              {sourceTypes.map((source) => {
-                const active = sourceFilters.has(source);
-                return (
-                  <button
-                    key={source}
-                    onClick={() => toggleSourceFilter(source)}
-                    className={cn(
-                      "rounded-full px-2.5 py-0.5 text-[12px] font-medium transition-colors",
-                      active
-                        ? "bg-accent text-white dark:bg-accent dark:text-white"
-                        : "bg-surface-hover text-muted hover:text-secondary",
-                    )}
-                  >
-                    {sourceLabel(source)}
-                  </button>
-                );
-              })}
-            </div>
+          {(allTags.length > 0 || skillsHaveUntagged) && (
+            <TagFilterPills
+              tags={allTags}
+              selected={tagFilters}
+              onToggle={toggleTagFilter}
+              onClear={() => setTagFilters(new Set())}
+              hasUntagged={skillsHaveUntagged}
+              label={t("mySkills.tags.filter")}
+              className="mt-2"
+            />
           )}
         </div>
 
@@ -632,7 +648,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
             </div>
           ) : (
             <div className="divide-y divide-border-subtle">
-              {ordered.map((skill) => {
+              {ordered.map((skill, index) => {
                 const status = classifySkill(skill, ctx);
                 return (
                   <SkillPickerRow
@@ -642,7 +658,7 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
                     allTags={allTags}
                     sourceLabel={sourceLabel(skill.source_type)}
                     selected={selectedIds.has(skill.id)}
-                    onToggle={() => toggleSelect(skill.id)}
+                    onToggle={handleRowClick(index)}
                   />
                 );
               })}
@@ -651,6 +667,25 @@ function AddSkillsSheetBody({ onClose, target, managedSkills, onInstalled }: Pro
         </div>
 
         <div className="shrink-0 border-t border-border-subtle bg-bg-secondary px-5 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="truncate text-[12px] text-muted">
+              {selectableSelected.length > 0
+                ? t("addFromLibrary.selectedCount", { count: selectableSelected.length })
+                : t("addFromLibrary.shiftHint")}
+              {hiddenSelectedCount > 0 &&
+                ` ${t("addFromLibrary.hiddenByFilters", { count: hiddenSelectedCount })}`}
+            </span>
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              disabled={availableIds.length === 0}
+              className="shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium text-muted transition-colors hover:bg-surface-hover hover:text-secondary disabled:opacity-50"
+            >
+              {allAvailableSelected
+                ? t("addFromLibrary.deselectAllSkills")
+                : t("addFromLibrary.selectAllSkills")}
+            </button>
+          </div>
           <button
             onClick={handleInstall}
             disabled={

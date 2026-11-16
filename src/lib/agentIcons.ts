@@ -19,8 +19,8 @@ const AGENT_ICON_FILES: Record<string, string> = {
   firebender: "firebender.svg",
   gemini_cli: "gemini_cli.svg",
   github_copilot: "github_copilot.png",
-  goose: "goose.png",
   gitlab_duo: "gitlab_duo.svg",
+  goose: "goose.png",
   grok: "grok.svg",
   hermes: "hermes.png",
   iflow: "iflow.png",
@@ -30,6 +30,7 @@ const AGENT_ICON_FILES: Record<string, string> = {
   kiro: "kiro.svg",
   kode: "kode.png",
   mcpjam: "mcpjam.png",
+  minimax_code: "minimax_code.png",
   mistral_vibe: "mistral_vibe.svg",
   mux: "mux.png",
   neovate: "neovate.png",
@@ -48,7 +49,9 @@ const AGENT_ICON_FILES: Record<string, string> = {
   warp: "warp.svg",
   windsurf: "windsurf.svg",
   workbuddy: "workbuddy.png",
+  workbuddy_overseas: "workbuddy.png",
   zencoder: "zencoder.png",
+  zcode: "zcode.svg",
 };
 
 // Monochrome line-art icons that render black (no fill / `currentColor`) and

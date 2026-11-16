@@ -257,6 +257,35 @@ pub(crate) fn use_mock_keyring() {
 
 #[cfg(test)]
 mod tests {
+    /// The regression #379 reports: libgit2 got `None` for callbacks and
+    /// answered "no callback set", which reached the user verbatim.
+    ///
+    /// Uses a host this app never stores credentials for, so it exercises the
+    /// helper fallback and the final message without reading the app's own
+    /// keychain entry — a test binary is unsigned and reading that entry would
+    /// block on a macOS authorization prompt.
+    #[test]
+    #[ignore = "hits the network"]
+    fn libgit2_is_given_a_credentials_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init_bare(dir.path()).unwrap();
+        let url = "https://gitlab.com/skills-manager-no-such-owner/nope.git";
+        let mut remote = repo.remote_anonymous(url).unwrap();
+        let mut callbacks = git2::RemoteCallbacks::new();
+        install_git2_credentials(&mut callbacks, url);
+
+        // RemoteConnection is not Debug, so unwrap the error by hand.
+        let msg = match remote.connect_auth(git2::Direction::Fetch, Some(callbacks), None) {
+            Ok(_) => panic!("a private remote must not connect anonymously"),
+            Err(e) => e.to_string(),
+        };
+
+        assert!(
+            !msg.contains("no callback set"),
+            "libgit2 still has no credentials callback: {msg}"
+        );
+    }
+
     use super::*;
 
     #[test]

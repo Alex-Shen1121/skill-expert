@@ -91,6 +91,7 @@ impl Env {
         };
         dev.activate();
         git(&dev.skills, &["init", "-b", "main"]);
+        std::fs::create_dir_all(dev.skills.join(".git/info")).unwrap();
         git_backup::configure_device_identity(&dev.skills, dev.name).unwrap();
         git(
             &dev.skills,

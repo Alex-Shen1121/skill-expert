@@ -13,6 +13,20 @@
 
 `skills enable/disable` 是兼容命令，不表示部署状态。操作后读取 `skills status`，确认每个目标记录和磁盘部署一致。
 
+## 项目技能
+
+`projects` 管理已登记项目中的技能副本。项目部署不改变全局部署，也不持续绑定 Preset；删除项目登记不删除项目文件。
+
+```text
+{CLI} --json projects list
+{CLI} --json projects show <project> --agent claude_code
+{CLI} --json projects deploy <project> <skill> --agent claude_code --dry-run
+{CLI} --json projects undeploy <project> <skill> --agent claude_code --dry-run
+{CLI} --json projects import <project> <relative-path> --agent claude_code --dry-run
+```
+
+先展示预览和目标路径，再按主文件的写入确认要求执行。`projects import` 的相对路径来自 `projects show`；`--force` 会允许替换或删除有差异的副本，须有具体授权。共享或无法确认归属的项目目录仍拒绝删除，`--force` 不绕过此保护。完成后重新运行 `projects show`，核对实际文件及逐目标结果。
+
 ## Preset
 
 Preset 成员关系只负责组织；`presets deploy/undeploy` 才修改实际部署。先用 `presets --help` 与子命令帮助获取当前参数。

@@ -1,4 +1,3 @@
-use crate::core::scenario_service;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +18,7 @@ use crate::core::{
     install_cancel::InstallCancelRegistry,
     installer, path_guard,
     repo_lock::RepoLock,
-    scanner,
+    scanner, scenario_service,
     skill_metadata::{self, is_valid_skill_dir},
     skill_store::{SkillRecord, SkillStore, SkillTargetRecord},
     sync_engine, sync_metadata,
@@ -188,6 +187,12 @@ use crate::skill_update_batch::CheckSkillUpdatesBatch;
 pub struct BatchDeleteSkillsResult {
     pub deleted: usize,
     pub failed: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InstallLocalResult {
+    pub skill_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -501,8 +506,10 @@ pub fn delete_managed_skills_by_ids(
 
             let targets = store.get_targets_for_skill(skill_id)?;
             for target in &targets {
-                let target_path = PathBuf::from(&target.target_path);
-                sync_engine::remove_target(&target_path).ok();
+                sync_engine::remove_recorded_target_or_warn(
+                    &PathBuf::from(&target.target_path),
+                    &target.mode,
+                );
             }
 
             let central = PathBuf::from(&skill.central_path);
@@ -624,7 +631,7 @@ pub async fn install_local(
     source_path: String,
     name: Option<String>,
     store: State<'_, Arc<SkillStore>>,
-) -> Result<(), AppError> {
+) -> Result<InstallLocalResult, AppError> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = (|| -> Result<(String, String), AppError> {
@@ -650,7 +657,7 @@ pub async fn install_local(
             Ok((skill_id, skill_name))
         })();
         log_install_outcome(&store, "local", outcome.as_ref());
-        outcome.map(|_| ())
+        outcome.map(|(skill_id, name)| InstallLocalResult { skill_id, name })
     })
     .await?
 }
@@ -2619,7 +2626,11 @@ pub fn check_skill_update_internal_with_remote(
                                 Path::new(&skill.central_path),
                             ) {
                                 Ok(current_hash) => {
-                                    let status = if current_hash == live_hash {
+                                    let status = if current_hash == live_hash
+                                        || differs_only_by_line_endings(
+                                            source_path,
+                                            Path::new(&skill.central_path),
+                                        ) {
                                         "up_to_date"
                                     } else {
                                         "update_available"
@@ -2654,6 +2665,34 @@ pub fn check_skill_update_internal_with_remote(
     }
 
     managed_skill_by_id(store, skill_id)
+}
+
+/// True when the original source and the library copy hold the same content in
+/// two line-ending encodings, and nothing else.
+///
+/// A `local`/`import` skill is checked by hashing the user's own source path,
+/// which is theirs to keep however they like — commonly a git working tree.
+/// Git for Windows defaults to `core.autocrlf=true`, so on a Windows + macOS
+/// pair the same checkout is CRLF on one machine and LF on the other while the
+/// library copy (our own byte copy, or a copy synced from the other machine)
+/// keeps the other encoding. Byte hashes then disagree forever and the skill
+/// sits at "update available"; re-importing rewrites the library in the local
+/// encoding, the other machine sees *its* copy drift, and the two devices push
+/// the same skill back and forth. Nothing changed, so nothing should be offered.
+///
+/// Deliberately compares the two live trees rather than the stored hash: the
+/// stored hash answers "what did we install?", and the question here is "do
+/// these two directories differ right now?". Any failure to read either side
+/// answers `false`, leaving the byte-hash verdict standing — this may only ever
+/// suppress a false update, never assert sameness it could not establish.
+fn differs_only_by_line_endings(source: &Path, central: &Path) -> bool {
+    let (Ok(source_hash), Ok(central_hash)) = (
+        installer::hash_local_source_eol_insensitive(source),
+        crate::core::content_hash::hash_directory_eol_insensitive(central),
+    ) else {
+        return false;
+    };
+    source_hash == central_hash
 }
 
 pub(crate) fn should_skip_update_check(
@@ -2871,8 +2910,20 @@ pub fn resolve_skillssh_install_target(
     source_ref: &str,
     skill_id: &str,
 ) -> Result<(String, PathBuf), AppError> {
+    resolve_install_target(store, "skillssh", source_ref, skill_id)
+}
+
+/// A reinstall keeps the directory its record already owns; a new skill takes
+/// the first name that is neither another record's (even with identical
+/// content) nor an existing folder, which installing would replace.
+fn resolve_install_target(
+    store: &SkillStore,
+    source_type: &str,
+    source_ref: &str,
+    skill_id: &str,
+) -> Result<(String, PathBuf), AppError> {
     if let Some(existing) = store
-        .get_skill_by_source_ref("skillssh", source_ref)
+        .get_skill_by_source_ref(source_type, source_ref)
         .map_err(AppError::db)?
     {
         return Ok((existing.name, PathBuf::from(existing.central_path)));
@@ -2892,10 +2943,11 @@ pub fn resolve_skillssh_install_target(
         };
         let candidate_path = central_repo::skills_dir().join(&candidate_name);
         let candidate_path_str = candidate_path.to_string_lossy().to_string();
-        let occupied = store
-            .get_skill_by_central_path(&candidate_path_str)
-            .map_err(AppError::db)?
-            .is_some();
+        let occupied = candidate_path.exists()
+            || store
+                .get_skill_by_central_path(&candidate_path_str)
+                .map_err(AppError::db)?
+                .is_some();
 
         if !occupied {
             return Ok((candidate_name, candidate_path));
@@ -4676,13 +4728,16 @@ mod tests {
         let target_dir = repo._tmp.path().join("target-skill-one");
         fs::create_dir_all(&target_dir).unwrap();
         fs::write(target_dir.join("SKILL.md"), "# target").unwrap();
+        // A real directory pairs with a copy record; a symlink record over a
+        // real directory is the #435 data-loss shape and now preserves it
+        // (see deleting_a_skill_preserves_user_content_...).
         repo.store
             .insert_target(&SkillTargetRecord {
                 id: "target-1".to_string(),
                 skill_id: "skill-1".to_string(),
                 tool: "cursor".to_string(),
                 target_path: target_dir.to_string_lossy().to_string(),
-                mode: "symlink".to_string(),
+                mode: "copy".to_string(),
                 status: "ok".to_string(),
                 synced_at: Some(1),
                 last_error: None,
@@ -5901,6 +5956,103 @@ mod tests {
         assert_eq!(stored.last_checked_at, None, "the check did not complete");
     }
 
+    /// Insert a `local` skill whose library copy is `central_body` and whose
+    /// original source path holds `source_body`, with the stored hash recorded
+    /// from the library copy exactly as an install would leave it.
+    fn insert_local_skill(repo: &TestRepo, id: &str, central_body: &str, source_body: &str) {
+        let central = central_repo::skills_dir().join(id);
+        fs::create_dir_all(&central).unwrap();
+        fs::write(central.join("SKILL.md"), central_body).unwrap();
+
+        let source = repo._tmp.path().join(format!("{id}-source"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), source_body).unwrap();
+
+        let mut skill = sample_skill(id, id, &central);
+        skill.source_type = "local".to_string();
+        skill.source_ref = Some(source.to_string_lossy().to_string());
+        skill.content_hash = Some(crate::core::content_hash::hash_directory(&central).unwrap());
+        skill.update_status = "unknown".to_string();
+        repo.store.insert_skill(&skill).unwrap();
+    }
+
+    /// Drives the real check, because the wiring is where this can go wrong:
+    /// the tiebreaker can be correct and still never be consulted. A Windows
+    /// checkout of the same skill is CRLF while the library copy synced from a
+    /// Mac is LF — byte hashes disagree, but there is no update to offer, and
+    /// offering one starts a re-import ping-pong between the two machines.
+    #[test]
+    fn a_local_source_that_differs_only_in_line_endings_is_up_to_date() {
+        let repo = test_repo();
+        insert_local_skill(
+            &repo,
+            "skill-1",
+            "---\nname: skill-1\n---\nbody\n",
+            "---\r\nname: skill-1\r\n---\r\nbody\r\n",
+        );
+
+        let dto =
+            check_skill_update_internal_with_remote(&repo.store, "skill-1", true, None).unwrap();
+
+        assert_eq!(dto.update_status, "up_to_date");
+    }
+
+    /// #502: `npm install` in a local skill's source is not an update.
+    #[test]
+    fn a_local_source_with_only_installed_dependencies_is_up_to_date() {
+        let repo = test_repo();
+        let body = "---\nname: skill-1\n---\nbody\n";
+        insert_local_skill(&repo, "skill-1", body, body);
+        let deps = repo._tmp.path().join("skill-1-source/node_modules/pkg");
+        fs::create_dir_all(&deps).unwrap();
+        fs::write(deps.join("index.js"), "module.exports = 1;\n").unwrap();
+
+        let dto =
+            check_skill_update_internal_with_remote(&repo.store, "skill-1", true, None).unwrap();
+
+        assert_eq!(dto.update_status, "up_to_date");
+    }
+
+    /// A vanished library copy still has an update to offer. This is a
+    /// regression guard on the end-to-end path, not proof of the empty-tree
+    /// guard itself — a non-empty source cannot collide with an empty library,
+    /// so what pins that collision is
+    /// `content_hash::tests::an_empty_or_missing_directory_has_no_tiebreaker_hash`.
+    #[test]
+    fn a_missing_library_copy_is_not_up_to_date() {
+        let repo = test_repo();
+        insert_local_skill(
+            &repo,
+            "skill-1",
+            "---\nname: skill-1\n---\nbody\n",
+            "---\r\nname: skill-1\r\n---\r\nbody\r\n",
+        );
+        fs::remove_dir_all(central_repo::skills_dir().join("skill-1")).unwrap();
+
+        let dto =
+            check_skill_update_internal_with_remote(&repo.store, "skill-1", true, None).unwrap();
+
+        assert_eq!(dto.update_status, "update_available");
+    }
+
+    /// The other half of the same wiring: the tiebreaker must not swallow a
+    /// real edit. Without this, "always up to date" would pass the test above.
+    #[test]
+    fn a_local_source_with_a_real_edit_still_reports_an_update() {
+        let repo = test_repo();
+        insert_local_skill(
+            &repo,
+            "skill-1",
+            "---\nname: skill-1\n---\nbody\n",
+            "---\r\nname: skill-1\r\n---\r\nbody, rewritten\r\n",
+        );
+
+        let dto =
+            check_skill_update_internal_with_remote(&repo.store, "skill-1", true, None).unwrap();
+
+        assert_eq!(dto.update_status, "update_available");
+    }
+
     /// A remote that failed to resolve off the lock still has to land as an
     /// `error` status here, not be swallowed as "nothing to apply" — the batch
     /// check counts that error and the card shows the reason.
@@ -5929,6 +6081,58 @@ mod tests {
         );
     }
 
+    /// 远端修订可读取但单个 Skill 的内容读取失败时，只记录该 Skill 的错误。
+    #[test]
+    fn a_failed_content_check_does_not_mask_a_sibling_result() {
+        let repo = test_repo();
+        let url = "https://example.test/a.git";
+        insert_monorepo_skill(&repo.store, "a", url, Some("skills/a"), "old-rev");
+        insert_monorepo_skill(&repo.store, "b", url, Some("skills/b"), "old-rev");
+        let b = repo.store.get_skill_by_id("b").unwrap().unwrap();
+        let reason = "cannot read remote skill content";
+        let resolved = ResolvedRemote {
+            revision: "new-rev".into(),
+            skills: Arc::new(HashMap::from([
+                (
+                    "a".into(),
+                    RemoteSkillContent {
+                        source_subpath: Some("skills/a".into()),
+                        locator_skill_id: None,
+                        content_hash: Err(reason.into()),
+                    },
+                ),
+                (
+                    "b".into(),
+                    RemoteSkillContent {
+                        source_subpath: Some("skills/b".into()),
+                        locator_skill_id: None,
+                        content_hash: Ok(crate::core::content_hash::hash_directory(Path::new(
+                            &b.central_path,
+                        ))
+                        .unwrap()),
+                    },
+                ),
+            ])),
+        };
+        let check = |id| {
+            check_skill_update_internal_with_remote(
+                &repo.store,
+                id,
+                true,
+                Some(PrefetchedRemote {
+                    key: remote(url, None),
+                    result: Ok(resolved.clone()),
+                }),
+            )
+        };
+        assert_eq!(check("a").unwrap_err().message, reason);
+        let a = repo.store.get_skill_by_id("a").unwrap().unwrap();
+        assert_eq!(a.update_status, "error");
+        assert_eq!(a.source_revision.as_deref(), Some("old-rev"));
+        assert_eq!(a.remote_revision.as_deref(), Some("new-rev"));
+        assert_eq!(check("b").unwrap().update_status, "up_to_date");
+    }
+
     /// Callers hold the central-repo lock across this write, so a git skill with
     /// nothing prefetched must be skipped rather than resolved inline — that
     /// inline call is the lock-held network round-trip behind the 20s "busy"
@@ -5944,6 +6148,169 @@ mod tests {
         assert_eq!(dto.update_status, "unknown");
         let stored = repo.store.get_skill_by_id("skill-1").unwrap().unwrap();
         assert_eq!(stored.last_checked_at, None, "no network, no write");
+    }
+
+    // ── Subpath skills of one monorepo (#561) ──
+
+    fn git_in(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .output()
+            .expect("git must be runnable");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// `file://` wants forward slashes and, on Windows, a slash before the drive.
+    fn file_url(path: &Path) -> String {
+        let raw = path.display().to_string().replace('\\', "/");
+        if raw.starts_with('/') {
+            format!("file://{raw}")
+        } else {
+            format!("file:///{raw}")
+        }
+    }
+
+    /// A repository holding a root skill and two sibling skills, `skills/a` and
+    /// `skills/b`, served over `file://`. Returns its path, URL and first commit.
+    fn monorepo(repo: &TestRepo) -> (PathBuf, String, String) {
+        let dir = repo._tmp.path().join("monorepo");
+        write_skill(&dir, "root");
+        write_skill(&dir.join("skills/a"), "a");
+        write_skill(&dir.join("skills/b"), "b");
+        git_in(&dir, &["init", "-q"]);
+        git_in(&dir, &["add", "-A"]);
+        git_in(&dir, &["commit", "-qm", "init"]);
+        // The blobless fetch is served by this repo, so the switch belongs here.
+        git_in(&dir, &["config", "uploadpack.allowFilter", "true"]);
+        let first = git_in(&dir, &["rev-parse", "HEAD"]);
+        let url = file_url(&dir);
+        (dir, url, first)
+    }
+
+    fn commit_file(dir: &Path, rel: &str, body: &str) -> String {
+        fs::write(dir.join(rel), body).unwrap();
+        git_in(dir, &["add", rel]);
+        git_in(dir, &["commit", "-qm", rel]);
+        git_in(dir, &["rev-parse", "HEAD"])
+    }
+
+    fn insert_monorepo_skill(
+        store: &SkillStore,
+        id: &str,
+        url: &str,
+        subpath: Option<&str>,
+        revision: &str,
+    ) {
+        insert_git_skill(store, id, url);
+        if url.starts_with("file://") {
+            let source = reqwest::Url::parse(url).unwrap().to_file_path().unwrap();
+            let source = source.join(subpath.unwrap_or(""));
+            let skill = store.get_skill_by_id(id).unwrap().unwrap();
+            installer::install_skill_dir_to_destination(
+                &source,
+                id,
+                Path::new(&skill.central_path),
+            )
+            .unwrap();
+        }
+        store
+            .update_skill_source_metadata(id, Some(url), subpath, None, Some(revision))
+            .unwrap();
+    }
+
+    /// The reported bug, end to end through the real check: a commit that only
+    /// touches `skills/a` is an update for `a` and nothing else in that repo —
+    /// except a skill installed from the repository root, which still sees
+    /// every commit, exactly as before.
+    #[test]
+    fn a_monorepo_commit_flags_only_the_skill_it_touches() {
+        let repo = test_repo();
+        let (dir, url, first) = monorepo(&repo);
+        insert_monorepo_skill(&repo.store, "a", &url, Some("skills/a"), &first);
+        insert_monorepo_skill(&repo.store, "b", &url, Some("skills/b"), &first);
+        insert_monorepo_skill(&repo.store, "root", &url, None, &first);
+
+        let head = commit_file(&dir, "skills/a/SKILL.md", "---\nname: a\n---\nchanged\n");
+
+        let check = |id: &str| check_skill_update_internal(&repo.store, id, true, None).unwrap();
+        assert_eq!(check("a").update_status, "update_available");
+        assert_eq!(check("b").update_status, "up_to_date");
+        assert_eq!(check("root").update_status, "update_available");
+
+        // `b`'s directory is the same tree at the new head, so that head is now
+        // what it was installed from: the next check needs no fetch.
+        let b = repo.store.get_skill_by_id("b").unwrap().unwrap();
+        assert_eq!(b.source_revision.as_deref(), Some(head.as_str()));
+        assert_eq!(b.remote_revision.as_deref(), Some(head.as_str()));
+        let a = repo.store.get_skill_by_id("a").unwrap().unwrap();
+        assert_eq!(a.source_revision.as_deref(), Some(first.as_str()));
+
+        // A `.gitattributes` above the directory changes the bytes an update
+        // writes into it — here every line ending — while its tree stays put.
+        commit_file(&dir, ".gitattributes", "skills/b/** text eol=crlf\n");
+        assert_eq!(check("b").update_status, "update_available");
+        let b = repo.store.get_skill_by_id("b").unwrap().unwrap();
+        assert_eq!(b.source_revision.as_deref(), Some(head.as_str()));
+    }
+
+    /// 已安装内容仍可与当前快照比较，无需远端保留历史 revision。
+    #[test]
+    fn an_unfetchable_installed_revision_still_compares_current_content() {
+        let repo = test_repo();
+        let (dir, url, _) = monorepo(&repo);
+        let gone = "0123456789abcdef0123456789abcdef01234567";
+        insert_monorepo_skill(&repo.store, "b", &url, Some("skills/b"), gone);
+        commit_file(&dir, "skills/a/SKILL.md", "---\nname: a\n---\nchanged\n");
+
+        let result = check_skill_update_internal(&repo.store, "b", true, None).unwrap();
+
+        assert_eq!(result.update_status, "up_to_date");
+        let b = repo.store.get_skill_by_id("b").unwrap().unwrap();
+        assert_eq!(b.last_check_error, None);
+        assert_eq!(b.source_revision, b.remote_revision);
+        assert_ne!(b.source_revision.as_deref(), Some(gone));
+    }
+
+    /// "Check all" resolves each remote once. Its siblings — here installed at
+    /// different revisions — are answered from that one resolution.
+    #[test]
+    fn one_resolution_answers_every_sibling_of_a_remote() {
+        let repo = test_repo();
+        let (dir, url, first) = monorepo(&repo);
+        insert_monorepo_skill(&repo.store, "a", &url, Some("skills/a"), &first);
+        let second = commit_file(&dir, "SKILL.md", "---\nname: root\n---\nroot only\n");
+        insert_monorepo_skill(&repo.store, "b", &url, Some("skills/b"), &second);
+        commit_file(&dir, "skills/a/SKILL.md", "---\nname: a\n---\nchanged\n");
+        let key = remote(&url, None);
+        let resolved = resolve_remote_content_for_check(
+            &repo.store,
+            &key,
+            &["a".into(), "b".into()],
+            None,
+            None,
+        )
+        .unwrap();
+        for (id, expected) in [("a", "update_available"), ("b", "up_to_date")] {
+            let result = check_skill_update_internal_with_remote(
+                &repo.store,
+                id,
+                true,
+                Some(PrefetchedRemote {
+                    key: key.clone(),
+                    result: Ok(resolved.clone()),
+                }),
+            )
+            .unwrap();
+            assert_eq!(result.update_status, expected);
+        }
     }
 
     fn write_skill(dir: &Path, name: &str) {
@@ -6206,5 +6573,46 @@ mod tests {
 
         let err = resolve_skill_dir(tmp.path(), Some("gone"), Some("nope-not-here")).unwrap_err();
         assert!(err.message.contains("not found"), "{}", err.message);
+    }
+
+    /// #435: removing a library skill used to delete whatever sat at each
+    /// recorded target. A real directory that replaced our symlink is the
+    /// user's local fork — it must survive the removal.
+    #[test]
+    fn deleting_a_skill_preserves_user_content_that_replaced_a_recorded_link() {
+        let repo = test_repo();
+        let dir = write_skill_dir("my-skill");
+        repo.store
+            .insert_skill(&sample_skill("s1", "my-skill", &dir))
+            .unwrap();
+
+        let agent_tmp = tempdir().unwrap();
+        let target = agent_tmp.path().join("my-skill");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("mine.txt"), "DO_NOT_OVERWRITE").unwrap();
+        repo.store
+            .insert_target(&SkillTargetRecord {
+                id: "t1".to_string(),
+                skill_id: "s1".to_string(),
+                tool: "test_agent".to_string(),
+                target_path: target.to_string_lossy().to_string(),
+                mode: "symlink".to_string(),
+                status: "ok".to_string(),
+                synced_at: Some(1),
+                last_error: None,
+                source_hash: None,
+            })
+            .unwrap();
+
+        let result = delete_managed_skills_by_ids(&repo.store, &["s1".to_string()]).unwrap();
+
+        assert_eq!(result.deleted, 1);
+        assert!(result.failed.is_empty());
+        assert_eq!(
+            fs::read_to_string(target.join("mine.txt")).unwrap(),
+            "DO_NOT_OVERWRITE",
+            "the user's local fork must survive the skill removal"
+        );
+        assert!(repo.store.get_targets_for_skill("s1").unwrap().is_empty());
     }
 }
