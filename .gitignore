@@ -50,6 +50,7 @@ docs/*
 !docs/adr/*.md
 reference
 CLAUDE.md
+AGENTS.md
 .loop-log
 
 # Local Git worktrees

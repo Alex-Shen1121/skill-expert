@@ -9,13 +9,18 @@ Upstream Skills Manager history is preserved in [the upstream history archive](d
 ## [Unreleased]
 
 ### Release Overview
--
+- 合入最新上游功能，并兼容现有 Agent 技能管家的数据、Agent 配置及发布身份。
 
 ### User-facing
--
+- 技能列表新增来源分组、渠道筛选和隐藏选中项提示，保留批量更新、取消与内容比对。
+- CLI 新增项目技能管理；共享技能目录中的多个 Agent 可复用部署，路径调整时保留原有副本。
+- 备份恢复遇到同名不同内容时提供确认与副本保留，避免恢复反复失败。
+- 新增更新内容展示、西班牙语和韩语，首次启动按系统选择语言与主题，并保留已保存的偏好。
 
 ### Developer & Governance
--
+- 同步上游 `f374817aeb0ae648940dad7c15b49b610fb9eca2`，保留本仓库的插件、GitLab Duo、自定义 Agent 与正式发布流程。
+- 数据库迁移兼容本仓库与上游不同的 schema 8/9 历史，补齐内容缓存表并保留来源哈希。
+- 统一 GUI/CLI 的配置校验、部署锁和失败回执，补充迁移、共享路径、恢复与前端交互回归。
 
 ## [1.0.23] - 2026-10-18
 

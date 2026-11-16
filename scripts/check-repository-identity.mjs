@@ -34,6 +34,9 @@ const currentPublicSurfaces = [
   'src-tauri/src/commands/settings.rs',
   'src-tauri/tauri.conf.json',
   'src/views/Settings.tsx',
+  'src/components/WhatsNewDialog.tsx',
+  'src/i18n/es.json',
+  'src/i18n/ko.json',
 ];
 
 const forbiddenPublicIdentity = [

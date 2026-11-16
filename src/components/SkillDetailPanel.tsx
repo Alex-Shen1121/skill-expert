@@ -22,6 +22,8 @@ interface Props {
   toolToggles?: SkillToolToggle[] | null;
   togglingTool?: string | null;
   onToggleTool?: (tool: string, enabled: boolean) => void;
+  /** Whether `toolToggles` belong to the active preset, the only one that deploys. */
+  isActivePreset: boolean;
   projects?: Project[];
   onProjectsChanged?: () => void;
 }
@@ -33,7 +35,7 @@ export function SkillDetailPanel(props: Props) {
   return <SkillDetailPanelContent key={panelKey} {...props} skill={skill} />;
 }
 
-function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingTool, onToggleTool, projects, onProjectsChanged }: Props & { skill: ManagedSkill }) {
+function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingTool, onToggleTool, isActivePreset, projects, onProjectsChanged }: Props & { skill: ManagedSkill }) {
   const { t } = useTranslation();
   const [index, setIndex] = useState<SkillBrowserIndex | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -119,7 +121,7 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
   const chooseFile = (path: string) => { if (path === selected) return; setSelected(path); setPreviews({}); setPreviewErrors({}); };
   const retry = () => { setIndex(null); setSource(null); setSourceDiff(null); setSourceError(null); setDiffError(null); setPreviews({}); setBrowseError(null); setPreviewErrors({}); setReload(current => current + 1); };
   const toggleItems: AgentToggleItem[] = (toolToggles ?? []).map(toggle => ({
-    key: toggle.tool, isCustom: tools?.find((tool) => tool.key === toggle.tool)?.is_custom, displayName: toggle.display_name, enabled: toggle.enabled,
+    key: toggle.tool, isCustom: tools?.find((tool) => tool.key === toggle.tool)?.is_custom, displayName: toggle.display_name, enabled: toggle.enabled, deployed: toggle.deployed,
     isAvailable: toggle.installed && toggle.globally_enabled, disabled: !toggle.installed || !toggle.globally_enabled,
     badgeLabel: !toggle.installed ? t("mySkills.agentToggleNotInstalled") : !toggle.globally_enabled ? t("mySkills.agentToggleDisabledGlobally") : null,
   }));
@@ -142,7 +144,7 @@ function SkillDetailPanelContent({ skill, onClose, tools, toolToggles, togglingT
       </section>
       <section><h3>{t("skillBrowser.directoryContents")}</h3><p>{activeIndex ? t(activeIndex.complete ? "skillBrowser.counts" : "skillBrowser.partialCounts", { files: activeIndex.file_count, directories: activeIndex.directory_count }) : t("common.loading")}</p><p className="mt-2 text-muted">{t("skillBrowser.includesHidden")}</p>{skill.tags.length > 0 && <p className="mt-2">{skill.tags.join(" · ")}</p>}</section>
     </div>
-    {toolToggles && onToggleTool && <AgentToggleSection items={toggleItems} togglingKey={togglingTool} onToggle={onToggleTool} className="mt-3" />}
+    {toolToggles && onToggleTool && <AgentToggleSection showPendingSync={isActivePreset} items={toggleItems} togglingKey={togglingTool} onToggle={onToggleTool} className="mt-3" />}
     {projects && projects.length > 0 && <SkillProjectsSection skill={skill} projects={projects} onChanged={onProjectsChanged} />}
   </div> : undefined;
 

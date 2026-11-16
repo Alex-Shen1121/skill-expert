@@ -4,9 +4,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::{
+    central_repo, content_hash,
     error::{AppError, TargetConflictDetail},
     skill_store::{ScenarioRecord, SkillStore, SkillTargetRecord},
-    sync_engine, tool_adapters, tool_service,
+    sync_engine, sync_metadata, tool_adapters, tool_service,
 };
 
 #[derive(Debug, Clone)]
@@ -76,6 +77,7 @@ pub fn collect_scenario_sync_targets(
         .get_skills_for_scenario(scenario_id)
         .map_err(AppError::db)?;
     let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
+    let existing_targets = store.get_all_targets().map_err(AppError::db)?;
     let mut targets = Vec::new();
 
     for skill in &skills {
@@ -84,7 +86,7 @@ pub fn collect_scenario_sync_targets(
         let adapters =
             enabled_installed_adapters_for_scenario_skill(store, scenario_id, &skill.id)?;
         for adapter in &adapters {
-            let target = adapter.skills_dir().join(&target_name);
+            let target = deployment_target(adapter, &target_name, &skill.id, &existing_targets);
             let mode = sync_engine::sync_mode_for_tool(&adapter.key, configured_mode.as_deref());
             targets.push(ScenarioSyncTarget {
                 skill_id: skill.id.clone(),
@@ -99,6 +101,30 @@ pub fn collect_scenario_sync_targets(
     }
 
     Ok(targets)
+}
+
+fn deployment_target(
+    adapter: &tool_adapters::ToolAdapter,
+    target_name: &str,
+    skill_id: &str,
+    existing_targets: &[SkillTargetRecord],
+) -> PathBuf {
+    let root = adapter.skills_dir();
+    existing_targets
+        .iter()
+        .find(|target| target.skill_id == skill_id && target.tool == adapter.key)
+        .map(|target| PathBuf::from(&target.target_path))
+        .filter(|path| is_skill_path_within_root(path, &root))
+        .unwrap_or_else(|| root.join(target_name))
+}
+
+fn is_skill_path_within_root(path: &Path, root: &Path) -> bool {
+    path.strip_prefix(root).is_ok_and(|relative| {
+        !relative.as_os_str().is_empty()
+            && relative
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+    })
 }
 
 pub fn preview_scenario_sync(
@@ -146,6 +172,96 @@ fn skip_check_mode(
     }
 }
 
+/// A rename only, so nothing is copied half-way; across volumes it fails and
+/// the caller keeps the copy where it is.
+fn move_into_kept_copies(path: &Path, tool: &str) -> std::io::Result<PathBuf> {
+    let root = central_repo::base_dir()
+        .join("kept-copies")
+        .join(single_dir_name(tool));
+    std::fs::create_dir_all(&root)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "skill".to_string());
+    let mut kept = root.join(&name);
+    let mut n = 2;
+    // `symlink_metadata`, not `exists`: a dangling link still takes the name.
+    while std::fs::symlink_metadata(&kept).is_ok() {
+        kept = root.join(format!("{name}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &kept)?;
+    Ok(kept)
+}
+
+/// A tool key as one directory name. Custom keys reach here unchecked from
+/// the CLI, so a key like `../skills` must not lead outside `kept-copies/`.
+fn single_dir_name(key: &str) -> String {
+    let name: String = key
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        "tool".to_string()
+    } else {
+        name
+    }
+}
+
+/// Whether the deployment recorded at exactly this path is still current, so a
+/// resync can leave it alone: a link to the source, or a real directory copied
+/// from the library's current content hash (#153).
+///
+/// [`sync_engine::sync_skill`] rewrites a recorded copy wholesale. Only the
+/// startup and preset sync asked this first, so every other resync (a preset
+/// applied from the PresetBar, a batch deploy, the sync after an install, an
+/// update that changed no content) deleted whatever had been written into the
+/// agent's copy although the library had not changed. Skipping never deletes
+/// anything, so every resync can ask.
+///
+/// Only the calling tool's own row counts. Rows of other tools sharing the
+/// directory are history of their own deployments, and the removal paths rely
+/// on their disagreeing to keep a directory whose owner is unclear. A copy
+/// replaced by a file or a foreign link is not current, so `sync_skill` still
+/// gets to refuse whatever replaced it.
+pub(crate) fn recorded_target_is_current(
+    record: Option<&SkillTargetRecord>,
+    source: &Path,
+    target: &Path,
+    desired: sync_engine::SyncMode,
+    library_hash: Option<&str>,
+) -> bool {
+    let Some(record) = record.filter(|record| record.status == "ok") else {
+        return false;
+    };
+    let Some(check_mode) = skip_check_mode(&record.mode, desired) else {
+        return false;
+    };
+    // A link to the source serves the library's content too; anything else
+    // in place of the copy goes to `sync_skill`, which refuses it.
+    if matches!(check_mode, sync_engine::SyncMode::Copy)
+        && !matches!(
+            sync_engine::classify_target(target, Some(source)),
+            Ok(sync_engine::TargetState::RealDir | sync_engine::TargetState::LinkToSource)
+        )
+    {
+        return false;
+    }
+    sync_engine::is_target_current(
+        source,
+        target,
+        check_mode,
+        record.source_hash.as_deref(),
+        library_hash,
+    )
+}
+
 /// A key identifying the *directory entry* a target path names, used to spot
 /// two rows that claim one object under different spellings.
 ///
@@ -157,9 +273,13 @@ fn skip_check_mode(
 ///
 /// Known gap: on a case-insensitive filesystem two spellings of the final
 /// component still key differently. That is the same lexical assumption the
-/// rest of this module makes about `target_path`, and erring here only costs a
-/// refusal, never a deletion.
-fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
+/// rest of this module makes about `target_path`. It is not harmless
+/// everywhere: in the batch deploy, a contradicting row spelled with a
+/// different case is not pooled, so the remaining rows can authorize a
+/// replacement the contradiction should have blocked (pre-existing, H review
+/// item 5). Outside the batch, rows of other agents only ever adopt, so there
+/// the gap costs a refusal or an extra row, never a deletion.
+pub(crate) fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return path.to_path_buf();
     };
@@ -176,6 +296,201 @@ fn ownership_key(path: &Path, memo: &mut HashMap<PathBuf, PathBuf>) -> PathBuf {
         }
     };
     canonical_parent.join(name)
+}
+
+/// What our records say we put at each target path, pooled across every row
+/// that names it — the one ownership judgment every deploy path asks.
+///
+/// Ownership belongs to the path, not to the `(skill, tool)` pair. When several
+/// agents share a skills directory, a row for any of them is evidence about the
+/// object there; otherwise the agent without its own row refuses a directory we
+/// demonstrably wrote for its neighbour (#363 review, cluster 37 A5). The
+/// evidence is narrow on purpose:
+///
+/// - Every row naming the object must agree on the mode. Contradictory rows
+///   mean we do not know what we put there, so they vouch for nothing —
+///   taking whichever came first would let a stale `copy` row authorize
+///   deleting a real directory that replaced our link.
+/// - Every row naming the object must belong to the skill being deployed. A
+///   row of another skill on the same path is that skill's deployment, not
+///   evidence for this one.
+///
+/// Rows are pooled from the whole table, not just the pairs being deployed:
+/// `skill_targets` is unique on `(skill_id, tool)`, not on `target_path`, so a
+/// row nobody selected can still be a claim on the same object. They are keyed
+/// by directory entry rather than by path string, so a row spelled differently
+/// (symlinked ancestor, `..`) still counts as evidence about the same object.
+struct PathEvidence {
+    memo: HashMap<PathBuf, PathBuf>,
+    /// `(skill_id, tool, mode)` of every row, by the directory entry it names.
+    rows: HashMap<PathBuf, Vec<(String, String, String)>>,
+    /// What this run itself wrote, as `(skill_id, mode)`. It outranks the
+    /// rows: they describe the previous deployment, this describes what is on
+    /// disk right now, and preferring them would make the second agent on a
+    /// shared path refuse the directory the first one just created after a
+    /// mode change.
+    written: HashMap<PathBuf, (String, String)>,
+}
+
+/// What [`PathEvidence`] says about one target, for one `(skill, tool)` pair.
+#[derive(Debug, PartialEq, Eq)]
+enum Evidence {
+    /// This agent's own row for this skill, or this run's own write: may
+    /// replace what it recorded.
+    Own(String),
+    /// Only other agents' rows for this skill. Outside a user-initiated batch
+    /// these may adopt an identical copy, never replace one: the other agent's
+    /// own skip check is what preserves edits made in its copy, and borrowing
+    /// its row to rewrite the directory would undo that (H review, item 1).
+    Borrowed(String),
+    /// Nothing vouches for the object.
+    Unvouched,
+}
+
+impl Evidence {
+    /// Both tiers, for the batch deploy: the user selected these pairs and
+    /// confirmed the batch, so any agreeing row authorizes replacement.
+    fn any_mode(&self) -> Option<&str> {
+        match self {
+            Evidence::Own(mode) | Evidence::Borrowed(mode) => Some(mode),
+            Evidence::Unvouched => None,
+        }
+    }
+}
+
+impl PathEvidence {
+    fn new(rows: &[SkillTargetRecord]) -> Self {
+        let mut memo = HashMap::new();
+        let mut by_key: HashMap<PathBuf, Vec<(String, String, String)>> = HashMap::new();
+        for row in rows {
+            let key = ownership_key(Path::new(&row.target_path), &mut memo);
+            by_key.entry(key).or_default().push((
+                row.skill_id.clone(),
+                row.tool.clone(),
+                row.mode.clone(),
+            ));
+        }
+        Self {
+            memo,
+            rows: by_key,
+            written: HashMap::new(),
+        }
+    }
+
+    fn judge(&mut self, skill_id: &str, tool: &str, target: &Path) -> Evidence {
+        let key = ownership_key(target, &mut self.memo);
+        if let Some((writer, mode)) = self.written.get(&key) {
+            return if writer == skill_id {
+                Evidence::Own(mode.clone())
+            } else {
+                Evidence::Unvouched
+            };
+        }
+        let Some(rows) = self.rows.get(&key) else {
+            return Evidence::Unvouched;
+        };
+        let Some((_, _, first_mode)) = rows.first() else {
+            return Evidence::Unvouched;
+        };
+        if !rows
+            .iter()
+            .all(|(owner, _, mode)| owner == skill_id && mode == first_mode)
+        {
+            return Evidence::Unvouched;
+        }
+        if rows.iter().any(|(_, row_tool, _)| row_tool == tool) {
+            Evidence::Own(first_mode.clone())
+        } else {
+            Evidence::Borrowed(first_mode.clone())
+        }
+    }
+
+    fn wrote(&mut self, skill_id: &str, target: &Path, mode: sync_engine::SyncMode) {
+        let key = ownership_key(target, &mut self.memo);
+        self.written
+            .insert(key, (skill_id.to_string(), mode.as_str().to_string()));
+    }
+
+    fn has_written(&mut self, target: &Path) -> bool {
+        let key = ownership_key(target, &mut self.memo);
+        self.written.contains_key(&key)
+    }
+
+    /// Another skill was written there earlier in this run. A dry run has to
+    /// treat that path as occupied, because the real run will find it so.
+    fn written_by_other_skill(&mut self, skill_id: &str, target: &Path) -> bool {
+        let key = ownership_key(target, &mut self.memo);
+        self.written
+            .get(&key)
+            .is_some_and(|(writer, _)| writer != skill_id)
+    }
+}
+
+/// What a deploy outside the batch does with [`PathEvidence::judge`]'s answer.
+enum DeployStep {
+    /// Write, replacing only what this recorded mode authorizes (`None`:
+    /// nothing of the user's may be destroyed).
+    Write(Option<String>),
+    /// The directory already holds exactly the library's content and another
+    /// agent sharing it recorded it: add this agent's row, touch nothing.
+    Adopt(String),
+}
+
+fn deploy_step(evidence: Evidence, source: &Path, target: &Path) -> DeployStep {
+    match evidence {
+        Evidence::Own(mode) => DeployStep::Write(Some(mode)),
+        Evidence::Borrowed(mode) if copy_matches_library(&mode, source, target) => {
+            DeployStep::Adopt(mode)
+        }
+        // A link to the source, or nothing at all, is still written: neither
+        // destroys anything. Anything else is refused, as it always was.
+        Evidence::Borrowed(_) | Evidence::Unvouched => DeployStep::Write(None),
+    }
+}
+
+/// Whether a borrowed copy-mode directory holds exactly the library's content,
+/// compared the way the stranded-skill backfill does (`hash_directory` on both
+/// sides, failing closed).
+///
+/// The hash skips `.gitignore`, caches and the like, so equal hashes do not
+/// prove the copy is unedited (#593). That is acceptable here only because
+/// adopting writes nothing: a wrong answer adds a row, it never deletes.
+fn copy_matches_library(mode: &str, source: &Path, target: &Path) -> bool {
+    mode == "copy"
+        && matches!(
+            sync_engine::classify_target(target, Some(source)),
+            Ok(sync_engine::TargetState::RealDir)
+        )
+        && source.is_dir()
+        && matches!(
+            (
+                content_hash::hash_directory(target),
+                content_hash::hash_directory(source),
+            ),
+            (Ok(deployed), Ok(library)) if deployed == library
+        )
+}
+
+/// The row recording an adopted directory: nothing was written, so its mode
+/// is the borrowed evidence's and its hash the library's it was compared to.
+fn adopted_target_record(
+    skill_id: &str,
+    tool: &str,
+    target: &Path,
+    mode: String,
+    source_hash: Option<String>,
+) -> SkillTargetRecord {
+    SkillTargetRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        skill_id: skill_id.to_string(),
+        tool: tool.to_string(),
+        target_path: target.to_string_lossy().to_string(),
+        mode,
+        status: "ok".to_string(),
+        synced_at: Some(chrono::Utc::now().timestamp_millis()),
+        last_error: None,
+        source_hash,
+    }
 }
 
 /// Authorization for a deployment write: a `skill_targets` row claiming this
@@ -338,7 +653,7 @@ pub fn sync_desired_targets_report(
     let mut report = DeploymentReport::not_run("empty");
     report.reason = None;
     report.total = Some(desired_targets.len());
-    let mut written: HashMap<PathBuf, (PathBuf, String)> = HashMap::new();
+    let mut evidence = PathEvidence::new(&existing);
     for desired in desired_targets {
         let mut result = DeploymentTarget {
             skill_id: desired.skill_id.clone(),
@@ -351,10 +666,12 @@ pub fn sync_desired_targets_report(
         if config.disabled.contains(&desired.tool)
             || !current.is_some_and(|a| {
                 a.is_installed()
-                    && a.skills_dir().join(sync_engine::target_dir_name(
-                        &desired.source,
-                        &desired.skill_name,
-                    )) == desired.target
+                    && deployment_target(
+                        a,
+                        &sync_engine::target_dir_name(&desired.source, &desired.skill_name),
+                        &desired.skill_id,
+                        &existing,
+                    ) == desired.target
             })
         {
             result.message = Some(
@@ -375,56 +692,55 @@ pub fn sync_desired_targets_report(
                 continue;
             }
         };
-        let recorded_mode = written
-            .get(&desired.target)
-            .filter(|(source, _)| source == &desired.source)
-            .map(|(_, mode)| mode.as_str())
-            .or_else(|| {
-                old.filter(|t| {
-                    Path::new(&t.target_path) == desired.target
-                        && recorded_target_matches_source(t, &desired.source)
-                })
-                .map(|t| t.mode.as_str())
-            });
-        if old.is_some_and(|t| {
-            Path::new(&t.target_path) == desired.target
-                && t.status == "ok"
-                && skip_check_mode(&t.mode, desired.mode).is_some_and(|mode| {
-                    sync_engine::is_target_current(
-                        &desired.source,
-                        &desired.target,
-                        mode,
-                        t.source_hash.as_deref(),
-                        Some(&source_hash),
-                    )
-                })
-        }) {
+        if recorded_target_is_current(
+            old.filter(|t| Path::new(&t.target_path) == desired.target),
+            &desired.source,
+            &desired.target,
+            desired.mode,
+            Some(&source_hash),
+        ) {
             result.outcome = "already_current".into();
             report.targets.push(result);
             continue;
         }
-        match sync_engine::sync_skill(
+        let step = deploy_step(
+            evidence.judge(&desired.skill_id, &desired.tool, &desired.target),
             &desired.source,
             &desired.target,
-            desired.mode,
-            replace_policy(recorded_mode),
-        ) {
+        );
+        let adopted = matches!(step, DeployStep::Adopt(_));
+        let recorded_mode = match step {
+            DeployStep::Adopt(mode) => Some(mode),
+            DeployStep::Write(mode) => mode.filter(|_| {
+                evidence.has_written(&desired.target)
+                    || old.is_some_and(|t| {
+                        Path::new(&t.target_path) == desired.target
+                            && recorded_target_matches_source(t, &desired.source)
+                    })
+            }),
+        };
+        let deployed = if adopted {
+            Ok(sync_engine::SyncMode::Copy)
+        } else {
+            sync_engine::sync_skill(
+                &desired.source,
+                &desired.target,
+                desired.mode,
+                replace_policy(recorded_mode.as_deref()),
+            )
+        };
+        match deployed {
             Ok(mode) => {
-                written.insert(
-                    desired.target.clone(),
-                    (desired.source.clone(), mode.as_str().into()),
+                if !adopted {
+                    evidence.wrote(&desired.skill_id, &desired.target, mode);
+                }
+                let row = adopted_target_record(
+                    &desired.skill_id,
+                    &desired.tool,
+                    &desired.target,
+                    mode.as_str().into(),
+                    Some(source_hash),
                 );
-                let row = SkillTargetRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    skill_id: desired.skill_id.clone(),
-                    tool: desired.tool.clone(),
-                    target_path: result.target_path.clone(),
-                    mode: mode.as_str().into(),
-                    status: "ok".into(),
-                    synced_at: Some(chrono::Utc::now().timestamp_millis()),
-                    last_error: None,
-                    source_hash: Some(source_hash),
-                };
                 match store.insert_target(&row) {
                     Ok(()) => {
                         result.outcome = "committed".into();
@@ -442,7 +758,7 @@ pub fn sync_desired_targets_report(
                             match if legacy_shared {
                                 Ok("shared".to_string())
                             } else {
-                                preserve_or_remove_target(store, old)
+                                preserve_or_remove_target(store, old, true)
                             } {
                                 Ok(reason) if reason == "shared" => {
                                     result.message = Some(format!(
@@ -450,14 +766,19 @@ pub fn sync_desired_targets_report(
                                         old.target_path
                                     ))
                                 }
-                                Ok(reason) if reason != "removed" && reason != "absent" => report
-                                    .issue(
+                                Ok(reason)
+                                    if reason != "removed"
+                                        && reason != "absent"
+                                        && reason != "kept_copy" =>
+                                {
+                                    report.issue(
                                         "retire_old_target",
                                         "TARGET_PRESERVED",
                                         Some(&old.tool),
                                         Some(&old.target_path),
                                         reason,
-                                    ),
+                                    )
+                                }
                                 Err(error) => report.issue(
                                     "retire_old_target",
                                     "CLEANUP_FAILED",
@@ -556,6 +877,7 @@ pub fn recorded_target_matches_source(target: &SkillTargetRecord, source: &Path)
 pub fn preserve_or_remove_target(
     store: &SkillStore,
     target: &SkillTargetRecord,
+    keep_copy: bool,
 ) -> Result<String, AppError> {
     let path = Path::new(&target.target_path);
     let all = store.get_all_targets().map_err(AppError::db)?;
@@ -598,6 +920,11 @@ pub fn preserve_or_remove_target(
     if !owned {
         return Ok("foreign_or_unconfirmed".into());
     }
+    if keep_copy && target.mode == "copy" {
+        let kept = move_into_kept_copies(path, &target.tool).map_err(AppError::io)?;
+        log::warn!("旧部署副本已保留到 {}", kept.display());
+        return Ok("kept_copy".into());
+    }
     sync_engine::remove_recorded_target(path, &target.mode).map_err(AppError::io)?;
     Ok("removed".into())
 }
@@ -612,7 +939,7 @@ pub fn remove_targets(
     // in this same batch remain protection evidence throughout the file phase.
     let outcomes = targets
         .iter()
-        .map(|target| preserve_or_remove_target(store, target))
+        .map(|target| preserve_or_remove_target(store, target, false))
         .collect::<Vec<_>>();
     let mut report = DeploymentReport::not_run("empty");
     report.operation = "remove";
@@ -649,6 +976,60 @@ pub fn remove_tool_targets(store: &SkillStore, tool: &str) -> Result<DeploymentR
         .filter(|t| t.tool == tool)
         .collect::<Vec<_>>();
     remove_targets(store, &targets)
+}
+
+/// Preview the ownership decisions made by `sync_desired_targets` without changing targets.
+pub fn preflight_scenario_sync_targets(
+    store: &SkillStore,
+    desired_targets: &[ScenarioSyncTarget],
+) -> Result<(), AppError> {
+    let mut evidence = PathEvidence::new(&store.get_all_targets().map_err(AppError::db)?);
+    let mut conflicts = Vec::new();
+    for desired in desired_targets {
+        // The real run will find another skill's deployment here even though
+        // the disk does not show it yet.
+        if evidence.written_by_other_skill(&desired.skill_id, &desired.target) {
+            conflicts.push(TargetConflictDetail {
+                path: desired.target.display().to_string(),
+                reason: sync_engine::ReplacePolicy::NoClobber.describe().to_string(),
+            });
+            continue;
+        }
+        let recorded_mode = match deploy_step(
+            evidence.judge(&desired.skill_id, &desired.tool, &desired.target),
+            &desired.source,
+            &desired.target,
+        ) {
+            DeployStep::Write(mode) => mode,
+            DeployStep::Adopt(_) => continue,
+        };
+        match sync_engine::preflight_replace(
+            &desired.source,
+            &desired.target,
+            desired.mode,
+            replace_policy(recorded_mode.as_deref()),
+        ) {
+            Ok(()) => evidence.wrote(&desired.skill_id, &desired.target, desired.mode),
+            Err(error) => match error.downcast_ref::<sync_engine::ReplaceRefused>() {
+                Some(refused) => conflicts.push(TargetConflictDetail {
+                    path: refused.target.display().to_string(),
+                    reason: refused.reason.to_string(),
+                }),
+                None => return Err(AppError::io(error)),
+            },
+        }
+    }
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::target_conflict(
+            format!(
+                "Refusing to sync: {} target(s) would overwrite content that is not ours. Nothing was changed.",
+                conflicts.len()
+            ),
+            conflicts,
+        ))
+    }
 }
 
 /// Turn reported refusals into the error a user-initiated command should show.
@@ -906,18 +1287,81 @@ pub fn sync_active_scenario_to_tool(store: &SkillStore, tool_key: &str) -> Resul
 /// thing the user asked us to take over. Ordinary deployment must never do
 /// that, so the two intents cannot share a code path (#363).
 #[derive(Debug, Clone, Copy)]
-pub enum DeployIntent {
+pub enum DeployIntent<'a> {
     /// Ordinary deployment: replace only what our own records vouch for.
     Managed,
-    /// The user explicitly asked us to take over whatever is at this path.
-    AdoptExisting,
+    /// The user explicitly asked us to take over this scanned skill path.
+    AdoptExisting(&'a Path),
+}
+
+/// Re-point every `source_ref` that names `target` at the referring skill's own
+/// central copy, ahead of an adoption that replaces `target` with a managed
+/// deployment (#425).
+///
+/// An adopted directory stops being an independent copy the moment the
+/// adoption runs: it becomes a link to (or copy of) central that can be
+/// removed at any time — by the agent's own skill management cleaning up what
+/// it does not recognize, or by a later undeploy. A skill whose `source_ref`
+/// still names that directory then fails its update check with
+/// `source_missing` forever, even though the central copy is intact.
+///
+/// The central copy always exists while the skill row does, so re-pointing
+/// keeps the source resolvable; the content-hash comparison against it keeps
+/// reporting `up_to_date`. Matching is by exact string or canonicalized path,
+/// because import records can spell the same directory with mixed separators
+/// than the deployment target computed from the adapter.
+pub(crate) fn detach_source_refs_from_adoption_target(
+    store: &SkillStore,
+    target: &Path,
+) -> Result<(), AppError> {
+    let target_str = target.to_string_lossy().into_owned();
+    // `canonicalize` resolves through symlinks, but a symlinked target is only
+    // unlinked by the replacement below (`remove_classified_target` treats
+    // LinkToSource/ForeignLink as `remove_link`) -- whatever it pointed at
+    // survives untouched. Resolving through the link would re-point the
+    // source_ref of a directory that is still on disk and still the user's
+    // source of truth, and the update check would then compare central to
+    // itself forever. An exact string match still applies: if the source_ref
+    // *is* the link path, that link really is going away.
+    let target_canonical = if std::fs::symlink_metadata(target)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        None
+    } else {
+        std::fs::canonicalize(target).ok()
+    };
+    for skill in store.get_all_skills().map_err(AppError::db)? {
+        let Some(source_ref) = skill.source_ref.as_deref() else {
+            continue;
+        };
+        // Already re-pointed by a previous adoption — nothing to do.
+        if source_ref == skill.central_path {
+            continue;
+        }
+        let points_at_target = source_ref == target_str
+            || target_canonical.as_ref().is_some_and(|canonical| {
+                std::fs::canonicalize(source_ref).is_ok_and(|source| &source == canonical)
+            });
+        if points_at_target {
+            store
+                .update_skill_source_ref(&skill.id, &skill.central_path)
+                .map_err(AppError::db)?;
+            log::info!(
+                "adoption: re-pointed source_ref of skill '{}' at its central copy; \
+                 the adopted agent directory is now a deployment, not a source (#425)",
+                skill.name
+            );
+        }
+    }
+    Ok(())
 }
 
 pub fn sync_single_skill_to_tool(
     store: &SkillStore,
     skill_id: &str,
     tool: &str,
-    intent: DeployIntent,
+    intent: DeployIntent<'_>,
 ) -> Result<(), AppError> {
     let _deployment = store.deployment_lock("sync_single_skill_to_tool")?;
     let adapter = tool_adapters::find_adapter_with_store(store, tool)?
@@ -943,9 +1387,24 @@ pub fn sync_single_skill_to_tool(
         .ok_or_else(|| AppError::not_found("Skill not found"))?;
 
     let source = PathBuf::from(&skill.central_path);
-    let target = adapter
-        .skills_dir()
-        .join(sync_engine::target_dir_name(&source, &skill.name));
+    let existing_targets = store.get_targets_for_skill(skill_id).unwrap_or_default();
+    let target = match intent {
+        DeployIntent::AdoptExisting(path) => {
+            let root = adapter.skills_dir();
+            if !is_skill_path_within_root(path, &root) {
+                return Err(AppError::invalid_input(
+                    "Skill path is outside the agent skills directory",
+                ));
+            }
+            path.to_path_buf()
+        }
+        DeployIntent::Managed => deployment_target(
+            &adapter,
+            &sync_engine::target_dir_name(&source, &skill.name),
+            skill_id,
+            &existing_targets,
+        ),
+    };
     let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
     let mode = sync_engine::sync_mode_for_tool(tool, configured_mode.as_deref());
     if matches!(intent, DeployIntent::Managed) {
@@ -963,6 +1422,7 @@ pub fn sync_single_skill_to_tool(
         )
         .require_complete();
     }
+    detach_source_refs_from_adoption_target(store, &target)?;
     let policy = sync_engine::ReplacePolicy::UserConfirmed;
     let actual_mode =
         sync_engine::sync_skill(&source, &target, mode, policy).map_err(AppError::io)?;
@@ -990,13 +1450,56 @@ pub enum BatchApplyMode {
     Remove,
 }
 
+/// Record a deploy or removal of `skill_ids × tool_keys` in the active
+/// preset's per-agent toggles, which the startup sync deploys from. Skills
+/// outside the active preset are skipped; the active preset never changes.
+/// Every launch reindexes the toggles from the sync metadata, so each changed
+/// member's file is rewritten as well (#549).
+pub fn set_active_preset_tool_toggles(
+    store: &SkillStore,
+    skill_ids: &[String],
+    tool_keys: &[String],
+    enabled: bool,
+) -> Result<(), AppError> {
+    let Ok(Some(active_id)) = store.get_active_scenario_id() else {
+        return Ok(());
+    };
+    let members = store
+        .get_skill_ids_for_scenario(&active_id)
+        .map_err(AppError::db)?;
+    let skill_ids: Vec<&String> = skill_ids.iter().filter(|id| members.contains(id)).collect();
+    if skill_ids.is_empty() || tool_keys.is_empty() {
+        return Ok(());
+    }
+    let adapter_keys: Vec<String> = tool_adapters::enabled_installed_adapters(store)?
+        .iter()
+        .map(|a| a.key.clone())
+        .collect();
+    sync_metadata::with_repo_lock("set skill tool toggle", || {
+        for skill_id in skill_ids {
+            store.ensure_scenario_skill_tool_defaults(&active_id, skill_id, &adapter_keys)?;
+            for tool in tool_keys {
+                store.set_scenario_skill_tool_enabled(&active_id, skill_id, tool, enabled)?;
+            }
+            sync_metadata::write_scenario_skill_unlocked(store, &active_id, skill_id)?;
+        }
+        Ok(())
+    })
+    .map_err(AppError::db)
+}
+
 /// Apply a batch of `(skill_id × tool_key)` pairs in either Add or Remove mode
-/// without touching `active_scenario_id` or `scenario_skill_tools` toggles.
+/// without changing `active_scenario_id`.
 ///
-/// This is the tray-side preset apply primitive. Unlike [`sync_single_skill_to_tool`]
-/// (which is wrapped by the `sync_skill_to_tool` Tauri command and carries the
-/// implicit active-preset toggle side-effect), this batch is a pure
-/// "write/remove files + maintain `skill_targets` rows" operation.
+/// This is the tray-side preset apply primitive, also behind the CLI's
+/// `presets deploy/undeploy` and `skills deploy/undeploy`. It also turns the
+/// pairs on (Add) or off (Remove) in the active preset's toggles, for skills
+/// in that preset. The startup sync deploys the active preset from those
+/// toggles: one left on brought a removed skill back at the next launch, and
+/// one left off kept a deployed skill out of the preview and out of the
+/// startup repair (#549). The toggles go first, so a busy repo lock fails the
+/// batch before any file changes, and a pair that then fails to deploy is
+/// retried by the startup sync.
 ///
 /// Remove mode handles shared physical paths: a `target_path` may be referenced
 /// by multiple `(skill_id, tool)` records when several tools resolve to the same
@@ -1014,16 +1517,31 @@ pub fn apply_skills_to_tools(
         return Ok(());
     }
 
+    let add = matches!(mode, BatchApplyMode::Add);
+    set_active_preset_tool_toggles(store, skill_ids, tool_keys, add)?;
     match mode {
-        BatchApplyMode::Add => apply_add(store, skill_ids, tool_keys),
+        BatchApplyMode::Add => apply_add(store, skill_ids, tool_keys, false),
         BatchApplyMode::Remove => apply_remove(store, skill_ids, tool_keys),
     }
+}
+
+/// Check the same targets and ownership rules as batch deployment without writing.
+pub fn preflight_add_skills_to_tools(
+    store: &SkillStore,
+    skill_ids: &[String],
+    tool_keys: &[String],
+) -> Result<(), AppError> {
+    if skill_ids.is_empty() || tool_keys.is_empty() {
+        return Ok(());
+    }
+    apply_add(store, skill_ids, tool_keys, true)
 }
 
 fn apply_add(
     store: &SkillStore,
     skill_ids: &[String],
     tool_keys: &[String],
+    preflight_only: bool,
 ) -> Result<(), AppError> {
     let configured_mode = store.get_setting("sync_mode").map_err(AppError::db)?;
     let disabled = tool_service::get_disabled_tools(store)?;
@@ -1075,7 +1593,7 @@ fn apply_add(
                 tool_key: tool_key.clone(),
                 mode: sync_engine::sync_mode_for_tool(tool_key, configured_mode.as_deref()),
                 source: source.clone(),
-                target: adapter.skills_dir().join(&target_name),
+                target: deployment_target(adapter, &target_name, skill_id, &existing_targets),
             });
         }
     }
@@ -1143,20 +1661,10 @@ fn apply_add(
                 .insert(row.mode.as_str());
         }
     }
-    let evidence_by_key: HashMap<&PathBuf, &str> = modes_by_key
-        .iter()
-        .filter_map(|(key, modes)| {
-            let mut it = modes.iter();
-            match (it.next(), it.next()) {
-                (Some(only), None) => Some((key, *only)),
-                _ => None,
-            }
-        })
-        .collect();
-    let evidence_for = |target: &Path, memo: &mut HashMap<PathBuf, PathBuf>| -> Option<&str> {
-        let key = ownership_key(target, memo);
-        evidence_by_key.get(&key).copied()
-    };
+
+    // Shared skills directories: a row of another agent on the same path
+    // vouches for it, see `PathEvidence`.
+    let mut evidence = PathEvidence::new(&existing_targets);
     let mut preflighted: HashSet<&Path> = HashSet::new();
     for pair in &plan {
         if !preflighted.insert(pair.target.as_path()) {
@@ -1166,7 +1674,11 @@ fn apply_add(
             &pair.source,
             &pair.target,
             pair.mode,
-            replace_policy(evidence_for(&pair.target, &mut key_memo)),
+            replace_policy(
+                evidence
+                    .judge(&pair.skill.id, &pair.tool_key, &pair.target)
+                    .any_mode(),
+            ),
         ) {
             match e.downcast_ref::<sync_engine::ReplaceRefused>() {
                 Some(refused) => conflicts.push(TargetConflictDetail {
@@ -1199,6 +1711,10 @@ fn apply_add(
                 .join("；")
         );
         return Err(AppError::target_conflict(summary, conflicts));
+    }
+
+    if preflight_only {
+        return Ok(());
     }
 
     let desired = plan
@@ -1238,6 +1754,158 @@ mod sync_desired_targets_tests {
     use crate::core::tool_adapters::CustomToolDef;
     use std::fs;
     use tempfile::tempdir;
+
+    /// Two adapters can point at the same skills directory — `amp` and
+    /// `replit` both deploy to `~/.config/agents/skills`, and `kimi` did too
+    /// until it moved to `~/.kimi-code/skills` (#270). When one of them is
+    /// retargeted, its stale record must be dropped, but the directory the
+    /// others are still deployed to must survive: it is their live
+    /// deployment, not this tool's leftover.
+    #[test]
+    fn retargeting_one_tool_keeps_a_directory_another_tool_still_claims() {
+        let _lock = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("repo");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+        fs::create_dir_all(central_repo::skills_dir()).unwrap();
+        let store = SkillStore::new(&base.join("test.db")).unwrap();
+
+        let source = central_repo::skills_dir().join("skill-a");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "real source").unwrap();
+
+        // The shared deployment both tools were synced to.
+        let shared = tmp.path().join("shared-agents").join("skill-a");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(shared.join("SKILL.md"), "real source").unwrap();
+
+        // Where the retargeted tool is moving to.
+        let moved = tmp.path().join("kimi-code").join("skill-a");
+        store
+            .set_setting(
+                "custom_tool_paths",
+                &serde_json::json!({
+                    "amp": shared.parent().unwrap(),
+                    "kimi": moved.parent().unwrap(),
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+        let skill = SkillRecord {
+            id: "skill-a".to_string(),
+            name: "skill-a".to_string(),
+            description: None,
+            source_type: "import".to_string(),
+            source_ref: Some(source.to_string_lossy().to_string()),
+            source_ref_resolved: None,
+            source_subpath: None,
+            source_branch: None,
+            source_revision: None,
+            remote_revision: None,
+            central_path: source.to_string_lossy().to_string(),
+            content_hash: Some("h1".to_string()),
+            enabled: true,
+            created_at: 1,
+            updated_at: 1,
+            status: "ok".to_string(),
+            update_status: "local_only".to_string(),
+            last_checked_at: None,
+            last_check_error: None,
+        };
+        store.insert_skill(&skill).unwrap();
+
+        for (id, tool) in [("target-amp", "amp"), ("target-kimi", "kimi")] {
+            store
+                .insert_target(&SkillTargetRecord {
+                    id: id.to_string(),
+                    skill_id: "skill-a".to_string(),
+                    tool: tool.to_string(),
+                    target_path: shared.to_string_lossy().to_string(),
+                    mode: "copy".to_string(),
+                    status: "ok".to_string(),
+                    synced_at: Some(1),
+                    last_error: None,
+                    source_hash: Some("h1".to_string()),
+                })
+                .unwrap();
+        }
+
+        // Adapter order puts amp before kimi, so amp is skipped as current
+        // before kimi reaches its retarget branch.
+        let desired = vec![
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "amp".to_string(),
+                source: source.clone(),
+                target: shared.clone(),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+            ScenarioSyncTarget {
+                skill_id: "skill-a".to_string(),
+                skill_name: "skill-a".to_string(),
+                tool: "kimi".to_string(),
+                source: source.clone(),
+                target: moved.clone(),
+                mode: sync_engine::SyncMode::Copy,
+                source_hash: Some("h1".to_string()),
+            },
+        ];
+
+        sync_desired_targets(&store, &desired).unwrap();
+
+        assert!(
+            shared.join("SKILL.md").exists(),
+            "amp's live deployment was deleted while retargeting kimi"
+        );
+        assert!(
+            moved.join("SKILL.md").exists(),
+            "kimi was not deployed to its new path"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    /// Kept copies land under `kept-copies/`, whatever the tool key looks
+    /// like, and never on top of an earlier one, dangling links included.
+    #[test]
+    fn kept_copies_stay_inside_kept_copies_and_never_collide() {
+        let _lock = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        let library = tmp.path().join("library");
+        central_repo::set_test_base_dir_override(Some(library.clone()));
+        let make_copy = |dir: &str| {
+            let path = tmp.path().join(dir).join("skill-a");
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("notes.md"), dir).unwrap();
+            path
+        };
+
+        // A CLI-created key with path syntax in it.
+        let first = make_copy("agent-1");
+        move_into_kept_copies(&first, "../skills").unwrap();
+        let kept_root = library.join("kept-copies").join("___skills");
+        assert_eq!(
+            fs::read_to_string(kept_root.join("skill-a/notes.md")).unwrap(),
+            "agent-1"
+        );
+        assert!(!library.join("skills").exists(), "escaped kept-copies/");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tmp.path().join("gone"), kept_root.join("skill-a-2")).unwrap();
+        let second = make_copy("agent-2");
+        move_into_kept_copies(&second, "../skills").unwrap();
+        assert!(!second.exists(), "the second copy was not moved");
+        let landed = if cfg!(unix) { "skill-a-3" } else { "skill-a-2" };
+        assert_eq!(
+            fs::read_to_string(kept_root.join(landed).join("notes.md")).unwrap(),
+            "agent-2"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
 
     /// Startup must survive a collision. `ensure_default_startup_scenario`
     /// reaches this function through `sync_scenario_skills`, and its caller
@@ -2017,6 +2685,81 @@ mod sync_desired_targets_tests {
         assert!(
             target.join("SKILL.md").exists(),
             "missing target was not re-synced"
+        );
+
+        central_repo::set_test_base_dir_override(None);
+    }
+
+    /// `canonicalize` resolves through symlinks, but the replacement that
+    /// follows an adoption does not: a symlinked target is only unlinked, so
+    /// whatever it pointed at survives. Re-pointing on the resolved path would
+    /// silently orphan a directory that is still on disk and still the user's
+    /// source of truth -- later edits in it would never be seen again (#425).
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_adoption_target_does_not_detach_the_directory_it_points_at() {
+        let _lock = central_repo::test_base_dir_lock();
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("repo");
+        central_repo::set_test_base_dir_override(Some(base.clone()));
+        fs::create_dir_all(central_repo::skills_dir()).unwrap();
+        let store = SkillStore::new(&base.join("test.db")).unwrap();
+
+        let central = central_repo::skills_dir().join("jira");
+        fs::create_dir_all(&central).unwrap();
+        fs::write(central.join("SKILL.md"), "central copy").unwrap();
+
+        // The folder the skill was imported from: still the user's source.
+        let import_src = tmp.path().join("claude").join("skills").join("jira");
+        fs::create_dir_all(&import_src).unwrap();
+        fs::write(import_src.join("SKILL.md"), "user copy").unwrap();
+
+        // Another agent's skills dir holds a symlink to that same folder.
+        let link = tmp.path().join("duo").join("skills").join("jira");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&import_src, &link).unwrap();
+
+        store
+            .insert_skill(&SkillRecord {
+                id: "jira".to_string(),
+                name: "jira".to_string(),
+                description: None,
+                source_type: "import".to_string(),
+                source_ref: Some(import_src.to_string_lossy().to_string()),
+                source_ref_resolved: None,
+                source_subpath: None,
+                source_branch: None,
+                source_revision: None,
+                remote_revision: None,
+                central_path: central.to_string_lossy().to_string(),
+                content_hash: Some("h1".to_string()),
+                enabled: true,
+                created_at: 1,
+                updated_at: 1,
+                status: "ok".to_string(),
+                update_status: "local_only".to_string(),
+                last_checked_at: None,
+                last_check_error: None,
+            })
+            .unwrap();
+
+        // Adopting the link must leave the pointee's source_ref alone.
+        detach_source_refs_from_adoption_target(&store, &link).unwrap();
+        let after = store.get_skill_by_id("jira").unwrap().unwrap();
+        assert_eq!(
+            after.source_ref.as_deref(),
+            Some(import_src.to_string_lossy().as_ref()),
+            "a symlinked target detached the real directory it points at"
+        );
+
+        // But adopting the real directory still detaches it: that one is
+        // about to be replaced by a deployment.
+        detach_source_refs_from_adoption_target(&store, &import_src).unwrap();
+        let after = store.get_skill_by_id("jira").unwrap().unwrap();
+        assert_eq!(
+            after.source_ref.as_deref(),
+            Some(central.to_string_lossy().as_ref()),
+            "adopting the real source dir no longer re-points source_ref"
         );
 
         central_repo::set_test_base_dir_override(None);

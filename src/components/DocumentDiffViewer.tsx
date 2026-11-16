@@ -174,10 +174,9 @@ function cellTone(type: DiffRow["type"], side: "left" | "right") {
     };
   }
   return {
-    lineNoClass: "text-faint",
-    lineNoStyle: { backgroundColor: "var(--color-surface-hover)" },
-    codeClass: "text-secondary",
-    codeStyle: { backgroundColor: "var(--color-bg-secondary)" },
+    lineNoClass: "bg-surface-hover text-faint",
+    codeClass: "bg-bg-secondary text-secondary",
+    codeStyle: undefined,
     markerClass: "text-faint",
   };
 }
@@ -200,12 +199,11 @@ function DiffCell({
     <>
       <td
         className={cn("w-14 select-none border-r border-border-subtle px-3 text-right font-mono text-[12px]", tone.lineNoClass)}
-        style={tone.lineNoStyle}
       >
         {number ?? ""}
       </td>
       <td
-        className={cn("border-r border-border-subtle px-3 font-mono text-[12.5px] leading-6", tone.codeClass)}
+        className={cn("border-r border-border-subtle px-3 font-mono text-[13px] leading-6", tone.codeClass)}
         style={tone.codeStyle}
       >
         <span className={cn("mr-3 inline-block w-3 select-none text-center font-semibold", tone.markerClass)}>

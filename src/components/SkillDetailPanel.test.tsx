@@ -40,6 +40,26 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it("当前 Preset 的未部署技能可点击同步，非当前 Preset 仅显示启用状态", async () => {
+  const user = userEvent.setup();
+  const onToggleTool = vi.fn();
+  const props = {
+    skill, onClose: vi.fn(), onToggleTool,
+    toolToggles: [{ tool: "codex", display_name: "Codex", installed: true, globally_enabled: true, enabled: true, deployed: false }],
+  };
+  const { rerender } = render(<SkillDetailPanel {...props} isActivePreset />);
+  await screen.findByRole("heading", { name: "阅读入口" });
+  await user.click(screen.getByRole("button", { name: "技能信息" }));
+  const toggle = screen.getByRole("button", { name: /Codex/ });
+  expect(toggle.getAttribute("data-state")).toBe("pending");
+  await user.click(toggle);
+  expect(onToggleTool).toHaveBeenLastCalledWith("codex", true);
+  rerender(<SkillDetailPanel {...props} isActivePreset={false} />);
+  expect(toggle.getAttribute("data-state")).toBe("enabled");
+  await user.click(toggle);
+  expect(onToggleTool).toHaveBeenLastCalledWith("codex", false);
+});
+
 // 状态语义来自 commands/skills.rs 的真实完整并集、权限失败和类型变化测试。
 const comparedFile = (path: string, status: SkillBrowserComparison["status"], kind: SkillBrowserEntry["kind"] = "file", sourceKind = kind): SkillBrowserComparison => {
   const entry = (entryKind: SkillBrowserEntry["kind"]): SkillBrowserEntry => ({ path, kind: entryKind, size: 20, error: null, link_target: null });
@@ -78,7 +98,7 @@ it("只看变化默认关闭，开启保留三种变化文件与展开的祖先�
     comparedFile("file-to-dir", "modified", "file", "directory"), comparedFile("file-to-dir/nested.txt", "added"),
   ];
   mockComparison({ index: { ...index, entries: entries.map(entry => entry.local ?? entry.source!), file_count: 8, directory_count: 3 }, entries, changed_file_count: 5, revision: "workspace", source_label: "local" });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByText("local：SKILL.md 完整正文");
   expect(screen.queryByRole("button", { name: "只看变化文件" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "差异" }));
@@ -116,7 +136,7 @@ it("不比较的符号链接与目录混合祖先仅保留结构，筛选计数�
     }
     return initial(command, args);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
   await user.click(within(tree).getByRole("button", { name: "container" }));
@@ -155,7 +175,7 @@ it("完整且可判定的零变化显示恢复全部入口，恢复后仍可阅�
   const user = userEvent.setup();
   const entries = [comparedFile("SKILL.md", "unchanged"), comparedFile("generated.pyc", "not_compared"), comparedFile("empty", null, "directory")];
   mockComparison({ index: { ...index, entries: entries.map(entry => entry.local!), file_count: 2, directory_count: 1 }, entries, changed_file_count: 0, revision: "workspace", source_label: "local" });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "只看变化文件" }));
   const tree = screen.getByRole("navigation", { name: "差异变化文件目录" });
@@ -175,7 +195,7 @@ it.each([true, false])("目录完整性为 %s 时，无法比较文件不伪装�
   const user = userEvent.setup();
   const entries = [comparedFile("SKILL.md", "unchanged"), { ...comparedFile("denied.txt", "uncomparable"), reason: "Permission denied (os error 13)" }];
   mockComparison({ index: { ...index, entries: entries.map(entry => entry.local!), file_count: 2, directory_count: 0, complete, issues: complete ? [] : ["restricted：Permission denied"] }, entries, changed_file_count: 0, revision: "workspace", source_label: "local" });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "只看变化文件" }));
   const tree = screen.getByRole("navigation", { name: "差异变化文件目录" });
@@ -198,7 +218,7 @@ it("搜索与变化集合取交集，清除搜索保留筛选，关闭筛选保�
   const entries = [comparedFile("SKILL.md", "unchanged"), comparedFile("docs", null, "directory"), comparedFile("docs/same.txt", "unchanged"), comparedFile("docs/new.txt", "added"),
     comparedFile("file-to-dir", "modified", "file", "directory"), comparedFile("file-to-dir/nested.txt", "added")];
   mockComparison({ index: { ...index, entries: entries.map(entry => entry.local ?? entry.source!), file_count: 5, directory_count: 1 }, entries, changed_file_count: 3, revision: "workspace", source_label: "local" });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "只看变化文件" }));
   const tree = screen.getByRole("navigation", { name: "差异变化文件目录" });
@@ -249,7 +269,7 @@ it("同一 Skill 返回差异保留筛选，本地与来源范围完整，切换
     if (command === "close_skill_browser") return Promise.resolve();
     throw new Error(`不应调用 ${command}`);
   });
-  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { rerender } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "只看变化文件" }));
   await user.click(screen.getByRole("button", { name: ".hidden" }));
@@ -265,7 +285,7 @@ it("同一 Skill 返回差异保留筛选，本地与来源范围完整，切换
   expect(screen.getByRole("button", { name: "只看变化文件" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("button", { name: "SKILL.md" })).toBeNull();
   await user.type(screen.getByRole("searchbox", { name: "查找文件" }), ".hidden");
-  rerender(<SkillDetailPanel skill={{ ...skill, id: "second", name: "第二个技能" }} onClose={vi.fn()} />);
+  rerender(<SkillDetailPanel isActivePreset={false} skill={{ ...skill, id: "second", name: "第二个技能" }} onClose={vi.fn()} />);
   expect(await screen.findByText("第二个技能的入口正文")).toBeTruthy();
   expect((screen.getByRole("searchbox", { name: "查找文件" }) as HTMLInputElement).value).toBe("");
   expect(screen.getByRole("button", { name: "SKILL.md" }).getAttribute("aria-current")).toBe("true");
@@ -281,7 +301,7 @@ it("目录尚未完整读取但没有失败文件条目时，也不能把空筛�
   const user = userEvent.setup();
   const entries = [comparedFile("SKILL.md", "unchanged"), comparedFile("restricted", null, "directory")];
   mockComparison({ index: { ...index, entries: entries.map(entry => entry.local!), file_count: 1, directory_count: 1, complete: false, issues: ["restricted：Permission denied"] }, entries, changed_file_count: 0, revision: "workspace", source_label: "local" });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "只看变化文件" }));
   const tree = screen.getByRole("navigation", { name: "差异变化文件目录" });
@@ -300,7 +320,7 @@ it("比较请求失败保留真实原因和重试入口，本地文件仍可阅�
   mockComparison({ index: { ...index, entries: [entries[0].local!], file_count: 1, directory_count: 0 }, entries, changed_file_count: 0, revision: "workspace", source_label: "local" });
   const initial = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => command === "get_skill_browser_diff" ? Promise.reject({ kind: "io", message: "比较失败：Permission denied" }) : initial(command, args));
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   expect(await screen.findByText("比较失败：Permission denied")).toBeTruthy();
   expect(screen.getByRole("button", { name: "重新准备来源" })).toBeTruthy();
@@ -310,7 +330,7 @@ it("比较请求失败保留真实原因和重试入口，本地文件仍可阅�
 });
 it("本地完整目录按需读取，折叠和恢复保留文件且不提前请求来源", async () => {
   const user = userEvent.setup();
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { unmount } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   expect(await screen.findByRole("heading", { name: "阅读入口" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "scripts/read.py" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "scripts" }));
@@ -332,7 +352,7 @@ it("入口缺失和局部失败不会伪装为空目录，重新加载后可以�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   expect(await screen.findByText("目录未完整读取")).toBeTruthy();
   expect(screen.queryByText("空目录")).toBeNull();
   expect(screen.getByText("references：权限不足")).toBeTruthy();
@@ -350,7 +370,7 @@ it("快速选择文件时迟到正文不覆盖当前路径，切换 Skill 后释
     if (command === "read_skill_browser_file" && (args as { relativePath: string }).relativePath === "SKILL.md") return new Promise(resolve => { finishOldRead = resolve; });
     return initial(command, args);
   });
-  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { rerender } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "scripts" }));
   await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
   expect(await screen.findByText("print('只读')")).toBeTruthy();
@@ -358,7 +378,7 @@ it("快速选择文件时迟到正文不覆盖当前路径，切换 Skill 后释
   await user.click(screen.getByRole("button", { name: "技能信息" }));
   expect(screen.queryByRole("heading", { name: "迟到的入口" })).toBeNull();
   expect(screen.getByText("print('只读')")).toBeTruthy();
-  rerender(<SkillDetailPanel skill={null} onClose={vi.fn()} />);
+  rerender(<SkillDetailPanel isActivePreset={false} skill={null} onClose={vi.fn()} />);
   expect(vi.mocked(invoke)).toHaveBeenCalledWith("close_skill_browser", { skillId: "demo", sessionId: "session-demo" });
 });
 
@@ -376,7 +396,7 @@ it("来源完整树与差异共用一次来源准备，保留相对路径并说�
     return initial(command, args);
   });
   const onClose = vi.fn();
-  render(<SkillDetailPanel skill={skill} onClose={onClose} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={onClose} />);
   await screen.findByRole("heading", { name: "阅读入口" });
   await user.click(screen.getByRole("button", { name: "来源" }));
   expect(await screen.findByRole("navigation", { name: "来源完整文件目录" })).toBeTruthy();
@@ -405,7 +425,7 @@ it("详情关闭后才完成的索引会话也会被释放", async () => {
     if (command === "open_skill_browser") return new Promise(resolve => { finishOpen = resolve; });
     return Promise.resolve();
   });
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { unmount } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   unmount();
   await act(async () => { finishOpen?.(index); });
   await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith("close_skill_browser", { skillId: "demo", sessionId: "session-demo" }));
@@ -415,7 +435,7 @@ it("详情关闭后才完成的索引会话也会被释放", async () => {
 
 it("重复选择当前文件保持已读正文", async () => {
   const user = userEvent.setup();
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByRole("heading", { name: "阅读入口" });
   await user.click(screen.getByRole("button", { name: "SKILL.md" }));
   expect(screen.getByRole("heading", { name: "阅读入口" })).toBeTruthy();
@@ -437,7 +457,7 @@ it("搜索完整相对路径区分同名文件，清除后展开选中文件的�
     }
     return initial(command, args);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   const search = await screen.findByRole("searchbox", { name: "查找文件" });
   await user.type(search, "指南.md");
   expect(screen.getByText("找到 2 个文件")).toBeTruthy();
@@ -464,7 +484,7 @@ it("Markdown 正文和原文切换保留 frontmatter、标记与当前路径", a
   const initial = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => command === "read_skill_browser_file"
     ? Promise.resolve({ path: "SKILL.md", kind: "text", size: 90, text: content, message: null }) : initial(command, args));
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   expect(await screen.findByRole("heading", { name: "正文标题" })).toBeTruthy();
   expect(screen.queryByText("name: 原始元数据")).toBeNull();
   await user.click(screen.getByRole("button", { name: "原文" }));
@@ -495,7 +515,7 @@ it("Markdown 相对链接从当前文档目录导航并展开父目录，保留�
     }
     return initial(command, args);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("link", { name: "阅读说明" }));
   expect(await screen.findByRole("heading", { name: "当前目录说明" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "docs" }).getAttribute("aria-expanded")).toBe("true");
@@ -518,7 +538,7 @@ it("缺失、越界和符号链接目标明确报错且不读取其他文件，�
     if (command === "read_skill_browser_file") return Promise.resolve({ path: "SKILL.md", kind: "text", text: content, size: 300, message: null });
     return initial(command, args);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("link", { name: "缺失文件" }));
   expect(screen.getByRole("alert").textContent).toContain("此版本中没有该文件：docs/missing.md");
   for (const label of ["根外文件", "编码越界", "绝对文件", "本地协议"]) {
@@ -544,13 +564,13 @@ it("搜索结果可用键盘阅读，切换 Skill 重置搜索并忽略迟到的
     if (command === "read_skill_browser_file" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ path: "SKILL.md", kind: "text", text: "# 另一个技能的入口", size: 20, message: null });
     return initial(command, args);
   });
-  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { rerender } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   const search = await screen.findByRole("searchbox", { name: "查找文件" });
   await user.type(search, "scripts/read");
   screen.getByRole("button", { name: "scripts/read.py" }).focus();
   await user.keyboard("{Enter}");
   expect(screen.getByRole("button", { name: "scripts/read.py" }).getAttribute("aria-current")).toBe("true");
-  rerender(<SkillDetailPanel skill={{ ...skill, id: "second", name: "另一个技能" }} onClose={vi.fn()} />);
+  rerender(<SkillDetailPanel isActivePreset={false} skill={{ ...skill, id: "second", name: "另一个技能" }} onClose={vi.fn()} />);
   expect(await screen.findByRole("heading", { name: "另一个技能的入口" })).toBeTruthy();
   expect((screen.getByRole("searchbox", { name: "查找文件" }) as HTMLInputElement).value).toBe("");
   await act(async () => { finishOldRead?.({ path: "scripts/read.py", kind: "text", text: "旧技能的迟到代码", size: 20, message: null }); });
@@ -564,7 +584,7 @@ it("预览上限内的大量短行仍保留全部原文", async () => {
   const initial = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => command === "read_skill_browser_file" && (args as { relativePath: string }).relativePath === "scripts/read.py"
     ? Promise.resolve({ path: "scripts/read.py", kind: "text", text: content, size: 256 * 1024, message: null }) : initial(command, args));
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.type(await screen.findByRole("searchbox", { name: "查找文件" }), "read.py");
   await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
   expect((await screen.findByLabelText("文件原文")).textContent).toBe(content);
@@ -585,7 +605,7 @@ it("来源准备失败后本地仍可阅读，重试只使用新会话且迟到�
     if (command === "read_skill_browser_file" && (args as { skillId: string }).skillId === "second") return Promise.resolve({ path: "SKILL.md", kind: "text", text: "# 第二个技能", size: 20, message: null });
     return initial(command, args);
   });
-  const { rerender } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { rerender } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByRole("heading", { name: "阅读入口" });
   await user.click(screen.getByRole("button", { name: "来源" }));
   expect(await screen.findByText("测试来源暂时不可达")).toBeTruthy();
@@ -594,7 +614,7 @@ it("来源准备失败后本地仍可阅读，重试只使用新会话且迟到�
   await user.click(screen.getByRole("button", { name: "来源" }));
   await user.click(screen.getByRole("button", { name: "重新准备来源" }));
   await waitFor(() => expect(attempts).toBe(2));
-  rerender(<SkillDetailPanel skill={{ ...skill, id: "second", name: "第二个技能" }} onClose={vi.fn()} />);
+  rerender(<SkillDetailPanel isActivePreset={false} skill={{ ...skill, id: "second", name: "第二个技能" }} onClose={vi.fn()} />);
   expect(await screen.findByRole("heading", { name: "第二个技能" })).toBeTruthy();
   await act(async () => { finishOldSource?.({ index, revision: "old-revision", location: "迟到的来源位置", source_label: "git" }); });
   expect(screen.queryByText("迟到的来源位置")).toBeNull();
@@ -610,7 +630,7 @@ it("跨版本缺失路径仍由后端核验快照，变化后的来源不能伪�
     if (command === "read_skill_browser_file" && (args as { side: string }).side === "source") return Promise.reject({ kind: "stale_snapshot", message: "来源文件已变化，请重新加载" });
     return initial(command, args);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "scripts" }));
   await user.click(screen.getByRole("button", { name: "scripts/read.py" }));
   await screen.findByText("print('只读')");
@@ -643,7 +663,7 @@ it("差异以完整并集导航，默认双栏阅读未变化文件并明确新�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByRole("heading", { name: "一致的完整入口" });
   await user.click(screen.getByRole("button", { name: "差异" }));
   const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
@@ -683,7 +703,7 @@ it("仅差异按所选文件展示片段、完整执行位和各自不可比较�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByText("旧入口行 保留的尾部");
   await user.click(screen.getByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "仅差异" }));
@@ -723,7 +743,7 @@ it.each([
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByRole("button", { name: "SKILL.md" });
   await user.click(screen.getByRole("button", { name: "差异" }));
   await user.click(await screen.findByRole("button", { name: "仅差异" }));
@@ -753,7 +773,7 @@ it("类型变化保留文件和目录两侧信息，混合路径仍可展开子�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
   await user.click(within(tree).getByRole("button", { name: "changed" }));
@@ -787,7 +807,7 @@ it("差异两侧读取绑定当前路径，存在性未知保留读取原因，�
     if (command === "close_skill_browser") return Promise.resolve();
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await screen.findByText("当前路径的安装全文");
   await user.click(screen.getByRole("button", { name: "差异" }));
   const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
@@ -826,7 +846,7 @@ it.each([
     const entry = entries.find(entry => entry.path === path)![side]!;
     return { path, kind: entry.kind === "file" ? "text" : entry.kind, size: entry.size, text: entry.kind === "file" ? "# 阅读入口" : null, message: entry.error };
   });
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { unmount } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   try {
     await user.click(await screen.findByRole("button", { name: "outside-link" }));
     expect(await screen.findByText(linkNotice)).toBeTruthy();
@@ -878,7 +898,7 @@ it("英文详情翻译受控差异原因与未知存在性提示，并保留真�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { unmount } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   try {
     await user.click(await screen.findByRole("button", { name: i18n.t("mySkills.docTabs.diff") }));
     await screen.findByRole("navigation", { name: "Complete comparison file tree" });
@@ -912,7 +932,7 @@ it("差异树保留来源目录的枚举错误，只有两侧已确认的空目�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "差异" }));
   const tree = await screen.findByRole("navigation", { name: "差异完整文件目录" });
   await user.click(within(tree).getByRole("button", { name: "restricted" }));
@@ -946,7 +966,7 @@ it.each(["local", "source"] as const)("%s 祖先目录读取失败时，差异�
     if (command === "close_skill_browser") return;
     throw new Error(`不应调用 ${command}`);
   });
-  const { unmount } = render(<SkillDetailPanel skill={skill} onClose={vi.fn()} />);
+  const { unmount } = render(<SkillDetailPanel isActivePreset={false} skill={skill} onClose={vi.fn()} />);
   try {
     await user.click(await screen.findByRole("button", { name: i18n.t("mySkills.docTabs.diff") }));
     const tree = await screen.findByRole("navigation", { name: "Complete comparison file tree" });
@@ -965,7 +985,7 @@ it.each(["local", "source"] as const)("%s 祖先目录读取失败时，差异�
 });
 
 it("网站快照可以浏览安装文件，但不提供 Git 来源比较入口", async () => {
-  render(<SkillDetailPanel skill={{ ...skill, source_type: "well-known", source_ref: "https://skills.sh/site/example.com/demo", can_check_update: false }} onClose={vi.fn()} />);
+  render(<SkillDetailPanel isActivePreset={false} skill={{ ...skill, source_type: "well-known", source_ref: "https://skills.sh/site/example.com/demo", can_check_update: false }} onClose={vi.fn()} />);
   await screen.findByText("阅读入口");
   expect(screen.getByText(i18n.t("install.websiteSnapshot"))).toBeTruthy();
   expect(screen.queryByRole("button", { name: "差异" })).toBeNull();

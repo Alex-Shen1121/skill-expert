@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags, WindowExt};
 
 pub mod commands;
 pub mod core;
@@ -23,7 +24,7 @@ static TRAY_PRESET_APPLY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// tray menu can render a disabled "Checking for updates..." label.
 static TRAY_CHECK_UPDATES_RUNNING: AtomicBool = AtomicBool::new(false);
 
-const MAIN_TRAY_ID: &str = "main-tray";
+const MAIN_TRAY_ID: &str = "skill-expert-tray";
 const TRAY_PRESET_ADD_PREFIX: &str = "tray-preset-add:";
 const TRAY_PRESET_REMOVE_PREFIX: &str = "tray-preset-remove:";
 const TRAY_OPEN_UPDATES_ID: &str = "tray-open-updates";
@@ -726,30 +727,11 @@ fn open_skills_folder_from_tray<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     tauri::async_runtime::spawn_blocking(move || {
         let repo_path = core::central_repo::base_dir();
 
-        #[cfg(target_os = "macos")]
-        let mut cmd = std::process::Command::new("open");
-        #[cfg(target_os = "windows")]
-        let mut cmd = {
-            let mut c = std::process::Command::new("explorer");
-            use std::os::windows::process::CommandExt;
-            c.creation_flags(0x08000000);
-            c
-        };
-        #[cfg(target_os = "linux")]
-        let mut cmd = std::process::Command::new("xdg-open");
-
-        let status = cmd.arg(&repo_path).status();
-        match status {
-            Ok(_status) =>
-            {
-                #[cfg(not(target_os = "windows"))]
-                if !_status.success() {
-                    log::warn!(
-                        "Tray open folder: file manager exited with status: {}",
-                        _status
-                    );
-                }
+        match core::file_manager::open_dir(&repo_path) {
+            Ok(status) if core::file_manager::exit_is_failure(status.success()) => {
+                log::warn!("Tray open folder: file manager exited with status: {status}");
             }
+            Ok(_) => {}
             Err(err) => log::warn!("Tray open folder failed: {err}"),
         }
         let _ = app_handle;
@@ -898,6 +880,9 @@ pub fn restart_app(app: &tauri::AppHandle) {
 
 fn teardown_before_exit(app: &tauri::AppHandle) {
     QUITTING.store(true, Ordering::SeqCst);
+    let _ = app.save_window_state(
+        StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN,
+    );
     if let Some(w) = app.get_webview_window("main") {
         if let Err(err) = w.destroy() {
             log::error!("Failed to destroy main window while quitting: {err}");
@@ -979,6 +964,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    StateFlags::SIZE
+                        | StateFlags::POSITION
+                        | StateFlags::MAXIMIZED
+                        | StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .setup(move |app| {
             #[cfg(debug_assertions)]
             ensure_debug_acceptance_window(app)?;
@@ -1140,8 +1135,18 @@ pub fn run() {
                     api.prevent_close();
                 }
             });
+            // A failed restore still shows the window at its default geometry.
+            if let Err(err) = win.restore_state(
+                StateFlags::SIZE
+                    | StateFlags::POSITION
+                    | StateFlags::MAXIMIZED
+                    | StateFlags::FULLSCREEN,
+            ) {
+                log::warn!("Failed to restore saved window state: {err}");
+            }
+            win.show()?;
             log::info!(
-                "startup: window handle + close hook in {} ms",
+                "startup: window handle + close hook + state restore in {} ms",
                 step.elapsed().as_millis()
             );
 
@@ -1222,6 +1227,7 @@ pub fn run() {
             commands::settings::set_settings,
             commands::settings::get_central_repo_path,
             commands::settings::get_central_repo_path_override,
+            commands::settings::get_central_repo_pending_path,
             commands::settings::get_central_repo_warnings,
             commands::settings::set_central_repo_path,
             commands::settings::open_central_repo_folder,
@@ -1269,6 +1275,7 @@ pub fn run() {
             commands::projects::add_project,
             commands::projects::add_linked_workspace,
             commands::projects::remove_project,
+            commands::projects::reveal_project_folder,
             commands::projects::scan_projects,
             commands::projects::get_project_agent_targets,
             commands::projects::get_project_root_impact,

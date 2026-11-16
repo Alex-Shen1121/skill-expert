@@ -1,14 +1,18 @@
 import { useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, Circle, CircleDashed, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../utils";
+import { agentToggleState, nextToggleValue } from "../lib/agentToggleState";
 import { AgentIcon } from "./AgentIcon";
 
 export interface AgentToggleItem {
   key: string;
   isCustom?: boolean;
   displayName: string;
+  /** Intent: enabled for this agent in the viewed preset. */
   enabled: boolean;
+  /** Fact: the skill is deployed to this agent (a `skill_targets` row). */
+  deployed: boolean;
   isAvailable: boolean;
   disabled?: boolean;
   badgeLabel?: string | null;
@@ -18,6 +22,8 @@ interface Props {
   items: AgentToggleItem[];
   togglingKey?: string | null;
   onToggle: (key: string, enabled: boolean) => void;
+  /** Mark enabled-but-not-deployed rows as pending. Only true for the active preset. */
+  showPendingSync: boolean;
   className?: string;
 }
 
@@ -25,6 +31,7 @@ export function AgentToggleSection({
   items,
   togglingKey,
   onToggle,
+  showPendingSync,
   className,
 }: Props) {
   const { t } = useTranslation();
@@ -32,7 +39,12 @@ export function AgentToggleSection({
 
   const availableItems = items.filter((item) => item.isAvailable);
   const unavailableItems = items.filter((item) => !item.isAvailable);
-  const enabledAvailableCount = availableItems.filter((item) => item.enabled).length;
+  // Counts the rows drawn with the green tick, so the summary and the icons
+  // below it never disagree. A copy deployed by another preset but turned off
+  // in the one being viewed is drawn as off and is not counted here.
+  const syncedAvailableCount = availableItems.filter(
+    (item) => agentToggleState(item, showPendingSync) === "deployed"
+  ).length;
 
   return (
     <div className={cn("rounded-xl border border-border-subtle", className)}>
@@ -42,7 +54,7 @@ export function AgentToggleSection({
             <span className="font-medium text-secondary">{t("mySkills.agentTogglesTitle")}</span>
             <span className="rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-[12px] text-muted">
               {t("mySkills.syncSummary", {
-                synced: enabledAvailableCount,
+                synced: syncedAvailableCount,
                 total: availableItems.length,
               })}
             </span>
@@ -57,6 +69,7 @@ export function AgentToggleSection({
                 item={item}
                 loading={togglingKey === item.key}
                 onToggle={onToggle}
+                showPendingSync={showPendingSync}
               />
             ))}
           </div>
@@ -80,6 +93,7 @@ export function AgentToggleSection({
                     item={item}
                     loading={togglingKey === item.key}
                     onToggle={onToggle}
+                    showPendingSync={showPendingSync}
                   />
                 ))}
               </div>
@@ -95,16 +109,21 @@ function AgentToggle({
   item,
   loading,
   onToggle,
+  showPendingSync,
 }: {
   item: AgentToggleItem;
   loading: boolean;
   onToggle: (key: string, enabled: boolean) => void;
+  showPendingSync: boolean;
 }) {
+  const { t } = useTranslation();
   const disabled = Boolean(item.disabled || loading);
+  const state = agentToggleState(item, showPendingSync);
+  const pending = state === "pending";
   return (
     <button
       type="button"
-      onClick={() => onToggle(item.key, !item.enabled)}
+      onClick={() => onToggle(item.key, nextToggleValue(state))}
       disabled={disabled}
       className={cn(
         "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-[12px] transition-colors",
@@ -112,13 +131,18 @@ function AgentToggle({
         !disabled && "hover:bg-surface-hover",
         disabled && "opacity-55"
       )}
-      title={item.badgeLabel ?? undefined}
+      title={item.badgeLabel ?? (pending ? t("mySkills.agentTogglePendingSyncHint") : undefined)}
+      data-state={state}
     >
       <span className="shrink-0">
         {loading ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" />
-        ) : item.enabled ? (
+        ) : state === "deployed" ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+        ) : pending ? (
+          <CircleDashed className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+        ) : state === "enabled" ? (
+          <CheckCircle2 className="h-3.5 w-3.5 text-muted" />
         ) : (
           <Circle className="h-3.5 w-3.5 text-muted" />
         )}
@@ -129,14 +153,18 @@ function AgentToggle({
         displayName={item.displayName}
         className="h-5 w-5 rounded-[4px]"
       />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-secondary">
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-secondary">
         {item.displayName}
       </span>
-      {item.badgeLabel && (
+      {item.badgeLabel ? (
         <span className="shrink-0 rounded-full border border-border-subtle bg-bg-secondary px-1.5 py-0.5 text-[11px] text-muted">
           {item.badgeLabel}
         </span>
-      )}
+      ) : pending ? (
+        <span className="shrink-0 rounded-full bg-amber-500/12 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+          {t("mySkills.agentTogglePendingSync")}
+        </span>
+      ) : null}
     </button>
   );
 }

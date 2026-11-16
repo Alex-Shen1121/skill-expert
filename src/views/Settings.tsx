@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  Sparkles,
 } from "lucide-react";
 import {
   DndContext,
@@ -47,13 +48,14 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { writeText as clipboardWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { check as checkUpdater } from "@tauri-apps/plugin-updater";
 import { open as dialogOpen, confirm as dialogConfirm } from "@tauri-apps/plugin-dialog";
 import { useNavigate } from "react-router-dom";
-import { cn } from "../utils";
+import { cn, compactHomePath } from "../utils";
 import { useApp } from "../context/AppContext";
 import { useThemeContext } from "../context/ThemeContext";
 import { AgentIcon } from "../components/AgentIcon";
@@ -62,10 +64,10 @@ import { SettingsPage } from "../components/settings/SettingsPage";
 import * as api from "../lib/tauri";
 import { applyTextSize } from "../lib/textScale";
 import { getErrorMessage, isAppError } from "../lib/error";
+import { WhatsNewDialog } from "../components/WhatsNewDialog";
+import { loadChangelog, selectWhatsNew, type ChangelogEntry } from "../lib/changelog";
+import { IS_MACOS, IS_WINDOWS } from "../lib/platform";
 import type { Theme } from "../hooks/useTheme";
-
-const IS_WINDOWS = navigator.userAgent.includes("Windows");
-const IS_MACOS = navigator.userAgent.includes("Mac");
 
 /** Platforms whose updater artifact can replace the running install.
  *
@@ -136,13 +138,6 @@ function ForegroundConcurrencySettingRow({
   );
 }
 
-function compactHomePath(path: string) {
-  return path
-    .replace(/\/Users\/[^/]+/, "~")
-    .replace(/\/home\/[^/]+/, "~")
-    .replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
-}
-
 interface SortableAgentCardProps {
   agentKey: string;
   dragLabel: string;
@@ -172,7 +167,7 @@ function SortableAgentCard({ agentKey, dragLabel, children }: SortableAgentCardP
       ref={setActivatorNodeRef}
       {...listeners}
       onClick={(e) => e.stopPropagation()}
-      className="mt-0.5 flex shrink-0 cursor-grab items-center justify-center rounded text-faint outline-none transition-colors hover:text-muted active:cursor-grabbing"
+      className="mt-0.5 flex shrink-0 cursor-grab items-center justify-center rounded-md text-faint outline-none transition-colors hover:text-muted active:cursor-grabbing"
       title={dragLabel}
       aria-label={dragLabel}
     >
@@ -234,11 +229,16 @@ export function Settings() {
   const [repoWarnings, setRepoWarnings] = useState<string[]>([]);
   const [centralRepoPath, setCentralRepoPath] = useState("");
   const [centralRepoPathOverride, setCentralRepoPathOverride] = useState<string | null>(null);
+  const [centralRepoPendingPath, setCentralRepoPendingPath] = useState<string | null>(null);
   const [editingCentralRepoPath, setEditingCentralRepoPath] = useState(false);
   const [centralRepoPathInput, setCentralRepoPathInput] = useState("");
   const [savingCentralRepoPath, setSavingCentralRepoPath] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  // This version's "What's new"; empty hides the entry point.
+  const [currentRelease, setCurrentRelease] = useState<ChangelogEntry[]>([]);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [gitRemoteInput, setGitRemoteInput] = useState("");
   const [gitRemoteSaving, setGitRemoteSaving] = useState(false);
   const [gitRemoteDisconnecting, setGitRemoteDisconnecting] = useState(false);
@@ -446,7 +446,21 @@ export function Settings() {
   useEffect(() => {
     api.checkLastPanic().then(setLastPanic).catch(() => {});
     api.getCentralRepoWarnings().then(setRepoWarnings).catch(() => {});
+    getVersion().then(setAppVersion).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!appVersion) return;
+    let cancelled = false;
+    loadChangelog(i18n.language)
+      .then((entries) => {
+        if (!cancelled) setCurrentRelease(selectWhatsNew(entries, appVersion, null));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [appVersion, i18n.language]);
 
   useEffect(() => {
     api.getSettings("sync_mode").then((v) => { if (v) setSyncMode(v); });
@@ -478,6 +492,7 @@ export function Settings() {
       setCentralRepoPathInput(path);
     }).catch(() => {});
     api.getCentralRepoPathOverride().then(setCentralRepoPathOverride).catch(() => {});
+    api.getCentralRepoPendingPath().then(setCentralRepoPendingPath).catch(() => {});
 
     // The saved setting is the single source of truth. Do not backfill from
     // `.git/config` — that made a cleared URL reappear on reopen (#260).
@@ -637,31 +652,52 @@ export function Settings() {
     }
     setSavingCentralRepoPath(true);
     try {
+      // The running session keeps using the current library; the move
+      // happens at the next launch.
       const nextPath = await api.setCentralRepoPath(trimmed);
-      setCentralRepoPath(nextPath);
       setCentralRepoPathOverride(nextPath);
+      const pending = await api.getCentralRepoPendingPath();
+      setCentralRepoPendingPath(pending);
       setEditingCentralRepoPath(false);
       toast.success(t("settings.repoPathSaved"));
-      toast.info(t("settings.repoPathRestartNotice"));
+      if (pending) toast.info(t("settings.repoPathRestartNotice"));
     } catch (error) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      toast.error(centralRepoPathError(error));
     } finally {
       setSavingCentralRepoPath(false);
     }
+  };
+
+  // The backend refuses a move the next launch could not make as
+  // "<CODE>: <folder>" (`central_repo.rs`). Match the code exactly: the folder
+  // name itself may contain either code.
+  const centralRepoPathError = (error: unknown) => {
+    const message = getErrorMessage(error, t("common.error"));
+    const separator = message.indexOf(": ");
+    const code = separator === -1 ? "" : message.slice(0, separator);
+    const path = compactHomePath(message.slice(separator + 2));
+    if (code === "REPO_TARGET_NOT_EMPTY") {
+      return t("settings.repoPathTargetNotEmpty", { path });
+    }
+    if (code === "REPO_TARGET_INSIDE_LIBRARY") {
+      return t("settings.repoPathTargetInsideLibrary", { path });
+    }
+    return message;
   };
 
   const handleResetCentralRepoPath = async () => {
     setSavingCentralRepoPath(true);
     try {
       const nextPath = await api.setCentralRepoPath(null);
-      setCentralRepoPath(nextPath);
       setCentralRepoPathOverride(null);
       setCentralRepoPathInput(nextPath);
+      const pending = await api.getCentralRepoPendingPath();
+      setCentralRepoPendingPath(pending);
       setEditingCentralRepoPath(false);
       toast.success(t("settings.repoPathReset"));
-      toast.info(t("settings.repoPathRestartNotice"));
+      if (pending) toast.info(t("settings.repoPathRestartNotice"));
     } catch (error) {
-      toast.error(getErrorMessage(error, t("common.error")));
+      toast.error(centralRepoPathError(error));
     } finally {
       setSavingCentralRepoPath(false);
     }
@@ -1019,7 +1055,7 @@ export function Settings() {
             </h3>
             {/* Enabled/disabled is carried by the switch; only "not installed" adds info. */}
             {!agent.installed && (
-              <span className="shrink-0 rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium text-muted">
+              <span className="shrink-0 rounded-full bg-surface-hover px-2 py-0.5 text-[11px] font-medium text-muted">
                 {t("settings.notInstalled")}
               </span>
             )}
@@ -1028,17 +1064,17 @@ export function Settings() {
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             {agent.key === "gitlab_duo" && !agent.is_custom && <p className="w-full text-[12px] text-muted whitespace-normal break-words">{t("agentRegistration.duoHelp")}</p>}
             {agent.is_custom && (
-              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">
+              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
                 {t("settings.customAgent")}
               </span>
             )}
             {agent.is_custom && agent.project_relative_skills_dir && (
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
                 {t("settings.projectAgentSupported")}
               </span>
             )}
             {agent.has_path_override && !agent.is_custom && (
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                 {t("settings.pathOverridden")}
               </span>
             )}
@@ -1084,7 +1120,7 @@ export function Settings() {
               aria-label={t("settings.agentPurpose.globalPathLabel", { name: agent.display_name })}
               value={editingPathValue}
               onChange={(e) => setEditingPathValue(e.target.value)}
-              className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+              className="h-7 min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSavePath();
@@ -1101,7 +1137,7 @@ export function Settings() {
             <button
               aria-label={t("common.save")}
               onClick={handleSavePath}
-              className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+              className="shrink-0 p-1 text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 outline-none"
             >
               <Check className="h-3 w-3" />
             </button>
@@ -1151,7 +1187,7 @@ export function Settings() {
                 value={editingProjectPathValue}
                 onChange={(e) => setEditingProjectPathValue(e.target.value)}
                 placeholder={t("settings.projectSkillsPathPlaceholder")}
-                className="h-7 min-w-0 flex-1 rounded border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
+                className="h-7 min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-1.5 text-[12px] font-mono text-secondary outline-none focus:border-accent"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveProjectPath();
@@ -1161,7 +1197,7 @@ export function Settings() {
               <button
                 aria-label={t("common.save")}
                 onClick={handleSaveProjectPath}
-                className="shrink-0 p-1 text-emerald-500 hover:text-emerald-400 outline-none"
+                className="shrink-0 p-1 text-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 outline-none"
               >
                 <Check className="h-3 w-3" />
               </button>
@@ -1525,7 +1561,9 @@ export function Settings() {
             </button>
           </div>
           <div className="w-full text-[12px] text-muted">
-            {centralRepoPathOverride
+            {centralRepoPendingPath
+              ? t("settings.repoPathPendingHint", { path: compactHomePath(centralRepoPendingPath) })
+              : centralRepoPathOverride
               ? t("settings.repoPathCustomHint")
               : t("settings.repoPathDefaultHint")}
           </div>
@@ -1622,25 +1660,27 @@ export function Settings() {
               <div className="min-w-0 flex-1">
                 <h3 className="text-[14px] font-semibold text-primary">{t("settings.language")}</h3>
               </div>
-              <div className="app-segmented flex-wrap bg-background">
-                {([
-                  { value: "zh", label: "简体中文" },
-                  { value: "zh-TW", label: "繁體中文" },
-                  { value: "en", label: "English" },
-                ] as const).map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => handleLanguageChange(opt.value)}
-                    className={cn(
-                      segmentedButtonClass,
-                      i18n.language === opt.value
-                        ? "bg-surface-active text-secondary"
-                        : "text-muted hover:text-tertiary"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+              {/* More languages than a segmented control holds, so a select. */}
+              <div className="relative">
+                <select
+                  value={i18n.language}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  aria-label={t("settings.language")}
+                  className="app-input h-[34px] cursor-pointer appearance-none bg-background pr-8 dark:[color-scheme:dark]"
+                >
+                  {[
+                    { value: "zh", label: "简体中文" },
+                    { value: "zh-TW", label: "繁體中文" },
+                    { value: "en", label: "English" },
+                    { value: "es", label: "Español" },
+                    { value: "ko", label: "한국어" },
+                  ].map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               </div>
             </div>
 
@@ -1968,7 +2008,9 @@ export function Settings() {
                 <Settings2 className="w-4 h-4 text-accent" />
               </div>
               <div>
-                <h3 className="text-[13px] font-semibold text-primary">{t("settings.version")}</h3>
+                <h3 className="text-[13px] font-semibold text-primary">
+                  {t("settings.version", { version: appVersion }).trim()}
+                </h3>
                 <p className="text-muted text-[13px]">
                   {t("settings.tagline")}
                   {appUpdate?.has_update && (
@@ -2035,6 +2077,15 @@ export function Settings() {
               >
                 <BookOpen className="w-3 h-3" /> {t("settings.help")}
               </button>
+              {currentRelease.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWhatsNewOpen(true)}
+                  className={`${actionButtonClass} bg-surface-hover hover:bg-surface-active text-tertiary border-border`}
+                >
+                  <Sparkles className="w-3 h-3" /> {t("settings.whatsNew")}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleReportIssue}
@@ -2089,7 +2140,7 @@ export function Settings() {
       general={generalSection}
       agents={agentsSection}
       connections={<>{networkSection}{gitSection}</>}
-      about={<>{aboutSection}{updatesSection}</>}
+      about={<>{aboutSection}{updatesSection}{whatsNewOpen && <WhatsNewDialog entries={currentRelease} onClose={() => setWhatsNewOpen(false)} />}</>}
     />
   );
 }

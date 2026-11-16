@@ -68,7 +68,7 @@ Agent 解析结果时始终传 `--json`：
 ## 3. 按请求加载操作参考
 
 - 安装、搜索、检查更新、执行更新或用 `skills set-source` 修正来源：读取 [`references/install-update.md`](references/install-update.md)。
-- 部署、撤销部署、Preset、标签、Agent 启用状态或同步排查：读取 [`references/deploy-organize.md`](references/deploy-organize.md)。
+- 部署、撤销部署、项目技能、Preset、标签、Agent 启用状态或同步排查：读取 [`references/deploy-organize.md`](references/deploy-organize.md)。
 - 收编现有目录、删除 Skill，或处理 `TARGET_CONFLICT`：读取 [`references/adopt-remove.md`](references/adopt-remove.md)。
 
 只读取当前请求需要的参考页。具体参数先运行对应子命令的 `--help`，参考页负责安全顺序和不会出现在帮助文本里的数据边界。
