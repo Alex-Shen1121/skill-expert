@@ -2039,9 +2039,7 @@ pub struct ProjectRemovalTarget {
     pub safe: bool,
 }
 
-/// Only a hash match proves a copy holds nothing of its own; `center_newer`
-/// is reached after the hashes already differed (see pushSkillToCenterAndAlign
-/// in ProjectDetail.tsx). A symlink holds no content of its own either.
+/// 副本需要同时核对结构和内容，哈希一致不足以证明被忽略的内容没有修改。
 ///
 /// A link is safe only when it resolves to the matched library skill's own
 /// directory, i.e. it is our deployment. A link the user made to somewhere
@@ -2064,10 +2062,7 @@ fn removal_is_safe(
             }
         });
     }
-    // A real copy needs equal hashes *and* nothing the library copy lacks:
-    // the hash skips `.gitignore`, `.git` and links, so equal hashes alone
-    // would let those go with it (#593). An unreadable entry is not proof of
-    // absence, so an error here is unsafe too.
+    // 保留结构校验，并比较哈希省略的文件与链接；任一读取失败都拒绝删除。
     sync_status == "in_sync"
         && matched.is_some_and(|managed| {
             crate::core::removals::removed_paths(
@@ -2075,6 +2070,11 @@ fn removal_is_safe(
                 Path::new(&managed.central_path),
             )
             .is_ok_and(|extra| extra.is_empty())
+                && crate::core::git_backup::replaceable_content_matches(
+                    Path::new(&variant.path),
+                    Path::new(&managed.central_path),
+                )
+                .unwrap_or(false)
         })
 }
 
@@ -2082,7 +2082,7 @@ fn removal_is_safe(
 /// because it holds entries the hash does not see.
 fn unsafe_removal_reason(sync_status: &str) -> String {
     if sync_status == "in_sync" {
-        "has content not in the library (files the library copy lacks, such as .gitignore, .git or links)".to_string()
+        "存在中央库未保存的文件内容、目录或符号链接目标".to_string()
     } else {
         format!("has content not in the library (sync status: {sync_status})")
     }
@@ -3833,6 +3833,92 @@ mod project_plan_tests {
         apply_project_deploy(&fx.store, &plan).unwrap();
         assert!(
             plan_project_undeploy(&fx.store, &fx.project_id, &ids(&[&demo]), &[]).unwrap()[0].safe
+        );
+    }
+
+    #[test]
+    fn undeploy_preserves_modified_ignored_files() {
+        for relative in [".gitignore", ".git/HEAD"] {
+            let fx = fixture(&["claude_code"]);
+            fx.store.set_setting("sync_mode", "copy").unwrap();
+            let demo = library_skill(&fx, "s-demo", "demo", "# Demo");
+            let deploy = plan_project_deploy(
+                &fx.store,
+                &fx.project_id,
+                &ids(&[&demo]),
+                &["claude_code".into()],
+            )
+            .unwrap();
+            apply_project_deploy(&fx.store, &deploy).unwrap();
+            let copy = fx.repo.join(".claude/skills/demo");
+            for root in [copy.as_path(), Path::new(&demo.central_path)] {
+                fs::create_dir_all(root.join(relative).parent().unwrap()).unwrap();
+                fs::write(root.join(relative), "原始配置\n").unwrap();
+            }
+            let original_plan =
+                plan_project_undeploy(&fx.store, &fx.project_id, &ids(&[&demo]), &[]).unwrap();
+            assert!(original_plan[0].safe);
+            fs::write(copy.join(relative), "项目中的本地修改\n").unwrap();
+            let changed_plan =
+                plan_project_undeploy(&fx.store, &fx.project_id, &ids(&[&demo]), &[]).unwrap();
+            assert_eq!(changed_plan[0].sync_status, "in_sync");
+            assert!(!changed_plan[0].safe, "{relative}");
+            assert!(remove_planned_project_copy(
+                &fx.store,
+                &fx.project_id,
+                &original_plan[0],
+                false,
+            )
+            .is_err());
+            assert!(delete_project_skill_internal(
+                &fx.store,
+                fx.project_id.clone(),
+                "demo".into(),
+                "claude_code".into(),
+                false,
+            )
+            .is_err());
+            assert_eq!(
+                fs::read_to_string(copy.join(relative)).unwrap(),
+                "项目中的本地修改\n"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn undeploy_preserves_modified_ignored_symlink() {
+        let fx = fixture(&["claude_code"]);
+        fx.store.set_setting("sync_mode", "copy").unwrap();
+        let demo = library_skill(&fx, "s-demo", "demo", "# Demo");
+        let deploy = plan_project_deploy(
+            &fx.store,
+            &fx.project_id,
+            &ids(&[&demo]),
+            &["claude_code".into()],
+        )
+        .unwrap();
+        apply_project_deploy(&fx.store, &deploy).unwrap();
+        let copy = fx.repo.join(".claude/skills/demo");
+        for root in [copy.as_path(), Path::new(&demo.central_path)] {
+            std::os::unix::fs::symlink("original-target", root.join("link")).unwrap();
+        }
+        let original_plan =
+            plan_project_undeploy(&fx.store, &fx.project_id, &ids(&[&demo]), &[]).unwrap();
+        assert!(original_plan[0].safe);
+        fs::remove_file(copy.join("link")).unwrap();
+        std::os::unix::fs::symlink("local-target", copy.join("link")).unwrap();
+        let changed_plan =
+            plan_project_undeploy(&fx.store, &fx.project_id, &ids(&[&demo]), &[]).unwrap();
+        assert_eq!(changed_plan[0].sync_status, "in_sync");
+        assert!(!changed_plan[0].safe);
+        assert!(
+            remove_planned_project_copy(&fx.store, &fx.project_id, &original_plan[0], false,)
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_link(copy.join("link")).unwrap(),
+            Path::new("local-target")
         );
     }
 

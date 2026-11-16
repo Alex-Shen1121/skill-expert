@@ -1349,7 +1349,7 @@ fn diverging_entries(backup: &Path, clone: &Path) -> Result<Vec<std::ffi::OsStri
         if std::fs::symlink_metadata(&theirs).is_err() {
             continue;
         }
-        if replaceable_content(&entry.path())? != replaceable_content(&theirs)? {
+        if !replaceable_content_matches(&entry.path(), &theirs)? {
             diverging.push(name);
         }
     }
@@ -1361,6 +1361,11 @@ fn diverging_entries(backup: &Path, clone: &Path) -> Result<Vec<std::ffi::OsStri
 /// compiled Python.
 fn is_clutter(name: &str) -> bool {
     matches!(name, ".DS_Store" | "Thumbs.db" | "__pycache__") || name.ends_with(".pyc")
+}
+
+/// 比较不可再生的文件内容和链接目标，读取失败时不认定两份内容相同。
+pub(crate) fn replaceable_content_matches(left: &Path, right: &Path) -> Result<bool> {
+    Ok(replaceable_content(left)? == replaceable_content(right)?)
 }
 
 /// Everything at `root` (directory, file or symlink) that replacing it with
