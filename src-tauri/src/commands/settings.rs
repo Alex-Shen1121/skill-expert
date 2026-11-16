@@ -1,4 +1,5 @@
 use semver::Version;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Command;
 use std::sync::Arc;
 use tauri::{Manager, State};
