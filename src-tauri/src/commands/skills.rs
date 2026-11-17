@@ -6185,6 +6185,8 @@ mod tests {
         write_skill(&dir, "root");
         write_skill(&dir.join("skills/a"), "a");
         write_skill(&dir.join("skills/b"), "b");
+        // 固定夹具的检出换行，避免宿主 Git 配置改变用于比较的字节。
+        fs::write(dir.join(".gitattributes"), "* text eol=lf\n").unwrap();
         git_in(&dir, &["init", "-q"]);
         git_in(&dir, &["add", "-A"]);
         git_in(&dir, &["commit", "-qm", "init"]);
