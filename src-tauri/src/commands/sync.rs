@@ -357,6 +357,7 @@ mod tests {
             skills_dir: target_base.to_string_lossy().to_string(),
             project_relative_skills_dir: None,
             category: Default::default(),
+            icon: None,
         }];
         store
             .set_setting(
@@ -394,6 +395,7 @@ mod tests {
                 skills_dir: dir.to_string_lossy().to_string(),
                 project_relative_skills_dir: None,
                 category: Default::default(),
+                icon: None,
             })
             .collect();
         store
